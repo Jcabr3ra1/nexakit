@@ -8,7 +8,7 @@ import { test } from 'node:test';
 
 const SCRIPT = fileURLToPath(new URL('../skills/elegir-modelo/modelos.mjs', import.meta.url));
 
-async function fixture(t, { claude, codexConfig, codexCache, agy } = {}) {
+async function fixture(t, { claude, codexConfig, codexCache, agy, agyFails } = {}) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'elegir-modelo-')));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const home = path.join(root, 'home'), bin = path.join(root, 'bin');
@@ -18,9 +18,17 @@ async function fixture(t, { claude, codexConfig, codexCache, agy } = {}) {
   if (claude) await fs.writeFile(path.join(home, '.claude/settings.json'), JSON.stringify(claude));
   if (codexConfig) await fs.writeFile(path.join(home, '.codex/config.toml'), codexConfig);
   if (codexCache) await fs.writeFile(path.join(home, '.codex/models_cache.json'), JSON.stringify({ models: codexCache }));
-  if (agy) await fs.writeFile(path.join(bin, 'agy'), `#!/bin/sh\nprintf '${agy}'\n`, { mode: 0o755 });
+  if (agy || agyFails) {
+    // A Node script behind a launcher for each platform, like the real npm shims.
+    await fs.writeFile(path.join(bin, 'agy.mjs'), agyFails
+      ? `process.stderr.write(${JSON.stringify(agyFails)}); process.exit(3);\n`
+      : `process.stdout.write(${JSON.stringify(agy)});\n`);
+    if (process.platform === 'win32') await fs.writeFile(path.join(bin, 'agy.cmd'), `@"${process.execPath}" "%~dp0agy.mjs" %*\r\n`);
+    else await fs.writeFile(path.join(bin, 'agy'), `#!/bin/sh\nexec "${process.execPath}" "${path.join(bin, 'agy.mjs')}" "$@"\n`, { mode: 0o755 });
+  }
+  const system = Object.fromEntries(['SystemRoot', 'ComSpec', 'PATHEXT'].filter(name => process.env[name]).map(name => [name, process.env[name]]));
   return (env = {}) => {
-    const result = spawnSync(process.execPath, [SCRIPT], { encoding: 'utf8', env: { PATH: bin, HOME: home, ...env } });
+    const result = spawnSync(process.execPath, [SCRIPT], { encoding: 'utf8', env: { ...system, PATH: bin, HOME: home, USERPROFILE: home, ...env } });
     return { status: result.status, out: result.stdout, err: result.stderr };
   };
 }
@@ -48,18 +56,21 @@ test('reports what Claude has stored and warns when an environment variable over
 });
 
 test('lists the Antigravity ids when agy is installed, and says so when it is not', async t => {
-  const withAgy = await fixture(t, { agy: 'Fetching available models...\\ngemini-4-argon-high\\tGemini 4 Argon (High)\\ngemini-3.8-flash-low\\tGemini 3.8 Flash (Low)\\n' });
+  const withAgy = await fixture(t, { agy: 'Fetching available models...\ngemini-4-argon-high\tGemini 4 Argon (High)\ngemini-3.8-flash-low\tGemini 3.8 Flash (Low)\n' });
   const { out } = withAgy();
   assert.match(out, /^- gemini-4-argon-high · Gemini 4 Argon \(High\)$/mu);
   assert.match(out, /^- gemini-3\.8-flash-low · Gemini 3\.8 Flash \(Low\)$/mu);
   assert.doesNotMatch(out, /Fetching/u);
   assert.match(out, /No guarda en archivos el modelo elegido/u);
   assert.match((await fixture(t))().out, /^agy no está instalado\.$/mu);
+  const failing = (await fixture(t, { agyFails: 'Not signed in.\nRun agy login.\n' }))().out;
+  assert.match(failing, /^agy models falló: Not signed in\.$/mu, 'installed but failing is not reported as missing');
+  assert.doesNotMatch(failing, /no está instalado/u);
 });
 
 test('missing files are reported, never a crash', async t => {
   const { status, out } = (await fixture(t))();
   assert.equal(status, 0);
   assert.match(out, /^Guardado: model=\(por defecto\) · effortLevel=\(por defecto\)$/mu);
-  assert.match(out, /No encontré ~\/\.codex\/models_cache\.json: abre Codex una vez\./u);
+  assert.match(out, /No encontré ~[\\/]\.codex[\\/]models_cache\.json: abre Codex una vez\./u);
 });

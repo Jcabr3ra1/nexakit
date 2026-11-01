@@ -47,9 +47,14 @@ out(`Guardado: model=${key('model')} · model_reasoning_effort=${key('model_reas
 
 // Antigravity lists its models on demand; the effort is part of each id.
 out('## Antigravity');
-const agy = spawnSync('agy', ['models'], { encoding: 'utf8', timeout: 20_000 });
-if (agy.error) {
+// On Windows npm installs agy as agy.cmd, which only runs through the shell.
+const windows = process.platform === 'win32';
+const agy = spawnSync('agy', ['models'], { encoding: 'utf8', timeout: 20_000, shell: windows });
+const missing = agy.error?.code === 'ENOENT' || (windows && agy.status !== 0 && /not recognized|no se reconoce/iu.test(agy.stderr ?? ''));
+if (missing) {
   out('agy no está instalado.');
+} else if (agy.error || agy.status !== 0) {
+  out(`agy models falló: ${(agy.stderr || agy.error?.message || `código ${agy.status}`).trim().split('\n')[0]}`);
 } else {
   for (const row of (agy.stdout ?? '').split('\n')) {
     const [id, label] = row.split('\t');
