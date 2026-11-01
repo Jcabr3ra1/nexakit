@@ -130,8 +130,8 @@ function buildSkillItem(entry, linksForSkill, { isFundamental }) {
   const reasonText = isFundamental
     ? entry.reasons.join(', ')
     : `perfil ${entry.profiles.join('/')}`;
-  const validated = entry.recommendationStatus === 'validated';
-  const checked = Boolean(isFundamental && validated && missingCount > 0);
+  // Suggested = matches something detected in the project; "validated" only changes the label, not the mark.
+  const checked = Boolean(isFundamental && entry.matchedSignals?.length > 0 && missingCount > 0);
 
   return {
     id: `skill:${entry.name}`,

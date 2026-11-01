@@ -100,7 +100,7 @@ test('wizard starts with project skills, then optionals, then review with instal
   assert.match(first, /vercel-react-best-practices/u);
   assert.match(first, /Next\.js/u);
   assert.doesNotMatch(first, /Configuración de instalación|differential-review/u);
-  assert.equal(model.fundamentalItems.every(item => !item.checked), true);
+  assert.equal(model.fundamentalItems.every(item => item.checked), true, 'every skill matching React or Next.js comes checked');
   assert.match(readable(first), /Por qué:.*package\.json/u);
   assert.match(readable(first), /Compatible/u);
   assert.match(readable(first), /Utilidad prevista:/u);
@@ -145,39 +145,34 @@ test('installed skills are identified in the first step and are not selected aga
   assert.equal(model.fundamentalItems.find(item => item.skillName === 'mcp-builder').checked, false);
 });
 
-test('only proven target scenarios are preselected; manual choices survive a target change', async t => {
+test('skills matching a detected signal are preselected for any target; manual choices survive a target change', async t => {
   const env = await createSandboxEnv(t, { name: 'mcp-demo', dependencies: { '@modelcontextprotocol/sdk': '1.30.0' } });
   const { buildToolkitTuiSnapshot, createToolkitTuiModel, runToolkitTui } = await import('../src/toolkit-tui.js');
   const setupOptions = { homeDirectory: env.homeDirectory, codexHome: env.codexHome, toolkitRoot: env.toolkitRoot, environment: { PATH: '' } };
-  const catalogPath = path.join(env.toolkitRoot, 'catalogs/skills.json');
-  const catalog = JSON.parse(await fs.readFile(catalogPath, 'utf8'));
-  const skill = catalog.skills.find(entry => entry.name === 'mcp-builder');
-  skill.scenarios = [{ id: 'synthetic-mcp-claude', revision: skill.revision, profile: 'mcp', taskClass: 'mcp-development', requiredSignals: ['mcp-sdk'], client: 'claude', status: 'passed', evidencePath: 'docs/skills/evidencias/synthetic.md' }];
-  await fs.mkdir(path.join(env.toolkitRoot, 'docs/skills/evidencias'), { recursive: true });
-  await fs.writeFile(path.join(env.toolkitRoot, skill.scenarios[0].evidencePath), 'Synthetic fixture to test recommendation gating; not a real skill evaluation.');
-  await fs.writeFile(catalogPath, JSON.stringify(catalog));
-  const both = createToolkitTuiModel(await buildToolkitTuiSnapshot({ projectRoot: env.projectRoot, setupOptions }));
-  assert.equal(both.fundamentalItems[0].checked, false);
-  const claude = createToolkitTuiModel(await buildToolkitTuiSnapshot({ projectRoot: env.projectRoot, agent: 'claude', setupOptions }));
-  assert.equal(claude.fundamentalItems[0].checked, true);
-  assert.equal(claude.fundamentalItems[0].recommendationStatus, 'validated');
+  for (const agent of ['all', 'claude', 'codex']) {
+    const model = createToolkitTuiModel(await buildToolkitTuiSnapshot({ projectRoot: env.projectRoot, agent, setupOptions }));
+    assert.equal(model.fundamentalItems[0].skillName, 'mcp-builder');
+    assert.equal(model.fundamentalItems[0].checked, true, `${agent}: no validated scenario is needed to come checked`);
+    assert.equal(model.fundamentalItems[0].recommendationStatus, 'compatible');
+    assert.equal(model.optionalItems.some(item => item.checked), false, 'skills without a matching signal stay unchecked');
+  }
   for (const manual of [false, true]) {
     const tty = createFakeTty();
     const running = runToolkitTui({ input: tty.input, output: tty.output, projectRoot: env.projectRoot, agent: 'claude', setupOptions });
     t.after(() => tty.sendKey('\x03'));
     await tty.waitFor(/Paso 1 de 3/u);
-    if (manual) { tty.sendKey(' '); tty.sendKey(' '); }
+    if (manual) tty.sendKey(' '); // the user unchecks the suggested skill
     tty.sendKey('\r');
     await tty.waitFor(/Paso 2 de 3/u);
     tty.sendKey('\r');
     await tty.waitFor(/Paso 3 de 3/u);
     tty.sendKey('e');
     await tty.waitFor(/Editar configuración/u);
-    tty.sendKey(' '); // Claude -> Codex, which has no passed scenario
+    tty.sendKey(' '); // Claude -> Codex: the plan is rebuilt for the new target
     await tty.waitFor(/Solo Codex/u);
     tty.sendKey('\r');
     await tty.waitFor(/\[Enter \/ s\] confirmar e instalar/u);
-    assert.match(tty.getFrame(), manual ? /Skills seleccionadas \(1\)/u : /Skills seleccionadas \(0\)/u);
+    assert.match(tty.getFrame(), manual ? /Skills seleccionadas \(0\)/u : /Skills seleccionadas \(1\)/u);
     tty.sendKey('q');
     assert.equal(await running, 0);
   }
@@ -273,7 +268,7 @@ test('step-by-step wizard supports back navigation, zero-write cancel in final r
   });
 
   await ttyCopy.waitFor(/Paso 1 de 3/u);
-  ttyCopy.sendKey('a'); // explicitly select both compatible HTTP skills
+  // Both compatible HTTP skills come checked because the project uses Express.
   ttyCopy.sendKey('\r'); // project skills -> optional skills
   await ttyCopy.waitFor(/Paso 2 de 3/u);
   ttyCopy.sendKey(' '); // select differential-review
@@ -345,14 +340,14 @@ test('final configuration preserves skill choices, discards drafts, and installs
     setupOptions: { homeDirectory: env.homeDirectory, codexHome: env.codexHome, toolkitRoot: env.toolkitRoot, environment: { PATH: '' } } });
   t.after(() => tty.sendKey('\x03'));
   await tty.waitFor(/Paso 1 de 3/u);
-  tty.sendKey(' '); // explicitly select api-design-principles; leave nodejs-backend-patterns unchecked
+  tty.sendKey(' '); // explicitly uncheck api-design-principles; nodejs-backend-patterns stays suggested
   tty.sendKey('\r');
   await tty.waitFor(/Paso 2 de 3/u);
   tty.sendKey(' '); // select differential-review
   tty.sendKey('\r');
   await tty.waitFor(/Paso 3 de 3/u);
-  assert.match(tty.getFrame(), /api-design-principles/u);
-  assert.doesNotMatch(tty.getFrame(), /nodejs-backend-patterns/u);
+  assert.match(tty.getFrame(), /nodejs-backend-patterns/u);
+  assert.doesNotMatch(tty.getFrame(), /api-design-principles/u);
 
   tty.sendKey('e');
   await tty.waitFor(/Editar configuración/u);
@@ -371,7 +366,7 @@ test('final configuration preserves skill choices, discards drafts, and installs
   await tty.waitFor(/\[Enter \/ s\] confirmar e instalar/u);
   assert.match(tty.getFrame(), /Solo Claude Code/u);
   assert.match(tty.getFrame(), /skills-lock\.json/u);
-  assert.doesNotMatch(tty.getFrame(), /nodejs-backend-patterns/u);
+  assert.doesNotMatch(tty.getFrame(), /api-design-principles/u);
   assert.deepEqual(await fs.readdir(env.homeDirectory), []);
   assert.equal(await fs.access(path.join(env.projectRoot, '.agent-toolkit')).then(() => true, () => false), false);
 
@@ -380,8 +375,8 @@ test('final configuration preserves skill choices, discards drafts, and installs
   assert.match(tty.getFrame(), /\[x\] differential-review/u);
   tty.sendKey('\x7f');
   await tty.waitFor(/Paso 1 de 3/u);
-  assert.match(tty.getFrame(), /\[ \] nodejs-backend-patterns/u);
-  assert.match(tty.getFrame(), /\[x\] api-design-principles/u);
+  assert.match(tty.getFrame(), /\[ \] api-design-principles/u);
+  assert.match(tty.getFrame(), /\[x\] nodejs-backend-patterns/u);
   tty.sendKey('\r');
   await tty.waitFor(/Paso 2 de 3/u);
   tty.sendKey('\r');
@@ -391,9 +386,9 @@ test('final configuration preserves skill choices, discards drafts, and installs
   tty.sendKey('q');
   assert.equal(await running, 0);
   const lock = JSON.parse(await fs.readFile(path.join(env.projectRoot, '.agent-toolkit/skills-lock.json'), 'utf8'));
-  assert.ok(lock.skills['api-design-principles']);
+  assert.ok(lock.skills['nodejs-backend-patterns']);
   assert.ok(lock.skills['differential-review']);
-  assert.equal(lock.skills['nodejs-backend-patterns'], undefined);
+  assert.equal(lock.skills['api-design-principles'], undefined);
   assert.equal(await fs.access(path.join(env.projectRoot, '.agents/skills')).then(() => true, () => false), false);
   assert.equal((await fs.lstat(path.join(env.projectRoot, '.claude/skills/differential-review'))).isSymbolicLink(), false);
 });
