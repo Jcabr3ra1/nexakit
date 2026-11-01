@@ -1,3 +1,5 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadSkillCatalog } from './skill-catalog.js';
@@ -13,6 +15,18 @@ import {
 import { levelAgentPlan, writeLevelAgents } from './level-agents.js';
 import { getToolkitCommandsGuide } from './toolkit-commands-guide.js';
 import { doctorToolkit, setupToolkit, TOOLKIT_ROOT } from './toolkit-setup.js';
+import { ACTIONABLE_LINK_STATES, READY_LINK_STATES } from './link-states.js';
+import { actualRoot } from './stable-install.js';
+
+// A review line is `<mark> <label>`: + create, ↻ move or repair, ! left untouched, ✓ already fine.
+const ACTION_MARKS = Object.freeze({ create: '+', move: '↻', repair: '↻', conflict: '!', legacy: '!', info: '✓' });
+const markOf = action => action.mark ?? ACTION_MARKS[action.kind] ?? '+';
+const shortPath = (value, home) => (home && (value === home || value.startsWith(home + path.sep)) ? `~${value.slice(home.length)}` : value);
+const resolveHome = async setupOptions => {
+  const home = setupOptions.homeDirectory ?? os.homedir();
+  return fs.realpath(home).catch(() => path.resolve(home));
+};
+const exists = file => fs.access(file).then(() => true, () => false);
 
 const AGENTS_CYCLE = ['all', 'claude', 'codex'];
 const AGENT_LABELS = Object.freeze({
@@ -82,7 +96,8 @@ export async function buildToolkitTuiSnapshot({
     agent,
     mode: installMode,
     catalog,
-    toolkitRoot
+    toolkitRoot,
+    ...(setupOptions.homeDirectory && { homeDirectory: setupOptions.homeDirectory })
   });
 
   const guide = getToolkitCommandsGuide({ clients: doctor.clients });
@@ -140,7 +155,7 @@ function buildSkillItem(entry, linksForSkill, { isFundamental }) {
 }
 
 export function createToolkitTuiModel(snapshot) {
-  const pendingGlobal = snapshot.setupPreview.skills.filter(s => ['missing', 'replace'].includes(s.state)).length;
+  const pendingGlobal = snapshot.setupPreview.skills.filter(s => ACTIONABLE_LINK_STATES.includes(s.state)).length;
   const conflictGlobal = snapshot.setupPreview.conflicts;
   const newLevels = snapshot.codexLevels.files.filter(f => f.state === 'nuevo').length;
   const globalNeedsSync = (pendingGlobal > 0 && conflictGlobal === 0) || newLevels > 0;
@@ -299,7 +314,7 @@ export function renderToolkitTuiFrame(model, { columns = 96, color = true } = {}
     outside();
   }
 
-  outside(`${doc.node.supported ? '✓' : '!'} Node ${doc.node.version}  ${Object.entries(doc.clients).map(([name, info]) => `${info.available ? '✓' : '○'} ${name}`).join('  ')}  ${Object.values(doc.mcp).every(m => m.state === 'configured') ? '✓ MCP' : '○ MCP pendiente'}`);
+  outside(`${doc.node.supported ? '✓' : '!'} Node ${doc.node.version}  ${Object.entries(doc.clients).map(([name, info]) => `${info.available ? '✓' : '○'} ${name}`).join('  ')}  ${Object.entries(doc.mcp).filter(([client]) => model.config.agent === 'all' || model.config.agent === client).every(([, m]) => READY_LINK_STATES.includes(m.state)) ? '✓ MCP' : '○ MCP pendiente'}`);
   const signals = model.snapshot.inspection.signals;
   outside(`Stack: ${signals.length ? signals.map(s => s.label).join(', ') : 'sin señales Node en la raíz'}`, c.dim);
   for (const signal of model.snapshot.recommendation.unmatchedSignals) outside(`${signal.label}: sin skill empaquetada aún.`, c.dim);
@@ -395,7 +410,10 @@ export function renderToolkitTuiFrame(model, { columns = 96, color = true } = {}
     }
     if (p.verifiedSkillsCount > 0) add(`✓ Integridad SHA-256 comprobada en ${p.verifiedSkillsCount} skill(s) del catálogo`, c.green);
     if (p.actions.length === 0) add('No hay cambios pendientes de escribir (todo lo seleccionado ya está al día).');
-    for (const action of p.actions.slice(0, 12)) add(`${action.kind === 'conflict' ? '!' : '+'} ${action.label}`, action.kind === 'conflict' ? c.yellow : plain);
+    for (const action of p.actions.slice(0, 12)) {
+      const mark = markOf(action);
+      add(`${mark} ${action.label}`, mark === '!' ? c.yellow : mark === '✓' ? c.green : mark === '↻' ? c.cyan : plain);
+    }
     if (p.actions.length > 12) add(`… y ${p.actions.length - 12} acción(es) más en la selección.`, c.dim);
     if (p.conflictsCount > 0) {
       add();
@@ -458,6 +476,7 @@ export function renderToolkitTuiFrame(model, { columns = 96, color = true } = {}
 export async function computeInstallPreview(model, setupOptions = {}) {
   const actions = [];
   let conflictsCount = 0;
+  const home = await resolveHome(setupOptions);
   const activeAgent = model.config.agent;
   const activeMode = model.config.installMode;
   const activeGitIgnore = model.config.gitIgnore ?? 'gitignore';
@@ -471,12 +490,35 @@ export async function computeInstallPreview(model, setupOptions = {}) {
       apply: false,
       ...(model.snapshot.codexProfile && { codexProfile: model.snapshot.codexProfile })
     });
+    // Installed links say nothing; links into another valid copy are named once, below.
+    const grouped = new Set(freshSetupPreview.legacy.flatMap(group => group.targets));
+    const skipped = new Set(freshSetupPreview.otherCopy?.missing ?? []);
     for (const s of freshSetupPreview.skills) {
-      if (['missing', 'replace'].includes(s.state)) {
-        actions.push({ kind: 'create', label: `[global ${s.client}] ${s.name} → ${s.target}` });
-      } else if (s.state === 'conflict') {
+      const where = `[global ${s.client}] ${s.name}`;
+      if (s.state === 'falta' && !skipped.has(s.name)) {
+        actions.push({ kind: 'create', mark: '+', label: where });
+      } else if (s.state === 'efimero') {
+        actions.push({ kind: 'move', mark: '↻', label: `${where}: mover a la copia estable` });
+      } else if (s.state === 'roto-propio') {
+        actions.push({ kind: 'repair', mark: '↻', label: `${where}: reparar` });
+      } else if (s.state === 'roto-ajeno' && !grouped.has(s.target)) {
         conflictsCount++;
-        actions.push({ kind: 'conflict', label: `[conflicto global ${s.client}] ${s.target} (no se toca)` });
+        actions.push({ kind: 'conflict', mark: '!', label: `${where}: enlace roto que no es de nexakit (no se toca)` });
+      } else if (s.state === 'conflicto') {
+        conflictsCount++;
+        actions.push({ kind: 'conflict', mark: '!', label: `${where}: ocupado por algo tuyo (no se toca)` });
+      }
+    }
+    for (const group of freshSetupPreview.legacy) {
+      conflictsCount += group.targets.length;
+      const where = shortPath(group.root, home);
+      actions.push({ kind: 'legacy', mark: '!', label: `${group.targets.length} enlaces rotos hacia ${where} parecen de una instalación anterior. Si son de nexakit: npx nexakit reparar --desde ${where}` });
+    }
+    if (freshSetupPreview.otherCopy) {
+      const { root, missing } = freshSetupPreview.otherCopy;
+      actions.push({ kind: 'info', mark: '✓', label: `Usa tu copia en ${shortPath(root, home)}` });
+      if (missing.length) {
+        actions.push({ kind: 'info', mark: '!', label: `Tu copia en ${shortPath(root, home)} no incluye ${missing.length} ${missing.length === 1 ? 'skill nueva' : 'skills nuevas'}; actualízala` });
       }
     }
 
@@ -507,16 +549,24 @@ export async function computeInstallPreview(model, setupOptions = {}) {
       mode: activeMode,
       gitIgnore: activeGitIgnore,
       catalog: model.snapshot.catalog,
-      toolkitRoot: setupOptions.toolkitRoot ?? TOOLKIT_ROOT
+      toolkitRoot: setupOptions.toolkitRoot ?? TOOLKIT_ROOT,
+      ...(setupOptions.homeDirectory && { homeDirectory: setupOptions.homeDirectory })
     });
     const verb = activeMode === 'copy' ? 'copia' : 'enlace';
     for (const l of freshProjectPlan.links) {
       const relTarget = path.relative(model.snapshot.inspection.projectRoot, l.target);
-      if (['missing', 'replace'].includes(l.state)) {
-        actions.push({ kind: 'create', label: `[${verb} ${l.client}] ${l.name} → ${relTarget}` });
-      } else if (l.state === 'conflict') {
+      const where = `[${verb} ${l.client}] ${l.name}`;
+      // Links carry the detailed state; copies only the coarse one.
+      const state = l.linkState ?? { missing: 'falta', replace: 'falta', installed: 'instalado', conflict: 'conflicto' }[l.state];
+      if (state === 'falta') {
+        actions.push({ kind: 'create', mark: '+', label: `${where} → ${relTarget}` });
+      } else if (state === 'efimero') {
+        actions.push({ kind: 'move', mark: '↻', label: `${where}: mover a la copia estable` });
+      } else if (state === 'roto-propio') {
+        actions.push({ kind: 'repair', mark: '↻', label: `${where}: reparar` });
+      } else if (['conflicto', 'roto-ajeno'].includes(state)) {
         conflictsCount++;
-        actions.push({ kind: 'conflict', label: `[conflicto ${l.client}] ${relTarget} (no se toca)` });
+        actions.push({ kind: 'conflict', mark: '!', label: `[conflicto ${l.client}] ${relTarget} (no se toca)` });
       }
     }
     if (freshProjectPlan.stateDirConflict) {
@@ -542,9 +592,19 @@ export async function computeInstallPreview(model, setupOptions = {}) {
     }
   }
 
+  // Running from an npx cache, the first thing written is the stable copy everything else will point to.
+  const globalNeedsStable = Boolean(freshSetupPreview?.ephemeral && !freshSetupPreview.otherCopy && (
+    freshSetupPreview.skills.some(s => ACTIONABLE_LINK_STATES.includes(s.state)) ||
+    Object.values(freshSetupPreview.mcp.states).some(s => ACTIONABLE_LINK_STATES.includes(s.state))));
+  const projectNeedsStable = Boolean(freshProjectPlan?.ephemeral && freshProjectPlan.mode === 'symlink' &&
+    freshProjectPlan.links.some(l => ['missing', 'replace'].includes(l.state)));
+  if ((globalNeedsStable || projectNeedsStable) && !(await exists(path.join(actualRoot(home), 'package.json')))) {
+    actions.unshift({ kind: 'create', mark: '+', label: 'Copia estable de nexakit en ~/.nexakit' });
+  }
+
   const manualCommands = [];
-  for (const [client, state] of Object.entries(model.snapshot.doctor.mcp)) {
-    if ((activeAgent === 'all' || activeAgent === client) && state.state !== 'configured' && model.snapshot.doctor.registrationCommands[client]) {
+  for (const client of Object.keys(model.snapshot.doctor.mcp)) {
+    if ((activeAgent === 'all' || activeAgent === client) && model.snapshot.doctor.registrationCommands[client]) {
       manualCommands.push(model.snapshot.doctor.registrationCommands[client]);
     }
   }
@@ -589,7 +649,10 @@ export async function executeApprovedPreview(model, setupOptions = {}) {
   }
 
   if (preview.freshProjectPlan) {
-    const appliedInstall = await applyProjectSkillInstall(preview.freshProjectPlan);
+    const appliedInstall = await applyProjectSkillInstall(preview.freshProjectPlan, {
+      ...(setupOptions.runNpm && { runNpm: setupOptions.runNpm }),
+      ...(setupOptions.packageSpec && { packageSpec: setupOptions.packageSpec })
+    });
     projectLinksCreated = appliedInstall.created;
     lockfileWritten = appliedInstall.lockfileWritten;
     conflicts += appliedInstall.conflicts;

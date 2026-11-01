@@ -1,4 +1,6 @@
+import os from 'node:os';
 import path from 'node:path';
+import readline from 'node:readline';
 import { pathToFileURL } from 'node:url';
 import { loadSkillCatalog } from './skill-catalog.js';
 import {
@@ -10,15 +12,18 @@ import {
 } from './skill-recommendations.js';
 import { formatRecommendationReport, runToolkitTui } from './toolkit-tui.js';
 import { doctorToolkit, setupToolkit } from './toolkit-setup.js';
+import { applyLegacyRepair, planLegacyRepair } from './legacy-repair.js';
+import { READY_LINK_STATES } from './link-states.js';
 
 const PROFILE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const RECOMMEND_PROFILES = ['frontend', 'backend', 'mcp', 'security'];
 
 const HELP = `Uso: npx nexakit [tui] [--project <ruta>] [--agent codex|claude|all] [--perfil-codex <nombre>]
      npx nexakit recommend [--project <ruta>] [--profile frontend|backend|mcp|security] [--client codex|claude] [--dry-run] [--json]
-     npx nexakit detach [--project <ruta>] [--global] [--agent codex|claude|all] [--apply] [--json]
-     npx nexakit doctor [--agent codex|claude|all] [--perfil-codex <nombre>] [--json]
-     npx nexakit setup [--agent codex|claude|all] [--perfil-codex <nombre>] [--apply] [--json]
+     npx nexakit detach [--project <ruta>] [--global] [--agent codex|claude|antigravity|all] [--apply] [--json]
+     npx nexakit reparar --desde <ruta> [--agent codex|claude|antigravity|all]
+     npx nexakit doctor [--agent codex|claude|antigravity|all] [--perfil-codex <nombre>] [--json]
+     npx nexakit setup [--agent codex|claude|antigravity|all] [--perfil-codex <nombre>] [--apply] [--json]
 
 (Alias local compatible: agent-toolkit)
 En una terminal interactiva, npx nexakit abre el asistente por pasos:
@@ -28,6 +33,8 @@ instalaciones o desacoplados ([d]) tras vista previa segura.
 recommend inspecciona el proyecto en solo lectura sin escribir ni usar red.
 detach retira las skills acopladas, .agent-toolkit/ y el bloque de ignore sin
 tocar archivos propios (--apply para ejecutar; --global incluye ~/.claude y ~/.codex).
+reparar re-apunta los enlaces rotos de una instalación anterior (--desde es la carpeta que ya no
+existe). No puede comprobar que sean de nexakit, así que lista lo que encontró y siempre pregunta.
 setup prepara enlaces globales de las skills base; --apply los crea sin reemplazar
 archivos existentes. Imprime los comandos MCP para registrar por separado.
 doctor comprueba instalación local sin iniciar modelos. Reinicia los clientes
@@ -119,6 +126,8 @@ export async function runToolkitCli(
     }
   }
 
+  if (command === 'reparar') return runRepair(rest, { out, err, input, output, isTTY, options });
+
   if (command === 'detach' || command === 'unlink') {
     const parsed = { projectRoot: process.cwd(), agent: 'all', global: false, apply: false, json: false };
     const seen = new Set();
@@ -127,7 +136,7 @@ export async function runToolkitCli(
       if (seen.has(flag)) { await err(HELP); return 2; }
       seen.add(flag);
       if (flag === '--project' && rest[i + 1]) parsed.projectRoot = rest[++i];
-      else if (flag === '--agent' && ['codex', 'claude', 'all'].includes(rest[i + 1])) parsed.agent = rest[++i];
+      else if (flag === '--agent' && ['codex', 'claude', 'antigravity', 'all'].includes(rest[i + 1])) parsed.agent = rest[++i];
       else if (flag === '--global') parsed.global = true;
       else if (flag === '--apply') parsed.apply = true;
       else if (flag === '--json') parsed.json = true;
@@ -190,7 +199,7 @@ export async function runToolkitCli(
     const flag = rest[i];
     if (seen.has(flag)) { await err(HELP); return 2; }
     seen.add(flag);
-    if (flag === '--agent' && ['codex', 'claude', 'all'].includes(rest[i + 1])) parsed.agent = rest[++i];
+    if (flag === '--agent' && ['codex', 'claude', 'antigravity', 'all'].includes(rest[i + 1])) parsed.agent = rest[++i];
     else if (flag === '--json') parsed.json = true;
     else if (flag === '--perfil-codex' && PROFILE_RE.test(rest[i + 1] ?? '')) parsed.codexProfile = rest[++i];
     else if (flag === '--apply' && command === 'setup') parsed.apply = true;
@@ -204,13 +213,84 @@ export async function runToolkitCli(
       : result.node.supported &&
         Object.values(result.dependencies).every(Boolean) &&
         Object.values(result.clients).every(c => c.available) &&
-        Object.values(result.mcp).every(m => m.state === 'configured') &&
-        result.skills.every(s => s.state === 'installed') &&
+        Object.values(result.mcp).every(m => READY_LINK_STATES.includes(m.state)) &&
+        result.skills.every(s => READY_LINK_STATES.includes(s.state)) &&
         (!result.codexSandbox || ['allowed', 'not-needed', 'unknown'].includes(result.codexSandbox.state))
         ? 0
         : 1;
   } catch {
     await err('No se pudo inspeccionar o instalar. Revisa rutas, permisos y conflictos; no se reemplazan destinos.\n');
+    return 1;
+  }
+}
+
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+// Reads one line, and treats anything but "s" (including no answer at all) as no. The answer comes from the
+// `line` event, which always precedes `close`, so an input that ends right after the answer is not lost.
+async function askYesNo(input, output) {
+  const rl = readline.createInterface({ input, ...(output?.isTTY && { output }) });
+  try {
+    const answer = await new Promise(resolve => {
+      let answered = false;
+      rl.once('line', line => { answered = true; resolve(line); });
+      rl.once('close', () => { if (!answered) resolve(''); });
+    });
+    return /^s(í|i)?$/iu.test(answer.trim());
+  } finally { rl.close(); }
+}
+
+async function runRepair(rest, { out, err, input, output, isTTY, options }) {
+  const parsed = { agent: 'all' };
+  const seen = new Set();
+  for (let i = 0; i < rest.length; i++) {
+    const flag = rest[i];
+    if (flag === '--si') { await err('reparar siempre pregunta; no admite --si.\n'); return 2; }
+    if (seen.has(flag)) { await err(HELP); return 2; }
+    seen.add(flag);
+    if (flag === '--desde' && rest[i + 1]) parsed.from = rest[++i];
+    else if (flag === '--agent' && ['codex', 'claude', 'antigravity', 'all'].includes(rest[i + 1])) parsed.agent = rest[++i];
+    else { await err(HELP); return 2; }
+  }
+  if (!parsed.from) { await err(HELP); return 2; }
+
+  const home = options.homeDirectory ?? os.homedir();
+  const short = value => (value === home || value.startsWith(home + path.sep) ? `~${value.slice(home.length)}` : value);
+  try {
+    const plan = await planLegacyRepair({ ...options, ...parsed });
+    const from = short(plan.from);
+    if (plan.links.length === 0) {
+      await out(`No encontré enlaces rotos hacia ${from}.\n`);
+      return 0;
+    }
+    await out([
+      `Encontré ${plural(plan.links.length, 'enlace roto', 'enlaces rotos')} hacia ${from}.`,
+      'No puedo comprobar que sean de nexakit: revisa la lista.',
+      ...plan.links.map(link => `  ${link.client} · ${link.name}`),
+      ''
+    ].join('\n'));
+    const interactive = Boolean(isTTY ?? (input?.isTTY && output?.isTTY));
+    if (!interactive) {
+      await err('Este comando necesita una terminal interactiva.\n');
+      return 2;
+    }
+    await out('¿Los re-apunto a la copia de nexakit en uso? [s/N]\n');
+    if (!(await askYesNo(input, output))) {
+      await out('No se cambió nada.\n');
+      return 0;
+    }
+    const result = await applyLegacyRepair(plan, options);
+    const lines = [`Listo: ${plural(result.repaired, 'enlace re-apuntado', 'enlaces re-apuntados')}.`];
+    if (result.changed) lines.push(`${plural(result.changed, 'enlace cambió', 'enlaces cambiaron')} mientras confirmabas y no se tocó; vuelve a ejecutar el comando.`);
+    if (result.skipped.length) lines.push(`No se repararon ${result.skipped.join(', ')}: la copia en uso no las incluye.`);
+    if (result.mcpCommands.length) {
+      lines.push('El MCP de revisión cruzada también apunta ahí. Para moverlo ejecuta:', ...result.mcpCommands.map(command => `  ${command}`));
+    }
+    if (result.repaired) lines.push('Reinicia tus agentes para que carguen las skills.');
+    await out(lines.join('\n') + '\n');
+    return result.changed || result.skipped.length ? 1 : 0;
+  } catch {
+    await err('No se pudo comprobar ni reparar. Revisa rutas y permisos; no se reemplazan destinos.\n');
     return 1;
   }
 }

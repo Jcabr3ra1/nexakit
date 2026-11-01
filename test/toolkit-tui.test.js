@@ -138,7 +138,7 @@ test('installed skills are identified in the first step and are not selected aga
   const { planProjectSkillInstall, applyProjectSkillInstall } = await import('../src/skill-recommendations.js');
   const setupOptions = { homeDirectory: env.homeDirectory, codexHome: env.codexHome, toolkitRoot: env.toolkitRoot, environment: { PATH: '' } };
   const snapshot = await buildToolkitTuiSnapshot({ projectRoot: env.projectRoot, setupOptions });
-  await applyProjectSkillInstall(await planProjectSkillInstall({ projectRoot: env.projectRoot, skillNames: ['mcp-builder'], agent: 'all', mode: 'symlink', catalog: snapshot.catalog, toolkitRoot: env.toolkitRoot }));
+  await applyProjectSkillInstall(await planProjectSkillInstall({ projectRoot: env.projectRoot, skillNames: ['mcp-builder'], agent: 'all', mode: 'symlink', catalog: snapshot.catalog, toolkitRoot: env.toolkitRoot, homeDirectory: env.homeDirectory }));
   const model = createToolkitTuiModel(await buildToolkitTuiSnapshot({ projectRoot: env.projectRoot, setupOptions }));
   const frame = renderToolkitTuiFrame(model, { columns: 100, color: false });
   assert.match(frame, /\[ \] mcp-builder · ya instalada/u);
@@ -516,7 +516,8 @@ test('runToolkitCli handles non-TTY fallback, recommend, detach (--apply / --jso
     mode: 'symlink',
     gitIgnore: 'gitignore',
     catalog,
-    toolkitRoot: env.toolkitRoot
+    toolkitRoot: env.toolkitRoot,
+    homeDirectory: env.homeDirectory
   });
   await applyProjectSkillInstall(installPlan);
 
@@ -545,4 +546,117 @@ test('runToolkitCli handles non-TTY fallback, recommend, detach (--apply / --jso
 
   assert.equal(await runToolkitCli(['recommend', '--profile', 'invalid'], { out: () => {}, err: () => {} }), 2);
   assert.equal(await runToolkitCli(['recommend', '--json', '--json'], { out: () => {}, err: () => {} }), 2);
+});
+
+// ---- Review lines for the real state of each link, and applying from an npx cache ----
+
+const dirLinkType = process.platform === 'win32' ? 'junction' : 'dir';
+const linkAt = async (to, at) => { await fs.mkdir(path.dirname(at), { recursive: true }); await fs.symlink(to, at, dirLinkType); };
+const BASE_SKILLS = ['differential-review', 'frontend-design', 'mcp-builder', 'web-design-guidelines'];
+async function reviewOf(env, setupOptions, prepare = () => {}) {
+  const { buildToolkitTuiSnapshot, createToolkitTuiModel, computeInstallPreview } = await import('../src/toolkit-tui.js');
+  const model = createToolkitTuiModel(await buildToolkitTuiSnapshot({ projectRoot: env.projectRoot, setupOptions }));
+  prepare(model);
+  model.config.syncGlobalCore = true;
+  model.step = 3;
+  model.previewData = await computeInstallPreview(model, setupOptions);
+  return { model, lines: model.previewData.actions.map(action => `${action.mark} ${action.label}`) };
+}
+
+test('review lines say what happens to each global link: create, move, repair or leave alone', async t => {
+  const env = await createSandboxEnv(t);
+  const { acquireLock } = await import('../src/install-lock.js'), { recordEntries } = await import('../src/install-registry.js');
+  const { renderToolkitTuiFrame } = await import('../src/toolkit-tui.js');
+  const home = env.homeDirectory;
+  await linkAt(path.join(env.root, '.npm/_npx/old/node_modules/nexakit/skills/frontend-design'), path.join(home, '.claude/skills/frontend-design'));
+  const owned = path.join(env.root, 'muerta/skills/frontend-design');
+  await linkAt(owned, path.join(home, '.agents/skills/frontend-design'));
+  const lock = await acquireLock(path.join(home, '.nexakit'), { waitMs: 1000 });
+  await recordEntries(path.join(home, '.nexakit'), [{ destino: path.join(home, '.agents/skills/frontend-design'), apunta: owned, raiz: path.join(env.root, 'muerta') }], lock);
+  await lock.release();
+  const legacy = path.join(env.root, 'Agent-Toolkit');
+  for (const name of ['differential-review', 'mcp-builder', 'web-design-guidelines']) {
+    await linkAt(path.join(legacy, 'skills', name), path.join(home, '.claude/skills', name));
+  }
+  await linkAt(path.join(env.root, 'suelta/skills/mcp-builder'), path.join(home, '.agents/skills/mcp-builder'));
+
+  const setupOptions = { homeDirectory: home, codexHome: env.codexHome, toolkitRoot: env.toolkitRoot, environment: { PATH: '' } };
+  const { model, lines } = await reviewOf(env, setupOptions);
+  for (const expected of [
+    '↻ [global claude] frontend-design: mover a la copia estable',
+    '↻ [global codex] frontend-design: reparar',
+    `! 3 enlaces rotos hacia ${legacy} parecen de una instalación anterior. Si son de nexakit: npx nexakit reparar --desde ${legacy}`,
+    '! [global codex] mcp-builder: enlace roto que no es de nexakit (no se toca)',
+    '+ [global codex] web-design-guidelines'
+  ]) assert.ok(lines.includes(expected), `${expected}\n--- got:\n${lines.join('\n')}`);
+  assert.equal(lines.filter(line => line.includes('[global claude] differential-review')).length, 0, 'grouped links are not listed one by one');
+  assert.equal(lines.some(line => line.includes('Copia estable')), false, 'not running from an npx cache');
+  assert.match(renderToolkitTuiFrame(model, { columns: 220, color: false }), /↻ \[global codex\] frontend-design: reparar/u);
+});
+
+test('a valid development copy is used and named once, with what it lacks, and the MCP pointing there counts as ready', async t => {
+  const env = await createSandboxEnv(t);
+  const { renderToolkitTuiFrame } = await import('../src/toolkit-tui.js');
+  const home = env.homeDirectory;
+  const dev = path.join(env.root, 'dev');
+  await fs.cp(env.toolkitRoot, dev, { recursive: true });
+  await fs.rm(path.join(dev, 'skills/mcp-builder'), { recursive: true });
+  await fs.mkdir(path.join(dev, 'bin'));
+  await fs.writeFile(path.join(dev, 'bin/agent-toolkit-mcp.js'), '');
+  for (const folder of ['.claude', '.agents']) for (const name of BASE_SKILLS.filter(name => name !== 'mcp-builder')) {
+    await linkAt(path.join(dev, 'skills', name), path.join(home, folder, 'skills', name));
+  }
+  const entry = path.join(dev, 'bin/agent-toolkit-mcp.js');
+  await fs.writeFile(path.join(home, '.claude.json'), JSON.stringify({ mcpServers: { 'agent-toolkit-workflow': { command: 'node', args: [entry] } } }));
+  await fs.mkdir(env.codexHome, { recursive: true });
+  await fs.writeFile(path.join(env.codexHome, 'config.toml'), `[mcp_servers.agent-toolkit-workflow]\ncommand = "node"\nargs = [${JSON.stringify(entry)}]\n`);
+
+  const setupOptions = { homeDirectory: home, codexHome: env.codexHome, toolkitRoot: env.toolkitRoot, environment: { PATH: '' } };
+  const { model, lines } = await reviewOf(env, setupOptions);
+  assert.equal(lines.filter(line => line === `✓ Usa tu copia en ${dev}`).length, 1);
+  assert.ok(lines.includes(`! Tu copia en ${dev} no incluye 1 skill nueva; actualízala`), lines.join('\n'));
+  assert.equal(lines.some(line => line.startsWith('+ [global')), false, 'nothing is created from another origin');
+  assert.match(renderToolkitTuiFrame(model, { columns: 220, color: false }), /✓ MCP/u);
+});
+
+test('when every global link is installed there is no global line at all', async t => {
+  const env = await createSandboxEnv(t);
+  const home = env.homeDirectory;
+  for (const folder of ['.claude', '.agents']) for (const name of BASE_SKILLS) {
+    await linkAt(path.join(env.toolkitRoot, 'skills', name), path.join(home, folder, 'skills', name));
+  }
+  const setupOptions = { homeDirectory: home, codexHome: env.codexHome, toolkitRoot: env.toolkitRoot, environment: { PATH: '' } };
+  const { lines } = await reviewOf(env, setupOptions);
+  assert.deepEqual(lines.filter(line => line.includes('[global')), []);
+});
+
+test('applying from an npx cache creates the stable copy first and links everything to it', async t => {
+  const env = await createSandboxEnv(t);
+  const { executeApprovedPreview } = await import('../src/toolkit-tui.js');
+  const { writeFakeInstall } = await import('../test-support/fake-npm.js');
+  const home = env.homeDirectory;
+  const ephemeral = path.join(env.root, '.npm/_npx/abc/node_modules/nexakit');
+  await fs.cp(env.toolkitRoot, ephemeral, { recursive: true });
+  const { version } = JSON.parse(await fs.readFile(path.join(ephemeral, 'package.json'), 'utf8'));
+  const calls = [];
+  const runNpm = async args => {
+    calls.push(args);
+    const installed = await writeFakeInstall(args[args.indexOf('--prefix') + 1], { version, skills: [] });
+    await fs.cp(ephemeral, installed, { recursive: true, force: true });
+    return { status: 0, stderr: '' };
+  };
+  const setupOptions = { homeDirectory: home, codexHome: env.codexHome, toolkitRoot: ephemeral, environment: { PATH: '' }, runNpm };
+  const { model, lines } = await reviewOf(env, setupOptions, m => {
+    for (const item of m.fundamentalItems) item.checked = item.skillName === 'frontend-design';
+  });
+  assert.equal(lines[0], '+ Copia estable de nexakit en ~/.nexakit');
+  assert.equal(await fs.access(path.join(home, '.nexakit')).then(() => true, () => false), false, 'the preview writes nothing');
+
+  await executeApprovedPreview(model, setupOptions);
+  assert.equal(calls.length, 1);
+  const actual = await fs.realpath(path.join(home, '.nexakit/actual'));
+  assert.equal(await fs.readlink(path.join(home, '.claude/skills/frontend-design')), path.join(home, '.nexakit/actual/skills/frontend-design'));
+  assert.equal(await fs.realpath(path.join(env.projectRoot, '.claude/skills/frontend-design')), path.join(actual, 'skills/frontend-design'));
+  await fs.rm(path.join(env.root, '.npm'), { recursive: true });
+  assert.equal(await fs.access(path.join(env.projectRoot, '.claude/skills/frontend-design/SKILL.md')).then(() => true, () => false), true);
 });

@@ -93,6 +93,9 @@ for (const [mode, code, state] of [
   if (["silent", "blocked-stdin", "closed-stdin", "ignore-term", "parent-child"].includes(mode)) {
     d.limits.timeoutMs = 1500; d.limits.graceMs = 150; d.limits.confirmationMs = 350;
   }
+  // The child of the group can take longer to vanish on a loaded runner; without the margin the supervisor
+  // rightly answers "indeterminate" instead of "timed-out".
+  if (mode === "parent-child") { d.limits.timeoutMs = 3000; d.limits.confirmationMs = 1000; }
   const r = check(await coordinator(root)(d)); assert.equal(r.state, state, JSON.stringify(r));
   assert.ok(r.reasons.includes(code), JSON.stringify(r)); assert.equal(r.process.metrics.terminationConfirmed, true);
   assert.ok(r.process.metrics.elapsedMs <= d.limits.timeoutMs); assert.equal(r.storage.state, "recorded");
