@@ -117,14 +117,16 @@ export function legacyGroups(items, { skillNames, mcpDeadRoot } = {}) {
 
 // `expectedLiteral` is the readlink value the plan saw; null means the path must not exist yet.
 // Re-reads right before writing and touches nothing when the link is no longer what the plan saw.
-export async function relinkIfUnchanged({ target, expectedLiteral, source }) {
+// `relative` writes the link relative to its own folder (Windows junctions are always absolute).
+export async function relinkIfUnchanged({ target, expectedLiteral, source, relative = false }) {
   const type = IS_WINDOWS ? 'junction' : 'dir';
   const absoluteSource = path.resolve(source);
+  const linkValue = relative && !IS_WINDOWS ? path.relative(path.dirname(target), absoluteSource) : absoluteSource;
   const info = await lstatOrNull(target);
 
   if (expectedLiteral === null) {
     if (info) return 'cambio';
-    try { await fs.symlink(absoluteSource, target, type); } catch (error) {
+    try { await fs.symlink(linkValue, target, type); } catch (error) {
       if (error.code === 'EEXIST') return 'cambio';
       throw error;
     }
@@ -136,13 +138,13 @@ export async function relinkIfUnchanged({ target, expectedLiteral, source }) {
   if (IS_WINDOWS) {
     // A junction cannot be renamed over; this window is not atomic there.
     await fs.unlink(target);
-    await fs.symlink(absoluteSource, target, type);
+    await fs.symlink(linkValue, target, type);
     return 'hecho';
   }
 
   // Build the new link beside the old one and rename over it, so the name is never missing.
   const temporary = `${target}.nx-${crypto.randomUUID()}`;
-  await fs.symlink(absoluteSource, temporary, type);
+  await fs.symlink(linkValue, temporary, type);
   try {
     if (await fs.readlink(target) !== expectedLiteral) {
       await fs.unlink(temporary);

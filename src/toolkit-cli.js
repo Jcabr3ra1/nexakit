@@ -17,7 +17,7 @@ const RECOMMEND_PROFILES = ['frontend', 'backend', 'mcp', 'security'];
 
 const HELP = `Uso: npx nexakit [tui] [--project <ruta>] [--agent codex|claude|all] [--perfil-codex <nombre>]
      npx nexakit recommend [--project <ruta>] [--profile frontend|backend|mcp|security] [--client codex|claude] [--dry-run] [--json]
-     npx nexakit detach [--project <ruta>] [--global] [--agent codex|claude|all] [--apply] [--json]
+     npx nexakit detach [--project <ruta>] [--global] [--agent codex|claude|antigravity|all] [--apply] [--json]
      npx nexakit doctor [--agent codex|claude|antigravity|all] [--perfil-codex <nombre>] [--json]
      npx nexakit setup [--agent codex|claude|antigravity|all] [--perfil-codex <nombre>] [--apply] [--json]
 
@@ -128,7 +128,7 @@ export async function runToolkitCli(
       if (seen.has(flag)) { await err(HELP); return 2; }
       seen.add(flag);
       if (flag === '--project' && rest[i + 1]) parsed.projectRoot = rest[++i];
-      else if (flag === '--agent' && ['codex', 'claude', 'all'].includes(rest[i + 1])) parsed.agent = rest[++i];
+      else if (flag === '--agent' && ['codex', 'claude', 'antigravity', 'all'].includes(rest[i + 1])) parsed.agent = rest[++i];
       else if (flag === '--global') parsed.global = true;
       else if (flag === '--apply') parsed.apply = true;
       else if (flag === '--json') parsed.json = true;

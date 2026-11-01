@@ -138,7 +138,7 @@ test('installed skills are identified in the first step and are not selected aga
   const { planProjectSkillInstall, applyProjectSkillInstall } = await import('../src/skill-recommendations.js');
   const setupOptions = { homeDirectory: env.homeDirectory, codexHome: env.codexHome, toolkitRoot: env.toolkitRoot, environment: { PATH: '' } };
   const snapshot = await buildToolkitTuiSnapshot({ projectRoot: env.projectRoot, setupOptions });
-  await applyProjectSkillInstall(await planProjectSkillInstall({ projectRoot: env.projectRoot, skillNames: ['mcp-builder'], agent: 'all', mode: 'symlink', catalog: snapshot.catalog, toolkitRoot: env.toolkitRoot }));
+  await applyProjectSkillInstall(await planProjectSkillInstall({ projectRoot: env.projectRoot, skillNames: ['mcp-builder'], agent: 'all', mode: 'symlink', catalog: snapshot.catalog, toolkitRoot: env.toolkitRoot, homeDirectory: env.homeDirectory }));
   const model = createToolkitTuiModel(await buildToolkitTuiSnapshot({ projectRoot: env.projectRoot, setupOptions }));
   const frame = renderToolkitTuiFrame(model, { columns: 100, color: false });
   assert.match(frame, /\[ \] mcp-builder · ya instalada/u);
@@ -516,7 +516,8 @@ test('runToolkitCli handles non-TTY fallback, recommend, detach (--apply / --jso
     mode: 'symlink',
     gitIgnore: 'gitignore',
     catalog,
-    toolkitRoot: env.toolkitRoot
+    toolkitRoot: env.toolkitRoot,
+    homeDirectory: env.homeDirectory
   });
   await applyProjectSkillInstall(installPlan);
 

@@ -195,3 +195,16 @@ test('classifyReference classifies a path that is not a link, such as an MCP scr
   await fs.writeFile(path.join(f.root, 'suelto.js'), '');
   assert.equal((await classifyReference({ target: 'x', literal: path.join(f.root, 'suelto.js'), suffix, activeRoots: [active] })).state, 'conflicto');
 });
+
+test('relinkIfUnchanged can write a link relative to its own folder', async t => {
+  const f = await fixture(t), { relinkIfUnchanged } = await import(moduleUrl);
+  const next = await makeCopy(path.join(f.root, 'next'));
+  const source = path.join(next, 'skills/example');
+  assert.equal(await relinkIfUnchanged({ target: f.target('rel'), expectedLiteral: null, source, relative: true }), 'hecho');
+  assert.equal(await fs.realpath(f.target('rel')), source);
+  if (process.platform !== 'win32') assert.equal(await fs.readlink(f.target('rel')), path.relative(f.links, source));
+  const old = await fs.readlink(f.target('rel'));
+  const other = await makeCopy(path.join(f.root, 'other'));
+  assert.equal(await relinkIfUnchanged({ target: f.target('rel'), expectedLiteral: old, source: path.join(other, 'skills/example'), relative: true }), 'hecho');
+  assert.equal(await fs.realpath(f.target('rel')), path.join(other, 'skills/example'));
+});

@@ -83,7 +83,8 @@ export async function buildToolkitTuiSnapshot({
     agent,
     mode: installMode,
     catalog,
-    toolkitRoot
+    toolkitRoot,
+    ...(setupOptions.homeDirectory && { homeDirectory: setupOptions.homeDirectory })
   });
 
   const guide = getToolkitCommandsGuide({ clients: doctor.clients });
@@ -508,7 +509,8 @@ export async function computeInstallPreview(model, setupOptions = {}) {
       mode: activeMode,
       gitIgnore: activeGitIgnore,
       catalog: model.snapshot.catalog,
-      toolkitRoot: setupOptions.toolkitRoot ?? TOOLKIT_ROOT
+      toolkitRoot: setupOptions.toolkitRoot ?? TOOLKIT_ROOT,
+      ...(setupOptions.homeDirectory && { homeDirectory: setupOptions.homeDirectory })
     });
     const verb = activeMode === 'copy' ? 'copia' : 'enlace';
     for (const l of freshProjectPlan.links) {
@@ -590,7 +592,10 @@ export async function executeApprovedPreview(model, setupOptions = {}) {
   }
 
   if (preview.freshProjectPlan) {
-    const appliedInstall = await applyProjectSkillInstall(preview.freshProjectPlan);
+    const appliedInstall = await applyProjectSkillInstall(preview.freshProjectPlan, {
+      ...(setupOptions.runNpm && { runNpm: setupOptions.runNpm }),
+      ...(setupOptions.packageSpec && { packageSpec: setupOptions.packageSpec })
+    });
     projectLinksCreated = appliedInstall.created;
     lockfileWritten = appliedInstall.lockfileWritten;
     conflicts += appliedInstall.conflicts;
