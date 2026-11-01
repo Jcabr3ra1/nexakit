@@ -240,9 +240,11 @@ localTest("S2 workspace is empty and private, no project content", async t => {
   } } })(request()); assert.equal(r.state, "completed-for-review");
 });
 localTest("S2 late final persistence cannot be presented as within total deadline", async t => {
-  const root = await setup(t), d = request(); d.limits.timeoutMs = 500;
+  // The process must finish inside the deadline and only the final persistence must miss it; 500 ms was too tight
+  // for the process itself on a loaded runner, which then reported "timed-out".
+  const root = await setup(t), d = request(); d.limits.timeoutMs = 2000;
   const r = check(await coordinator(root, { store: { checkpoint: async name => {
-    if (name === "durable-completed-for-review") await new Promise(r => setTimeout(r, 510));
+    if (name === "durable-completed-for-review") await new Promise(r => setTimeout(r, 2010));
   } } })(d));
   assert.equal(r.state, "indeterminate"); assert.ok(r.elapsedMs > d.limits.timeoutMs);
   assert.ok(r.reasons.includes("supervised-deadline")); assert.equal((await coordinator(root)(d)).fixtureExecuted, false);
