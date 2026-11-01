@@ -202,6 +202,7 @@ El total sale de cinco criterios: riesgo, tamaño, ambigüedad, contexto y tipo 
 | `gemini <lo que necesitas>` | Usa Gemini para explicar, investigar, analizar archivos o generar una imagen. `investigar` e `imagen` son atajos. Requiere `agy`. |
 | `cerrar-memoria` | Tras fusionar un PR, pone al día la memoria de Obsidian del proyecto. Solo si el proyecto tiene `project-memory.json`. |
 | `revision-cruzada` | Reúne todas las reglas de `programar` y `revisar`. Casi nunca la escribes tú. |
+| `elegir-modelo` | Recomienda y comprueba el modelo y el esfuerzo de Claude Code, Codex y Antigravity con los nombres reales de tu equipo. Se activa sola al empezar una tarea o al preguntar qué modelo usar. |
 | `spec-driven-development, depurar, desarrollo-con-pruebas, quality-gate` | Flujo de trabajo adaptado de Superpowers (especificar y planificar, investigar causa raíz antes de arreglar, TDD paso a paso y verificar con evidencia fresca). Convive con Superpowers si lo tienes instalado; ver [integración](../skills/superpowers-integration.md). |
 | `differential-review, frontend-design, mcp-builder, web-design-guidelines, ordenar-proyecto` | Skills recomendadas que también instala `setup`: revisión de seguridad de un cambio, diseño de interfaces, crear servidores MCP, pautas web y ordenar archivos. |
 
