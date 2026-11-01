@@ -713,3 +713,15 @@ test('a copy and the project metadata stop writing as soon as the lock is lost',
   assert.equal(await exists(path.join(l.project, '.claude/skills/frontend-design')), true);
   assert.equal(await exists(path.join(l.project, '.agent-toolkit')), false, 'the metadata folder is not created without the lock');
 });
+
+test('the catalog knows the new signals and api-design-principles uses the Python and REST ones', async () => {
+  const catalog = await loadSkillCatalog();
+  const api = catalog.skills.find(s => s.name === 'api-design-principles');
+  assert.deepEqual(api.matching.anySignals, ['express', 'fastify', 'hono', 'django', 'fastapi', 'flask', 'rest-api']);
+  const schema = JSON.parse(await fs.readFile(new URL('../schemas/skill-catalog.schema.json', import.meta.url), 'utf8'));
+  for (const id of ['django', 'fastapi', 'flask', 'tauri', 'python', 'rust', 'rest-api']) assert.ok(schema.$defs.signal.enum.includes(id), id);
+  const { SIGNAL_LABELS } = await import('../src/skill-recommendations.js');
+  assert.equal(SIGNAL_LABELS['rest-api'], 'API REST');
+  assert.equal(SIGNAL_LABELS.django, 'Django');
+  assert.equal(catalog.skills.find(s => s.name === 'nodejs-backend-patterns').matching.anySignals.join(), 'express,fastify,hono');
+});

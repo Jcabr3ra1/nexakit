@@ -53,7 +53,14 @@
         "fastify",
         "hono",
         "playwright",
-        "vitest"
+        "vitest",
+        "django",
+        "fastapi",
+        "flask",
+        "tauri",
+        "python",
+        "rust",
+        "rest-api"
       ]
     },
     "capabilityFlag": {

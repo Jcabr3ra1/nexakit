@@ -34,7 +34,7 @@ const IGNORE_BLOCK_END = '# <<< agent-toolkit (managed) <<<';
 const LEVEL_AGENT_HEADER = '# Generado por `agent-toolkit-inbox agentes`.';
 const LEVEL_AGENT_NAMES = ['nivel_ligero.toml', 'nivel_normal.toml', 'nivel_exigente.toml', 'nivel_alto.toml'];
 
-const SIGNAL_LABELS = Object.freeze({
+export const SIGNAL_LABELS = Object.freeze({
   nodejs: 'Node.js',
   typescript: 'TypeScript',
   'mcp-sdk': 'MCP SDK',
@@ -50,7 +50,14 @@ const SIGNAL_LABELS = Object.freeze({
   fastify: 'Fastify',
   hono: 'Hono',
   playwright: 'Playwright',
-  vitest: 'Vitest'
+  vitest: 'Vitest',
+  django: 'Django',
+  fastapi: 'FastAPI',
+  flask: 'Flask',
+  tauri: 'Tauri',
+  python: 'Python',
+  rust: 'Rust',
+  'rest-api': 'API REST'
 });
 
 const PACKAGE_TO_SIGNAL = Object.freeze({
