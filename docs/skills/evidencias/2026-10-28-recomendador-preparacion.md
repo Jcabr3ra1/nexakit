@@ -20,7 +20,7 @@ El usuario aprobó en el chat la planificación en lectura y preparar el worktre
 run_codex_plan devolvió «La ejecución fue cancelada; no se llamó al modelo».
 No se reintentó ni se avanzaron manualmente las etapas del almacén de tareas.
 
-El [plan preparado por la sesión actual](../../planes/2026-10-28-recomendador-skills-plan.md)
+El plan preparado por la sesión actual (en la memoria de Obsidian de NexaKit (`03-IMPLEMENTACION/Planes/2026-10-28-recomendador-skills-plan.md`)
 permite revisar el encargo. Ejecutar el runner nativo requiere una vista previa
 vigente y completar la confirmación interactiva del MCP.
 

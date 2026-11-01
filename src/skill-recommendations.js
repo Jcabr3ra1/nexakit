@@ -2,9 +2,13 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { acquireLock } from './install-lock.js';
+import { isRegistered, readRegistry, recordEntries } from './install-registry.js';
+import { classifyLink, relinkIfUnchanged } from './link-states.js';
 import { IS_WINDOWS } from './platform.js';
 import { loadSkillCatalog } from './skill-catalog.js';
-import { TOOLKIT_ROOT } from './toolkit-setup.js';
+import { actualRoot, ensureStableInstall, nexakitDir } from './stable-install.js';
+import { TOOLKIT_ROOT, globalSkillTarget, resolveRoots } from './toolkit-setup.js';
 
 const MAX_MANIFEST_BYTES = 512 * 1024;
 const MAX_SKILL_FILES = 256;
@@ -13,6 +17,14 @@ const VALID_CLIENTS = new Set(['codex', 'claude']);
 const VALID_INSTALL_MODES = new Set(['symlink', 'copy']);
 const VALID_GIT_IGNORE = new Set(['gitignore', 'git-exclude', 'none']);
 const SKILL_NAME_RE = /^[a-z0-9-]+$/u;
+// Antigravity reads project skills from `.agents/skills`, the folder Codex uses: one link serves both.
+const projectClientsFor = agent => (agent === 'all' ? ['codex', 'claude'] : [agent === 'antigravity' ? 'codex' : agent]);
+const servesFor = (client, agent) => (client === 'claude' ? ['claude'] : agent === 'all' ? ['codex', 'antigravity'] : [agent === 'antigravity' ? 'antigravity' : 'codex']);
+// The coarse vocabulary the rest of the code reads; `linkState` keeps the detailed one.
+const COARSE_STATE = Object.freeze({
+  falta: 'missing', efimero: 'replace', 'roto-propio': 'replace', instalado: 'installed',
+  'otra-copia': 'installed', conflicto: 'conflict', 'roto-ajeno': 'conflict'
+});
 
 export const PROJECT_TOOLKIT_DIR = '.agent-toolkit';
 const PROJECT_MANIFEST_FILE = 'manifest.json';
@@ -701,8 +713,8 @@ async function projectTargetState(source, target, mode, catalogEntry) {
       throw err;
     }
   }
-  // mode === 'copy'
-  if (info.isSymbolicLink()) return 'replace';
+  // mode === 'copy': links are classified by the planner; here one is never assumed replaceable.
+  if (info.isSymbolicLink()) return 'conflict';
   if (info.isDirectory() && catalogEntry) {
     const integrity = await verifyCatalogIntegrity(target, catalogEntry);
     return integrity === 'verified' ? 'installed' : 'conflict';
@@ -717,10 +729,12 @@ export async function planProjectSkillInstall({
   mode = 'symlink',
   gitIgnore = 'gitignore',
   catalog,
-  toolkitRoot = TOOLKIT_ROOT
+  toolkitRoot = TOOLKIT_ROOT,
+  linkRoot,
+  homeDirectory = os.homedir()
 } = {}) {
-  if (!['codex', 'claude', 'all'].includes(agent)) {
-    throw new Error('El agente debe ser codex, claude o all.');
+  if (!['codex', 'claude', 'antigravity', 'all'].includes(agent)) {
+    throw new Error('El agente debe ser codex, claude, antigravity o all.');
   }
   if (!VALID_INSTALL_MODES.has(mode)) {
     throw new Error('El modo de instalación debe ser symlink o copy.');
@@ -728,12 +742,32 @@ export async function planProjectSkillInstall({
   if (!VALID_GIT_IGNORE.has(gitIgnore)) {
     throw new Error('La estrategia gitIgnore debe ser gitignore, git-exclude o none.');
   }
-  const clients = agent === 'all' ? ['codex', 'claude'] : [agent];
+  const clients = projectClientsFor(agent);
   const root = await fs.realpath(projectRoot);
   const resolvedToolkit = await fs.realpath(toolkitRoot);
+  const home = await fs.realpath(homeDirectory).catch(() => path.resolve(homeDirectory));
+  const roots = await resolveRoots({ toolkitRoot: resolvedToolkit, homeDirectory: home });
+  // An explicit linkRoot means the caller chose where to link, so no stable copy is made.
+  const linkRootPath = linkRoot ? path.resolve(linkRoot) : roots.linkRoot;
+  const ephemeral = !linkRoot && roots.ephemeral;
   const activeCatalog = catalog ?? await loadSkillCatalog();
   const catalogByName = new Map(activeCatalog.skills.map(s => [s.name, s]));
   const uniqueSkills = [...new Set(skillNames ?? [])].sort();
+
+  // A broken link is nexakit's only with proof: the install registry (the exact link), or this project's
+  // manifest. An entry written by this version records the exact link too; one from 0.1.0 only has the path,
+  // so its link must at least have nexakit's own shape: `<root>/<where this skill lives in nexakit>`.
+  const registry = await readRegistry(nexakitDir(home));
+  const previousManifest = await readProjectToolkitManifest(root);
+  const manifested = new Map((previousManifest?.entries ?? []).filter(entry => entry?.relativePath).map(entry => [entry.relativePath, entry]));
+  const ownedBy = suffix => (target, literal) => {
+    if (isRegistered(registry, target, literal)) return true;
+    const entry = manifested.get(path.relative(root, target).split(path.sep).join('/'));
+    if (!entry) return false;
+    if (typeof entry.apunta === 'string') return entry.apunta === literal;
+    return path.resolve(path.dirname(target), literal).endsWith(path.sep + path.normalize(suffix));
+  };
+  const activeRoots = [linkRootPath, resolvedToolkit, actualRoot(home)];
 
   const links = [];
   const verifiedCatalogEntries = new Map();
@@ -759,8 +793,29 @@ export async function planProjectSkillInstall({
     for (const client of clients) {
       const target = path.join(root, client === 'codex' ? '.agents' : '.claude', 'skills', skillName);
       await ensureSafeProjectParents(root, target, false);
+      const serves = servesFor(client, agent);
+      const suffix = path.relative(resolvedToolkit, source);
+      if (mode === 'symlink') {
+        const info = await classifyLink({ target, suffix, activeRoots, isOwned: ownedBy(suffix) });
+        links.push({
+          client, serves, name: skillName, source: path.join(linkRootPath, suffix), target, mode,
+          state: COARSE_STATE[info.state], linkState: info.state,
+          ...(info.literal && { literal: info.literal }), ...(info.root && { root: info.root })
+        });
+        continue;
+      }
+      if ((await lstatOrNull(target))?.isSymbolicLink()) {
+        // A link where a copy goes is replaced only when it is provably nexakit's; any other link is the user's.
+        const info = await classifyLink({ target, suffix, activeRoots, isOwned: ownedBy(suffix) });
+        const ours = ['instalado', 'otra-copia', 'efimero', 'roto-propio'].includes(info.state);
+        links.push({
+          client, serves, name: skillName, source, target, mode, state: ours ? 'replace' : 'conflict',
+          linkState: info.state, ...(info.literal && { literal: info.literal })
+        });
+        continue;
+      }
       const state = await projectTargetState(source, target, mode, catalogEntry);
-      links.push({ client, name: skillName, source, target, state, mode });
+      links.push({ client, serves, name: skillName, source, target, state, mode });
     }
   }
 
@@ -800,6 +855,10 @@ export async function planProjectSkillInstall({
     gitIgnore,
     projectRoot: root,
     toolkitRoot: resolvedToolkit,
+    linkRoot: linkRootPath,
+    ephemeral,
+    homeDirectory: home,
+    agent,
     links,
     stateDirPath,
     manifestPath,
@@ -822,7 +881,8 @@ export async function planProjectSkillInstall({
   };
 }
 
-async function copyVerifiedSkillDirectory(sourceDir, targetDir, catalogEntry) {
+async function copyVerifiedSkillDirectory(sourceDir, targetDir, catalogEntry, lock) {
+  await lock?.assertHeld();
   await fs.mkdir(targetDir, { recursive: true, mode: 0o755 });
   if (catalogEntry) {
     for (const file of catalogEntry.files) {
@@ -833,15 +893,18 @@ async function copyVerifiedSkillDirectory(sourceDir, targetDir, catalogEntry) {
       if (actualHash !== file.sha256) {
         throw new Error(`Integridad SHA-256 rechazada durante la copia de ${catalogEntry.name} (${file.path}).`);
       }
+      await lock?.assertHeld();
       await fs.mkdir(path.dirname(dstFile), { recursive: true, mode: 0o755 });
       await fs.writeFile(dstFile, bytes, { mode: 0o644 });
     }
   } else {
+    await lock?.assertHeld();
     await fs.cp(sourceDir, targetDir, { recursive: true, dereference: false });
   }
 }
 
-async function writeSkillsLockfile(lockfilePath, activeEntriesBySkill) {
+async function writeSkillsLockfile(lockfilePath, activeEntriesBySkill, lock) {
+  await lock?.assertHeld();
   await fs.mkdir(path.dirname(lockfilePath), { recursive: true, mode: 0o755 });
   const existingInfo = await lstatOrNull(lockfilePath);
   if (existingInfo && (!existingInfo.isFile() || existingInfo.isSymbolicLink())) {
@@ -882,6 +945,7 @@ async function writeSkillsLockfile(lockfilePath, activeEntriesBySkill) {
     generatedBy: 'nexakit',
     skills: sortedSkills
   };
+  await lock?.assertHeld();
   await fs.writeFile(lockfilePath, JSON.stringify(payload, null, 2) + '\n', { mode: 0o644 });
   return true;
 }
@@ -891,13 +955,15 @@ async function writeProjectManifestAndIgnore({
   mode,
   gitIgnore,
   prevManifest,
-  coupledEntriesMap
+  coupledEntriesMap,
+  lock
 }) {
   const stateDir = path.join(projectRoot, PROJECT_TOOLKIT_DIR);
   const stateStat = await lstatOrNull(stateDir);
   if (stateStat && (!stateStat.isDirectory() || stateStat.isSymbolicLink())) {
     return { manifestWritten: false, gitIgnoreUpdated: false };
   }
+  await lock?.assertHeld();
   await fs.mkdir(stateDir, { recursive: true, mode: 0o755 });
 
   const entries = [...coupledEntriesMap.values()].sort((a, b) =>
@@ -910,17 +976,20 @@ async function writeProjectManifestAndIgnore({
   if (gitIgnore !== 'none') {
     const info = await inspectGitIgnoreTarget(projectRoot, gitIgnore);
     if (!info.conflict && !info.unavailable && info.targetPath) {
+      await lock?.assertHeld();
       await fs.mkdir(path.dirname(info.targetPath), { recursive: true, mode: 0o755 });
       const currentStat = await lstatOrNull(info.targetPath);
       if (!currentStat) {
         if (gitIgnore === 'gitignore') createdIgnoreFile = true;
         const nextText = upsertManagedIgnoreBlock('', entries.map(e => e.relativePath));
+        await lock?.assertHeld();
         await fs.writeFile(info.targetPath, nextText, { mode: 0o644 });
         gitIgnoreUpdated = true;
       } else if (currentStat.isFile() && !currentStat.isSymbolicLink()) {
         const prevText = await fs.readFile(info.targetPath, 'utf8');
         const nextText = upsertManagedIgnoreBlock(prevText, entries.map(e => e.relativePath));
         if (nextText !== prevText) {
+          await lock?.assertHeld();
           await fs.writeFile(info.targetPath, nextText, { mode: 0o644 });
         }
         gitIgnoreUpdated = true;
@@ -935,6 +1004,7 @@ async function writeProjectManifestAndIgnore({
           const otherText = await fs.readFile(otherInfo.targetPath, 'utf8');
           const cleaned = removeManagedIgnoreBlock(otherText);
           if (cleaned.changed) {
+            await lock?.assertHeld();
             if (!cleaned.content && otherStrategy === 'gitignore' && prevManifest?.createdIgnoreFile) {
               await fs.unlink(otherInfo.targetPath).catch(() => {});
               createdIgnoreFile = false;
@@ -955,6 +1025,7 @@ async function writeProjectManifestAndIgnore({
     createdIgnoreFile,
     entries
   };
+  await lock?.assertHeld();
   await fs.writeFile(
     path.join(stateDir, PROJECT_MANIFEST_FILE),
     JSON.stringify(manifestPayload, null, 2) + '\n',
@@ -963,10 +1034,51 @@ async function writeProjectManifestAndIgnore({
   return { manifestWritten: true, gitIgnoreUpdated };
 }
 
-export async function applyProjectSkillInstall(plan) {
+// Links are written under the install lock: it prepares the stable copy when running from an npx cache,
+// re-checks the hashes where the links will point, and records every link so a broken one can be proven ours.
+export async function applyProjectSkillInstall(plan, { runNpm, packageSpec, lockOptions, acquire = acquireLock } = {}) {
   if (!plan || !Array.isArray(plan.links) || !plan.projectRoot) {
     throw new Error('Se requiere una vista previa válida de instalación de skills.');
   }
+  const mode = plan.mode ?? 'symlink';
+  const gitIgnore = plan.gitIgnore ?? 'gitignore';
+  // Anything that writes (links, copies, the manifest, ignore rules or the lockfile) runs under the lock.
+  // With nothing to write, nothing is written, so a run that changes nothing never creates ~/.nexakit.
+  const pending = plan.links.some(l => ['missing', 'replace'].includes(l.state));
+  const previous = await readProjectToolkitManifest(plan.projectRoot);
+  const settingsChanged = Boolean(previous) && (previous.mode !== mode || previous.gitIgnoreStrategy !== gitIgnore);
+  if (!pending && !settingsChanged) return applyProjectSkillInstallLocked(plan, { registryEntries: [], lock: null, writeMetadata: false });
+
+  const home = plan.homeDirectory ?? os.homedir();
+  const lock = await acquire(nexakitDir(home), lockOptions);
+  const registryEntries = [];
+  try {
+    if (mode === 'symlink' && pending) {
+      if (plan.ephemeral) {
+        const { version } = JSON.parse(await fs.readFile(path.join(plan.toolkitRoot ?? TOOLKIT_ROOT, 'package.json'), 'utf8'));
+        await ensureStableInstall({
+          homeDirectory: home, version, lock, ...(runNpm && { runNpm }), ...(packageSpec && { packageSpec })
+        });
+      }
+      const linkRoot = plan.linkRoot ?? plan.toolkitRoot ?? TOOLKIT_ROOT;
+      if (path.resolve(linkRoot) !== path.resolve(plan.toolkitRoot ?? TOOLKIT_ROOT)) {
+        // The files that get linked are the ones in linkRoot, so their hashes must hold there too.
+        for (const entry of Object.values(plan.verifiedCatalogEntries ?? {})) {
+          const check = await verifyBundledSkillHashes({ skillEntry: entry, toolkitRoot: linkRoot });
+          if (!check.ok) throw new Error(check.reason);
+        }
+      }
+    }
+    const result = await applyProjectSkillInstallLocked(plan, { registryEntries, lock, writeMetadata: true });
+    await recordEntries(nexakitDir(home), registryEntries, lock);
+    return result;
+  } finally {
+    await lock.release();
+  }
+}
+
+// `lock` is null only when nothing will be written; every write checks it still holds the lock just before.
+async function applyProjectSkillInstallLocked(plan, { registryEntries, lock, writeMetadata }) {
   const mode = plan.mode ?? 'symlink';
   const gitIgnore = plan.gitIgnore ?? 'gitignore';
   const catalogEntries = plan.verifiedCatalogEntries ?? {};
@@ -1008,35 +1120,49 @@ export async function applyProjectSkillInstall(plan) {
       continue;
     }
 
+    await lock?.assertHeld();
     await ensureSafeProjectParents(plan.projectRoot, item.target, true);
-    const currentState = await projectTargetState(item.source, item.target, mode, catalogEntry);
-    if (currentState === 'conflict') {
-      updatedLinks.push({ ...item, state: 'conflict' });
-      continue;
-    }
-    if (currentState === 'installed') {
-      if (coupledEntriesMap.has(`${item.client}:${item.name}`)) {
-        const list = installedClientsBySkill.get(item.name) ?? [];
-        list.push(item.client);
-        installedClientsBySkill.set(item.name, list);
-      }
-      updatedLinks.push({ ...item, state: 'installed' });
-      continue;
-    }
-    if (currentState === 'replace') {
-      const currentInfo = await lstatOrNull(item.target);
-      if (!currentInfo?.isSymbolicLink()) {
-        updatedLinks.push({ ...item, state: 'conflict' });
+    let literal;
+    if (mode === 'symlink') {
+      // Re-reads the link right before writing: if it is no longer what the plan saw, it is left alone.
+      await lock?.assertHeld();
+      const outcome = await relinkIfUnchanged({
+        target: item.target, expectedLiteral: item.linkState === 'falta' ? null : item.literal, source: item.source, relative: true
+      });
+      if (outcome === 'cambio') {
+        updatedLinks.push({ ...item, state: 'conflict', changed: true });
         continue;
       }
-      await fs.unlink(item.target);
-    }
-
-    if (mode === 'symlink') {
-      const linkTarget = IS_WINDOWS ? path.resolve(item.source) : path.relative(path.dirname(item.target), item.source);
-      await fs.symlink(linkTarget, item.target, IS_WINDOWS ? 'junction' : 'dir');
+      // The registry and the manifest keep what readlink returns, the value that is compared later.
+      literal = await fs.readlink(item.target);
+      registryEntries.push({ destino: item.target, apunta: literal, raiz: plan.linkRoot ?? plan.toolkitRoot });
     } else {
-      await copyVerifiedSkillDirectory(item.source, item.target, catalogEntry);
+      const current = await lstatOrNull(item.target);
+      if (current?.isSymbolicLink()) {
+        // Only a link the plan proved to be nexakit's becomes a copy, and only if it did not change since.
+        if (item.state !== 'replace' || !item.literal || await fs.readlink(item.target) !== item.literal) {
+          updatedLinks.push({ ...item, state: 'conflict', changed: true });
+          continue;
+        }
+        await lock?.assertHeld();
+        await fs.unlink(item.target);
+      } else {
+        const currentState = await projectTargetState(item.source, item.target, mode, catalogEntry);
+        if (currentState === 'conflict') {
+          updatedLinks.push({ ...item, state: 'conflict' });
+          continue;
+        }
+        if (currentState === 'installed') {
+          if (coupledEntriesMap.has(`${item.client}:${item.name}`)) {
+            const list = installedClientsBySkill.get(item.name) ?? [];
+            list.push(item.client);
+            installedClientsBySkill.set(item.name, list);
+          }
+          updatedLinks.push({ ...item, state: 'installed' });
+          continue;
+        }
+      }
+      await copyVerifiedSkillDirectory(item.source, item.target, catalogEntry, lock);
     }
 
     created++;
@@ -1045,6 +1171,7 @@ export async function applyProjectSkillInstall(plan) {
       name: item.name,
       relativePath: relPath,
       mode,
+      ...(literal && { apunta: literal }),
       ...(catalogEntry?.revision && { revision: catalogEntry.revision })
     });
     const list = installedClientsBySkill.get(item.name) ?? [];
@@ -1054,7 +1181,7 @@ export async function applyProjectSkillInstall(plan) {
   }
 
   let lockfileWritten = false;
-  if (mode === 'copy' && !plan.stateDirConflict && !plan.lockfileConflict && installedClientsBySkill.size > 0) {
+  if (writeMetadata && mode === 'copy' && !plan.stateDirConflict && !plan.lockfileConflict && installedClientsBySkill.size > 0) {
     const activeMap = new Map();
     for (const [skillName, clients] of installedClientsBySkill.entries()) {
       const catalogEntry = catalogEntries[skillName];
@@ -1063,20 +1190,22 @@ export async function applyProjectSkillInstall(plan) {
     if (activeMap.size > 0) {
       lockfileWritten = await writeSkillsLockfile(
         plan.lockfilePath ?? path.join(plan.projectRoot, PROJECT_TOOLKIT_DIR, PROJECT_LOCKFILE_NAME),
-        activeMap
+        activeMap,
+        lock
       );
     }
   }
 
   let manifestWritten = false;
   let gitIgnoreUpdated = false;
-  if (!plan.stateDirConflict && (coupledEntriesMap.size > 0 || lockfileWritten)) {
+  if (writeMetadata && !plan.stateDirConflict && (coupledEntriesMap.size > 0 || lockfileWritten)) {
     const res = await writeProjectManifestAndIgnore({
       projectRoot: plan.projectRoot,
       mode,
       gitIgnore,
       prevManifest,
-      coupledEntriesMap
+      coupledEntriesMap,
+      lock
     });
     manifestWritten = res.manifestWritten;
     gitIgnoreUpdated = res.gitIgnoreUpdated;
@@ -1117,11 +1246,17 @@ export async function planToolkitDetach({
   homeDirectory = os.homedir(),
   codexHome
 } = {}) {
-  if (!['codex', 'claude', 'all'].includes(agent)) {
-    throw new Error('El agente debe ser codex, claude o all.');
+  if (!['codex', 'claude', 'antigravity', 'all'].includes(agent)) {
+    throw new Error('El agente debe ser codex, claude, antigravity o all.');
   }
-  const clients = agent === 'all' ? ['codex', 'claude'] : [agent];
+  const clients = agent === 'all' ? ['codex', 'claude', 'antigravity'] : [agent];
+  // Antigravity shares Codex's project folder, so removing one's project links removes the other's.
+  const projectClients = [...new Set(clients.map(c => (c === 'antigravity' ? 'codex' : c)))];
   const resolvedToolkit = await fs.realpath(toolkitRoot);
+  const homeReal = await fs.realpath(homeDirectory).catch(() => path.resolve(homeDirectory));
+  // Links made from an npx run point into the stable copy, which is nexakit's too.
+  const stableVersions = path.join(nexakitDir(homeReal), 'versiones');
+  const registry = await readRegistry(nexakitDir(homeReal));
   const activeCatalog = catalog ?? await loadSkillCatalog();
   const catalogByName = new Map(activeCatalog.skills.map(s => [s.name, s]));
 
@@ -1141,17 +1276,17 @@ export async function planToolkitDetach({
 
     let candidateEntries = [];
     if (manifest) {
-      candidateEntries = manifest.entries.filter(e => clients.includes(e.client));
-      remainingManifestEntries = manifest.entries.filter(e => !clients.includes(e.client));
+      candidateEntries = manifest.entries.filter(e => projectClients.includes(e.client));
+      remainingManifestEntries = manifest.entries.filter(e => !projectClients.includes(e.client));
     } else {
-      const extLinks = await findFallbackExternalToolkitLinks(root, resolvedToolkit, clients, homeDirectory);
+      const extLinks = await findFallbackExternalToolkitLinks(root, resolvedToolkit, projectClients, homeDirectory);
       const seenKeys = new Set(extLinks.map(e => `${e.client}:${e.name}`));
       candidateEntries = [...extLinks];
       if (legacyLock) {
         for (const [skillName, meta] of Object.entries(legacyLock.skills ?? {})) {
           const lockClients = Array.isArray(meta?.clients) ? meta.clients : ['codex', 'claude'];
           for (const client of lockClients) {
-            if (!clients.includes(client) || seenKeys.has(`${client}:${skillName}`)) continue;
+            if (!projectClients.includes(client) || seenKeys.has(`${client}:${skillName}`)) continue;
             candidateEntries.push({
               client,
               name: skillName,
@@ -1174,7 +1309,7 @@ export async function planToolkitDetach({
         let safeToUnlink = Boolean(manifest);
         try {
           const real = await fs.realpath(target);
-          safeToUnlink = isWithinRoot(real, resolvedToolkit) && !isWithinRoot(real, root);
+          safeToUnlink = (isWithinRoot(real, resolvedToolkit) || isWithinRoot(real, stableVersions)) && !isWithinRoot(real, root);
         } catch (err) {
           if (err.code !== 'ENOENT') throw err;
         }
@@ -1258,24 +1393,25 @@ export async function planToolkitDetach({
 
     for (const client of clients) {
       for (const name of bundledNames) {
-        const expectedSource = path.join(resolvedToolkit, 'skills', name);
-        const target = path.join(home, client === 'codex' ? '.agents' : '.claude', 'skills', name);
+        const target = globalSkillTarget(home, client, name);
         const info = await lstatOrNull(target);
         if (!info?.isSymbolicLink()) continue;
-        try {
-          const [actual, expected] = await Promise.all([fs.realpath(target), fs.realpath(expectedSource)]);
-          if (normalizedPath(actual) === normalizedPath(expected)) {
-            items.push({
-              scope: 'global',
-              client,
-              name,
-              target,
-              relativePath: target,
-              action: 'remove-global-link',
-              reason: 'enlace global de Agent Toolkit'
-            });
-          }
-        } catch {}
+        // Only links that are provably nexakit's: into this copy, the stable copy, an npx cache, or recorded broken.
+        const link = await classifyLink({
+          target, suffix: `skills/${name}`, activeRoots: [resolvedToolkit, actualRoot(home)],
+          isOwned: (at, literal) => isRegistered(registry, at, literal)
+        });
+        if (['instalado', 'efimero', 'roto-propio'].includes(link.state)) {
+          items.push({
+            scope: 'global',
+            client,
+            name,
+            target,
+            relativePath: target,
+            action: 'remove-global-link',
+            reason: 'enlace global de Agent Toolkit'
+          });
+        }
       }
     }
 

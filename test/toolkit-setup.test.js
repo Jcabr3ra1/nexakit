@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import { fakeNpm, writeFakeInstall } from '../test-support/fake-npm.js';
 
 async function fixture(t) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'toolkit-setup-')));
@@ -15,18 +16,23 @@ async function fixture(t) {
   return { root, homeDirectory, toolkitRoot };
 }
 const moduleUrl = new URL('../src/toolkit-setup.js', import.meta.url);
+const stableUrl = new URL('../src/stable-install.js', import.meta.url);
+const registryUrl = new URL('../src/install-registry.js', import.meta.url);
+const lockUrl = new URL('../src/install-lock.js', import.meta.url);
 const directoryLinkType = process.platform === 'win32' ? 'junction' : 'dir';
 test('setup preview writes nothing; apply links both clients and repeating preserves links', async t => {
   const f = await fixture(t);
   assert.equal(await fs.access(moduleUrl).then(() => true, () => false), true, 'setup module exists');
   const { setupToolkit } = await import(moduleUrl);
-  const preview = await setupToolkit({ ...f, agent: 'all' });
+  // Without `agy` on the PATH, `all` means Codex and Claude.
+  const environment = { PATH: '' };
+  const preview = await setupToolkit({ ...f, agent: 'all', environment });
   assert.equal(preview.applied, false);
   assert.equal(preview.skills.length, 2);
   assert.deepEqual(await fs.readdir(f.homeDirectory), []);
-  assert.equal((await setupToolkit({ ...f, agent: 'all', apply: true })).applied, true);
+  assert.equal((await setupToolkit({ ...f, agent: 'all', apply: true, environment })).applied, true);
   assert.equal(await fs.realpath(path.join(f.homeDirectory, '.agents/skills/example')), path.join(f.toolkitRoot, 'skills/example'));
-  assert.equal((await setupToolkit({ ...f, agent: 'all', apply: true })).skills.every(s => s.state === 'installed'), true);
+  assert.equal((await setupToolkit({ ...f, agent: 'all', apply: true, environment })).skills.every(s => s.state === 'instalado'), true);
 });
 
 test('setup recognizes an equivalent directory link and keeps its source intact', async t => {
@@ -37,7 +43,7 @@ test('setup recognizes an equivalent directory link and keeps its source intact'
   await fs.symlink(process.platform === 'win32' ? source.toUpperCase() : path.relative(path.dirname(target), source), target, directoryLinkType);
   const before = await fs.readlink(target);
   const result = await setupToolkit({ ...f, agent: 'codex', apply: true });
-  assert.equal(result.skills[0].state, 'installed');
+  assert.equal(result.skills[0].state, 'instalado');
   assert.equal(await fs.readlink(target), before);
   assert.match(await fs.readFile(path.join(source, 'SKILL.md'), 'utf8'), /name: example/u);
 });
@@ -50,15 +56,17 @@ test('doctor finds client executables using platform PATH extensions', async t =
   const result = await doctorToolkit({ ...f, agent: 'codex', environment: { PATH: bin, PATHEXT: '.EXE;.CMD' } });
   assert.equal(result.clients.codex.available, true);
 });
-test('setup preserves occupied targets and rejects symlink parents without modifying unrelated files', async t => {
+test('setup skips occupied targets, reports them and rejects symlink parents without modifying unrelated files', async t => {
   const f = await fixture(t);
   assert.equal(await fs.access(moduleUrl).then(() => true, () => false), true);
   const { setupToolkit } = await import(moduleUrl);
   await fs.mkdir(path.join(f.homeDirectory, '.agents/skills/example'), { recursive: true });
   await fs.writeFile(path.join(f.homeDirectory, '.agents/skills/example/mine'), 'keep');
+  // A conflict is skipped and reported; it does not block the rest of the apply.
   const blocked = await setupToolkit({ ...f, agent: 'codex', apply: true });
-  assert.equal(blocked.applied, false);
-  assert.equal(blocked.skills[0].state, 'conflict');
+  assert.equal(blocked.applied, true);
+  assert.equal(blocked.conflicts, 1);
+  assert.equal(blocked.skills[0].state, 'conflicto');
   assert.equal(await fs.readFile(path.join(f.homeDirectory, '.agents/skills/example/mine'), 'utf8'), 'keep');
   await fs.symlink(f.root, path.join(f.homeDirectory, '.claude'), directoryLinkType);
   await assert.rejects(setupToolkit({ ...f, agent: 'claude', apply: true }));
@@ -70,7 +78,7 @@ test('doctor reports missing dependencies and optional Superpowers without creat
   const result = await doctorToolkit({ ...f, agent: 'codex', environment: { PATH: '' } });
   assert.equal(result.clients.codex.available, false);
   assert.equal(result.superpowers.required, false);
-  assert.equal(result.mcp.codex.state, 'missing');
+  assert.equal(result.mcp.codex.state, 'falta');
   assert.equal(result.nativeConnectionVerified, false);
   assert.deepEqual(await fs.readdir(f.homeDirectory), []);
 });
@@ -78,10 +86,13 @@ test('doctor reports missing dependencies and optional Superpowers without creat
 test('doctor recognizes complete MCP tables with extra fields without exposing their contents', async t => {
   const f = await fixture(t), { doctorToolkit } = await import(moduleUrl);
   await fs.mkdir(path.join(f.homeDirectory,'.codex'));
+  // The entry only counts as installed when the script it runs exists.
+  await fs.mkdir(path.join(f.toolkitRoot, 'bin'));
+  await fs.writeFile(path.join(f.toolkitRoot, 'bin/agent-toolkit-mcp.js'), '');
   const config = `[mcp_servers.agent-toolkit-workflow]\ncommand = "node"\nargs = [${JSON.stringify(path.join(f.toolkitRoot,'bin/agent-toolkit-mcp.js'))}]\nstartup_timeout_sec = 20\n[mcp_servers.agent-toolkit-workflow.env]\nPRIVATE_VALUE = "must-not-leak"\n`;
   await fs.writeFile(path.join(f.homeDirectory,'.codex/config.toml'), config);
   const result = await doctorToolkit({ ...f, agent: 'codex', environment: { PATH: '' } });
-  assert.equal(result.mcp.codex.state, 'configured');
+  assert.equal(result.mcp.codex.state, 'instalado');
   assert.equal(JSON.stringify(result).includes('must-not-leak'), false);
 });
 
@@ -187,4 +198,207 @@ test('sandbox_mode takes precedence, :read-only blocks and current profile files
   assert.equal((await run(['doctor', '--agent', 'codex', '--perfil-codex', '../x'])).code, 2);
   assert.equal((await run(['doctor', '--agent', 'codex', '--perfil-codex', 'estricto', '--json'])).json.codexSandbox.state, 'read-only');
   assert.equal((await run(['doctor', '--agent', 'codex', '--perfil-codex', 'estricto', '--json'])).code, 1);
+});
+
+const link = async (to, at) => { await fs.mkdir(path.dirname(at), { recursive: true }); await fs.symlink(to, at, directoryLinkType); };
+const exists = file => fs.lstat(file).then(() => true, () => false);
+const skillTarget = (home, client, name) => path.join(home, client === 'codex' ? '.agents/skills' : '.claude/skills', name);
+
+async function npxFixture(t, skills = ['example']) {
+  const f = await fixture(t);
+  const ephemeral = await writeFakeInstall(path.join(f.root, '.npm/_npx/abc'), { skills });
+  return { ...f, ephemeral, npm: fakeNpm({ skills }) };
+}
+async function register(home, entries) {
+  const { acquireLock } = await import(lockUrl), { recordEntries } = await import(registryUrl), { nexakitDir } = await import(stableUrl);
+  const lock = await acquireLock(nexakitDir(home), { waitMs: 1000 });
+  try { await recordEntries(nexakitDir(home), entries, lock); } finally { await lock.release(); }
+}
+
+test('an npx run links to the stable copy and survives removing the npx cache', async t => {
+  const f = await npxFixture(t), { setupToolkit, doctorToolkit } = await import(moduleUrl), { actualRoot } = await import(stableUrl);
+  const result = await setupToolkit({ homeDirectory: f.homeDirectory, toolkitRoot: f.ephemeral, agent: 'all', apply: true, environment: { PATH: '' }, runNpm: f.npm });
+  assert.deepEqual([result.applied, result.ephemeral, f.npm.calls.length], [true, true, 1]);
+  for (const client of ['codex', 'claude']) {
+    assert.equal(await fs.readlink(skillTarget(f.homeDirectory, client, 'example')), path.join(actualRoot(f.homeDirectory), 'skills/example'));
+  }
+  await fs.rm(path.join(f.root, '.npm'), { recursive: true });
+  const doctor = await doctorToolkit({ homeDirectory: f.homeDirectory, toolkitRoot: actualRoot(f.homeDirectory), agent: 'all', environment: { PATH: '' } });
+  assert.deepEqual(doctor.skills.map(skill => skill.state), ['instalado', 'instalado']);
+});
+
+test('an npx run keeps a valid development copy and does not mix origins', async t => {
+  const f = await npxFixture(t, ['example', 'other', 'extra']), { setupToolkit } = await import(moduleUrl);
+  const dev = await writeFakeInstall(path.join(f.root, 'dev'), { skills: ['example', 'other'] });
+  for (const client of ['codex', 'claude']) for (const name of ['example', 'other']) {
+    await link(path.join(dev, 'skills', name), skillTarget(f.homeDirectory, client, name));
+  }
+  const result = await setupToolkit({ homeDirectory: f.homeDirectory, toolkitRoot: f.ephemeral, agent: 'all', apply: true, environment: { PATH: '' }, runNpm: f.npm });
+  assert.equal(result.activeRoot, dev);
+  assert.deepEqual(result.otherCopy, { root: dev, missing: ['extra'] });
+  assert.equal(f.npm.calls.length, 0, 'no stable copy is needed when the development copy is the active root');
+  for (const client of ['codex', 'claude']) {
+    for (const name of ['example', 'other']) assert.equal(await fs.readlink(skillTarget(f.homeDirectory, client, name)), path.join(dev, 'skills', name));
+    assert.equal(await exists(skillTarget(f.homeDirectory, client, 'extra')), false);
+  }
+  assert.deepEqual(result.skills.map(skill => skill.state).sort(), ['falta', 'falta', 'otra-copia', 'otra-copia', 'otra-copia', 'otra-copia']);
+});
+
+test('links into another npx cache, a deleted one or the running one are moved to the stable copy', async t => {
+  const f = await npxFixture(t, ['example', 'other']), { setupToolkit } = await import(moduleUrl), { actualRoot } = await import(stableUrl);
+  const oldCache = await writeFakeInstall(path.join(f.root, '.npm/_npx/old'), { skills: ['example', 'other'] });
+  await link(path.join(oldCache, 'skills/example'), skillTarget(f.homeDirectory, 'claude', 'example'));
+  await link(path.join(f.root, '.npm/_npx/gone/node_modules/nexakit/skills/example'), skillTarget(f.homeDirectory, 'codex', 'example'));
+  await link(path.join(f.ephemeral, 'skills/other'), skillTarget(f.homeDirectory, 'claude', 'other'));
+  const options = { homeDirectory: f.homeDirectory, toolkitRoot: f.ephemeral, agent: 'all', environment: { PATH: '' }, runNpm: f.npm };
+  const preview = await setupToolkit(options);
+  assert.deepEqual(preview.skills.map(skill => `${skill.client}/${skill.name}:${skill.state}`),
+    ['codex/example:efimero', 'codex/other:falta', 'claude/example:efimero', 'claude/other:efimero']);
+  await setupToolkit({ ...options, apply: true });
+  for (const client of ['codex', 'claude']) for (const name of ['example', 'other']) {
+    assert.equal(await fs.readlink(skillTarget(f.homeDirectory, client, name)), path.join(actualRoot(f.homeDirectory), 'skills', name));
+  }
+});
+
+test('a registered broken link is repaired; an unregistered one is left as it is', async t => {
+  const f = await fixture(t), { setupToolkit } = await import(moduleUrl);
+  const owned = path.join(f.root, 'dead1/skills/example'), foreign = path.join(f.root, 'dead2/skills/example');
+  const claude = skillTarget(f.homeDirectory, 'claude', 'example'), codex = skillTarget(f.homeDirectory, 'codex', 'example');
+  await link(owned, claude);
+  await link(foreign, codex);
+  await register(f.homeDirectory, [{ destino: claude, apunta: owned, raiz: path.join(f.root, 'dead1') }]);
+  const result = await setupToolkit({ ...f, agent: 'all', apply: true, environment: { PATH: '' } });
+  assert.equal(await fs.realpath(claude), path.join(f.toolkitRoot, 'skills/example'));
+  assert.equal(await fs.readlink(codex), foreign);
+  assert.equal(result.conflicts, 1);
+  assert.deepEqual(result.skills.map(skill => `${skill.client}:${skill.state}`), ['codex:roto-ajeno', 'claude:instalado']);
+});
+
+test('groups of old broken links are reported for `reparar --desde` and never touched', async t => {
+  const f = await fixture(t), { setupToolkit } = await import(moduleUrl);
+  for (const name of ['b', 'c']) {
+    await fs.mkdir(path.join(f.toolkitRoot, 'skills', name));
+    await fs.writeFile(path.join(f.toolkitRoot, 'skills', name, 'SKILL.md'), 'x');
+  }
+  const legacyRoot = path.join(f.root, 'Agent-Toolkit');
+  for (const name of ['b', 'c', 'example']) await link(path.join(legacyRoot, 'skills', name), skillTarget(f.homeDirectory, 'claude', name));
+  const preview = await setupToolkit({ ...f, agent: 'claude' });
+  assert.deepEqual(preview.legacy, [{ root: legacyRoot, targets: ['b', 'c', 'example'].map(name => skillTarget(f.homeDirectory, 'claude', name)) }]);
+  await setupToolkit({ ...f, agent: 'claude', apply: true, environment: { PATH: '' } });
+  for (const name of ['b', 'c', 'example']) assert.equal(await fs.readlink(skillTarget(f.homeDirectory, 'claude', name)), path.join(legacyRoot, 'skills', name));
+});
+
+test('a stable copy removed by hand leaves its links as owned and broken, and the next apply rebuilds it', async t => {
+  const f = await npxFixture(t), { setupToolkit, doctorToolkit } = await import(moduleUrl);
+  const options = { homeDirectory: f.homeDirectory, toolkitRoot: f.ephemeral, agent: 'claude', environment: { PATH: '' }, runNpm: f.npm };
+  await setupToolkit({ ...options, apply: true });
+  await fs.rm(path.join(f.homeDirectory, '.nexakit/versiones'), { recursive: true });
+  assert.equal((await setupToolkit(options)).skills[0].state, 'roto-propio');
+  await setupToolkit({ ...options, apply: true });
+  assert.equal(f.npm.calls.length, 2);
+  assert.equal((await doctorToolkit(options)).skills[0].state, 'instalado');
+});
+
+test('Antigravity is included when agy is installed or its folder exists, and only then', async t => {
+  const f = await fixture(t), { setupToolkit, doctorToolkit } = await import(moduleUrl);
+  const bin = path.join(f.root, 'bin');
+  await fs.mkdir(bin);
+  await fs.writeFile(path.join(bin, 'agy'), '', { mode: 0o755 });
+  const without = await setupToolkit({ ...f, agent: 'all', apply: true, environment: { PATH: '' } });
+  assert.deepEqual(without.clients, ['codex', 'claude']);
+  assert.equal(await exists(path.join(f.homeDirectory, '.gemini')), false);
+  const withAgy = await setupToolkit({ ...f, agent: 'all', apply: true, environment: { PATH: bin } });
+  assert.deepEqual(withAgy.clients, ['codex', 'claude', 'antigravity']);
+  assert.equal(await fs.realpath(path.join(f.homeDirectory, '.gemini/antigravity-cli/skills/example')), path.join(f.toolkitRoot, 'skills/example'));
+  const doctor = await doctorToolkit({ ...f, agent: 'all', environment: { PATH: bin } });
+  assert.equal(doctor.clients.antigravity.available, true);
+  assert.equal('antigravity' in doctor.mcp, false, 'Antigravity has no coordination MCP in this phase');
+
+  const g = await fixture(t);
+  await fs.mkdir(path.join(g.homeDirectory, '.gemini/antigravity-cli'), { recursive: true });
+  assert.deepEqual((await setupToolkit({ ...g, agent: 'all', environment: { PATH: '' } })).clients, ['codex', 'claude', 'antigravity']);
+  assert.deepEqual((await setupToolkit({ ...g, agent: 'antigravity', environment: { PATH: '' } })).clients, ['antigravity']);
+  await assert.rejects(setupToolkit({ ...g, agent: 'gemini', environment: { PATH: '' } }), /antigravity/u);
+});
+
+test('MCP states and registration commands only for what needs them, with the node on the PATH', async t => {
+  const f = await fixture(t), { setupToolkit } = await import(moduleUrl);
+  await fs.mkdir(path.join(f.toolkitRoot, 'bin'));
+  await fs.writeFile(path.join(f.toolkitRoot, 'bin/agent-toolkit-mcp.js'), '');
+  const dev = await writeFakeInstall(path.join(f.root, 'dev'));
+  const bin = path.join(f.root, 'bin');
+  await fs.mkdir(bin);
+  await fs.writeFile(path.join(bin, 'node'), '', { mode: 0o755 });
+  const config = path.join(f.homeDirectory, '.claude.json');
+  const write = server => fs.writeFile(config, JSON.stringify({ mcpServers: { 'agent-toolkit-workflow': server } }));
+  const check = async () => {
+    const result = await setupToolkit({ ...f, agent: 'claude', environment: { PATH: bin } });
+    return { state: result.mcp.states.claude.state, command: result.mcp.registrationCommands.claude };
+  };
+  const runs = file => ({ command: 'node', args: [file] });
+  const add = `claude mcp add --scope user --transport stdio agent-toolkit-workflow -- '${path.join(bin, 'node')}' '${path.join(f.toolkitRoot, 'bin/agent-toolkit-mcp.js')}'`;
+
+  await write(runs(path.join(f.toolkitRoot, 'bin/agent-toolkit-mcp.js')));
+  assert.deepEqual(await check(), { state: 'instalado', command: undefined });
+  await write(runs(path.join(dev, 'bin/agent-toolkit-mcp.js')));
+  assert.deepEqual(await check(), { state: 'otra-copia', command: undefined });
+  await write({ command: 'python', args: ['server.py'] });
+  assert.deepEqual(await check(), { state: 'conflicto', command: undefined });
+  await write(runs(path.join(f.root, '.npm/_npx/zz/node_modules/nexakit/bin/agent-toolkit-mcp.js')));
+  assert.deepEqual(await check(), { state: 'efimero', command: `claude mcp remove agent-toolkit-workflow -s user && ${add}` });
+  const dead = path.join(f.root, 'dead/bin/agent-toolkit-mcp.js');
+  await write(runs(dead));
+  assert.deepEqual(await check(), { state: 'roto-ajeno', command: undefined });
+  await register(f.homeDirectory, [{ destino: 'mcp:claude:agent-toolkit-workflow', apunta: dead, raiz: path.join(f.root, 'dead') }]);
+  assert.deepEqual(await check(), { state: 'roto-propio', command: `claude mcp remove agent-toolkit-workflow -s user && ${add}` });
+  await fs.rm(config);
+  assert.deepEqual(await check(), { state: 'falta', command: add });
+});
+
+test('a registration command is never suggested for a stable copy that does not exist yet', async t => {
+  const f = await npxFixture(t), { setupToolkit } = await import(moduleUrl);
+  const options = { homeDirectory: f.homeDirectory, toolkitRoot: f.ephemeral, agent: 'claude', environment: { PATH: '' }, runNpm: f.npm };
+  const preview = await setupToolkit(options);
+  assert.deepEqual([preview.mcp.registrationCommands, preview.mcp.registrationPending], [{}, ['claude']]);
+  const applied = await setupToolkit({ ...options, apply: true });
+  assert.match(applied.mcp.registrationCommands.claude, /\.nexakit[\\/]actual[\\/]bin[\\/]agent-toolkit-mcp\.js/u);
+  assert.equal(applied.mcp.registrationPending, undefined);
+});
+
+// A lock that is lost after `keep` checks, to prove each write checks it first.
+const losingLock = keep => {
+  let checks = 0;
+  return async () => ({ token: 'x', release: async () => {}, assertHeld: async () => { if (++checks > keep) throw Object.assign(new Error('perdido'), { code: 'perdido' }); } });
+};
+
+test('setup checks it still holds the lock right before writing each link', async t => {
+  const f = await fixture(t), { setupToolkit } = await import(moduleUrl);
+  await fs.mkdir(path.join(f.toolkitRoot, 'skills', 'b'));
+  await fs.writeFile(path.join(f.toolkitRoot, 'skills', 'b', 'SKILL.md'), 'x');
+  await assert.rejects(setupToolkit({ ...f, agent: 'claude', apply: true, environment: { PATH: '' }, acquire: losingLock(1) }), { code: 'perdido' });
+  assert.deepEqual(await fs.readdir(path.join(f.homeDirectory, '.claude/skills')), ['b'], 'only the link written while the lock was held');
+});
+
+test('the node registered for the MCP is never one inside an npx cache', async t => {
+  const f = await fixture(t), { resolveNodeExecutable } = await import(moduleUrl);
+  const ephemeral = path.join(f.root, '.npm/_npx/abc/node_modules/.bin'), stable = path.join(f.root, 'bin');
+  for (const dir of [ephemeral, stable]) {
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, 'node'), '', { mode: 0o755 });
+  }
+  assert.equal(await resolveNodeExecutable({ PATH: [ephemeral, stable].join(path.delimiter) }), path.join(stable, 'node'));
+  assert.equal(await resolveNodeExecutable({ PATH: ephemeral }), process.execPath, 'falls back to the node running nexakit when it is not ephemeral');
+});
+
+test('a node reached through a link into an npx cache is not registered either', async t => {
+  const f = await fixture(t), { resolveNodeExecutable } = await import(moduleUrl);
+  const cached = path.join(f.root, '.npm/_npx/abc/node_modules/.bin/node');
+  await fs.mkdir(path.dirname(cached), { recursive: true });
+  await fs.writeFile(cached, '', { mode: 0o755 });
+  const viaLink = path.join(f.root, 'enlace'), stable = path.join(f.root, 'estable');
+  await fs.mkdir(viaLink);
+  await fs.mkdir(stable);
+  await fs.symlink(cached, path.join(viaLink, 'node'));
+  await fs.writeFile(path.join(stable, 'node'), '', { mode: 0o755 });
+  assert.equal(await resolveNodeExecutable({ PATH: [viaLink, stable].join(path.delimiter) }), path.join(stable, 'node'));
 });

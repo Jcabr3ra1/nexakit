@@ -29,8 +29,6 @@ cabecera propia de NexaKit con tipografía de terminal y una vista real del asis
   asistente por pasos, con foco lila y progreso visible. Se integra en la cabecera del README.
 - [`agent-toolkit-mark.svg`](agent-toolkit-mark.svg): variante vectorial
   simplificada creada durante la exploración de la propuesta 02.
-- [`agent-toolkit-mark-v1.png`](agent-toolkit-mark-v1.png): propuesta anterior en
-  verde menta y azul petróleo.
 
 ## Alcance
 
