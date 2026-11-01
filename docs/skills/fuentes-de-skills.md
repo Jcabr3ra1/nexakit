@@ -128,7 +128,7 @@ con las skills [`spec-driven-development`](../../skills/spec-driven-development/
 [`depurar`](../../skills/depurar/SKILL.md),
 [`desarrollo-con-pruebas`](../../skills/desarrollo-con-pruebas/SKILL.md) y
 [`quality-gate`](../../skills/quality-gate/SKILL.md), cada una con su copia de
-`LICENSE.txt` original. El [diseño de adaptación](../planes/2026-10-28-integracion-superpowers-design.md)
+`LICENSE.txt` original. El diseño de adaptación (en la memoria de Obsidian de NexaKit (`03-IMPLEMENTACION/Planes/2026-10-28-integracion-superpowers-design.md`)
 conserva las decisiones de alcance. El plugin original y las adaptaciones de
 Toolkit mantienen mantenimiento separado.
 

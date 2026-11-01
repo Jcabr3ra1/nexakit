@@ -6,3 +6,8 @@ coverage/
 assets/runtime/package-lock.json
 *.tgz
 .agent-toolkit/
+
+# Planes y diseños de trabajo: viven en la memoria de Obsidian
+docs/planes/
+docs/superpowers/
+.superpowers/

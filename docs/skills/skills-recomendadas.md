@@ -45,7 +45,7 @@ Prioridad reiterada por el usuario el 2026-10-28: **MCP Builder y seguridad**.
 Ambas están incorporadas con [evaluación inicial acotada](evidencias/2026-10-28-evaluacion-inicial-mcp-seguridad.md).
 La evaluación funcional general sigue pendiente. El contexto tecnológico y el siguiente
 resultado de cada pendiente están en
-[Stack actual y prioridades](../planes/2026-10-28-stack-y-prioridades.md).
+«Stack actual y prioridades», en la memoria de Obsidian de NexaKit (`03-IMPLEMENTACION/Planes/2026-10-28-stack-y-prioridades.md`).
 
 Para el Toolkit actual, evaluar primero mcp-builder y differential-review en
 tareas reales acotadas. Para el catálogo reutilizable, incorporar después perfiles

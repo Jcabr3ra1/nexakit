@@ -10,8 +10,8 @@ usa la [guía de comandos](guias/guia-de-comandos.md) o la
 ## Criterio de organización
 
 Cada documento vive junto a su tema: guías, memoria, clientes, modelos,
-coordinación, operación o skills. Los planes específicos permanecen junto a su
-tema; `planes/` reúne diseños y planes transversales. Los comandos de las guías
+coordinación, operación o skills. Los planes y diseños de trabajo no se versionan:
+viven en la memoria de Obsidian de NexaKit (`03-IMPLEMENTACION/Planes/`). Los comandos de las guías
 se ejecutan desde la raíz del repositorio salvo indicación explícita.
 
 Al añadir documentación, elige una carpeta existente y actualiza este índice.
@@ -104,12 +104,3 @@ Para una reorganización, utiliza la skill
 - [Integración y adaptación de Superpowers](skills/superpowers-integration.md)
 - [Fuentes de las skills](skills/fuentes-de-skills.md)
 
-## Planes y diseños transversales
-
-- [Plan de implementación del recomendador](planes/2026-10-28-recomendador-skills-plan.md)
-- [Vista previa de planificación del recomendador](planes/2026-10-28-recomendador-vista-previa.md)
-- [Diseño del recomendador de skills](planes/2026-10-28-recomendador-skills-design.md)
-- [Stack actual y prioridades de Agent Toolkit](planes/2026-10-28-stack-y-prioridades.md)
-- [Adaptación selectiva de Superpowers a Agent Toolkit](planes/2026-10-28-integracion-superpowers-design.md)
-- [Organización de documentación y skill reutilizable](planes/2026-10-28-organizacion-documentacion-design.md)
-- [Plan de organización de documentación](planes/2026-10-28-organizacion-documentacion-plan.md)
