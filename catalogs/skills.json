@@ -967,7 +967,11 @@
         "anySignals": [
           "express",
           "fastify",
-          "hono"
+          "hono",
+          "django",
+          "fastapi",
+          "flask",
+          "rest-api"
         ],
         "profiles": [
           "backend"
