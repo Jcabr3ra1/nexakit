@@ -61,7 +61,7 @@ async function baseSkillNames(root) {
 async function catalogNames(root) {
   try { return JSON.parse(await fs.readFile(path.join(root, 'catalogs/skills.json'), 'utf8')).skills.map(s => s.name); } catch { return []; }
 }
-async function packageVersion(root) {
+export async function packageVersion(root) {
   return JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8')).version;
 }
 async function parents(home, target, create = false) {
@@ -76,7 +76,7 @@ async function parents(home, target, create = false) {
     if (info && (!info.isDirectory() || info.isSymbolicLink())) throw new Error('Un directorio de instalación está ocupado o es un enlace.');
   }
 }
-function registrationCommand(client, current, nodePath, entry) {
+export function registrationCommand(client, current, nodePath, entry) {
   const add = client === 'codex'
     ? `codex mcp add agent-toolkit-workflow -- ${quote(nodePath)} ${quote(entry)}`
     : `claude mcp add --scope user --transport stdio agent-toolkit-workflow -- ${quote(nodePath)} ${quote(entry)}`;
