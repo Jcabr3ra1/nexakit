@@ -90,8 +90,8 @@ const FRAMEWORK_CONFIG_HINTS = Object.freeze([
 const OUT_OF_COVERAGE_MANIFESTS = Object.freeze(['go.mod', 'composer.json', 'Gemfile']);
 // A folder with any of these is described by them; its README is read only when it has none. A README often lists
 // technologies it documents or talks about (nexakit's own README names every catalog technology) without using them.
-const PROJECT_MANIFESTS = Object.freeze(['package.json', 'requirements.txt', 'pyproject.toml', 'manage.py', 'Cargo.toml',
-  'src-tauri/Cargo.toml', ...OUT_OF_COVERAGE_MANIFESTS]);
+const PROJECT_MANIFESTS = Object.freeze(['package.json', 'tsconfig.json', 'requirements.txt', 'pyproject.toml', 'manage.py',
+  'Cargo.toml', 'tauri.conf.json', 'src-tauri/Cargo.toml', 'src-tauri/tauri.conf.json', ...OUT_OF_COVERAGE_MANIFESTS]);
 
 // README dictionary. Case-insensitive, whole words only: "Reactor", "vue-router" or "flask_utils" do not count,
 // "Express.js" does.
@@ -147,6 +147,50 @@ async function foldersToScan(root, git, limits) {
   return ['.', ...names.slice(0, MAX_SUBFOLDERS)];
 }
 
+// Dependency names declared in a pyproject.toml, without a TOML parser: PEP 621 `[project] dependencies`,
+// `[project.optional-dependencies]` and `[dependency-groups]` arrays, and Poetry `[tool.poetry.*dependencies]` keys.
+// Metadata such as `keywords` or `description` is never read.
+function pyprojectDependencies(text) {
+  const names = new Set();
+  const nameOf = spec => spec.match(/^\s*([A-Za-z0-9._-]+)/u)?.[1].toLowerCase().replace(/_/gu, '-');
+  let table = '';
+  let array = null; // text of a dependency array being collected, until its closing bracket
+  for (const raw of text.split(/\r?\n/u)) {
+    if (array !== null) {
+      array += `\n${raw}`;
+    } else {
+      const header = raw.match(/^\s*\[\[?\s*([^\]]+?)\s*\]\]?\s*(?:#.*)?$/u);
+      if (header) { table = header[1].replace(/["'\s]/gu, ''); continue; }
+      const key = raw.match(/^\s*["']?([A-Za-z0-9._-]+)["']?\s*=\s*(.*)$/u);
+      if (!key) continue;
+      const arrayTable = table === 'project.optional-dependencies' || table === 'dependency-groups';
+      if ((table === 'project' && key[1] === 'dependencies') || arrayTable) {
+        if (key[2].trimStart().startsWith('[')) array = key[2];
+      } else if (/^tool\.poetry(?:\.group\.[^.]+)?\.(?:dev-)?dependencies$/u.test(table)) {
+        const name = nameOf(key[1]);
+        if (name) names.add(name);
+      }
+      if (array === null) continue;
+    }
+    // Close the array at the bracket that balances the first one, ignoring brackets inside strings ("pkg[extra]").
+    let depth = 0, quote = null, end = -1;
+    for (let i = 0; i < array.length && end < 0; i++) {
+      const ch = array[i];
+      if (quote) { if (ch === quote) quote = null; } else if (ch === '"' || ch === "'") quote = ch;
+      else if (ch === '#') { const nl = array.indexOf('\n', i); if (nl < 0) break; i = nl; }
+      else if (ch === '[') depth++;
+      else if (ch === ']' && --depth === 0) end = i;
+    }
+    if (end < 0) continue;
+    for (const match of array.slice(0, end).matchAll(/"([^"]*)"|'([^']*)'/gu)) {
+      const name = nameOf(match[1] ?? match[2]);
+      if (name) names.add(name);
+    }
+    array = null;
+  }
+  return names;
+}
+
 function pythonPackages(text, kind) {
   const found = new Set();
   if (kind === 'requirements') {
@@ -157,18 +201,24 @@ function pythonPackages(text, kind) {
       if (name && PYTHON_PACKAGE_TO_SIGNALS[name]) found.add(name);
     }
   } else {
-    // pyproject.toml without a TOML parser: a package name that starts a string or a key, comments removed.
-    const code = text.split(/\r?\n/u).map(line => line.replace(/#.*$/u, '')).join('\n');
-    const pattern = /(?:^|["'\s[,{])(djangorestframework|django|fastapi|flask)(?=\s*(?:[<>=~![;"',]|$))/gimu;
-    for (const match of code.matchAll(pattern)) found.add(match[1].toLowerCase());
+    for (const name of pyprojectDependencies(text)) if (PYTHON_PACKAGE_TO_SIGNALS[name]) found.add(name);
   }
   return [...found].sort();
 }
 
-async function scanFolder(root, folder, add, limits) {
+async function scanFolder(root, folder, add, limits, { nestedAllowed }) {
   const dir = path.join(root, folder);
   const shown = name => (folder === '.' ? name : `${folder}/${name}`);
-  const fileInfo = name => lstatOrNull(path.join(dir, name));
+  // Nested manifests (src-tauri/…) are read only through a real folder that Git does not ignore: a link could
+  // lead out of the project.
+  const nestedDir = nestedAllowed ? lstatOrNull(path.join(dir, 'src-tauri')) : Promise.resolve(null);
+  const fileInfo = async name => {
+    if (name.includes('/')) {
+      const info = await nestedDir;
+      if (!info?.isDirectory() || info.isSymbolicLink()) return null;
+    }
+    return lstatOrNull(path.join(dir, name));
+  };
   const readSmall = async name => {
     const info = await fileInfo(name);
     return isPlainFile(info) && info.size <= MAX_MANIFEST_BYTES ? fs.readFile(path.join(dir, name), 'utf8') : null;
@@ -248,7 +298,11 @@ export async function detectSignals(root, { git = false } = {}) {
     found.set(id, sources);
   };
   const scanned = await foldersToScan(root, git, limits);
-  for (const folder of scanned) await scanFolder(root, folder, add, limits);
+  const nestedIgnored = git ? gitIgnored(root, scanned.map(folder => (folder === '.' ? 'src-tauri' : `${folder}/src-tauri`))) : new Set();
+  for (const folder of scanned) {
+    const nested = folder === '.' ? 'src-tauri' : `${folder}/src-tauri`;
+    await scanFolder(root, folder, add, limits, { nestedAllowed: !nestedIgnored.has(nested) });
+  }
 
   const byPath = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
   const signals = [...found.entries()]

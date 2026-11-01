@@ -153,3 +153,44 @@ test('existing manifest limits keep working, now per folder', async t => {
   assert.ok(result.limits.some(l => /web\/next\.config\.mjs/u.test(l)));
   assert.ok(result.limits.some(l => /svc\/go\.mod/u.test(l)));
 });
+
+test('a src-tauri folder that is a link out of the project is not read', async t => {
+  const outside = await tree(t, { 'Cargo.toml': '[dependencies]\ntauri = "2"\n', 'tauri.conf.json': '{}' });
+  const root = await tree(t, { 'desktop/README.md': 'x' });
+  await fs.symlink(outside, path.join(root, 'src-tauri'));
+  await fs.symlink(outside, path.join(root, 'desktop', 'src-tauri'));
+  assert.deepEqual(ids(await detectSignals(root, { git: false })), []);
+});
+
+test('a src-tauri folder that Git ignores gives no signals', async t => {
+  const root = await tree(t, {
+    '.gitignore': 'src-tauri/\ndesktop/src-tauri/\n',
+    'src-tauri/Cargo.toml': '[dependencies]\ntauri = "2"\n',
+    'desktop/src-tauri/tauri.conf.json': '{}'
+  });
+  execFileSync('git', ['init', '-q', root], { stdio: 'ignore' });
+  assert.deepEqual(ids(await detectSignals(root, { git: true })), []);
+});
+
+test('tsconfig.json and Tauri configs also count as manifests for the README rule', async t => {
+  const root = await tree(t, {
+    'web/tsconfig.json': '{}',
+    'web/README.md': 'Ejemplo: así se haría en React.\n',
+    'app/src-tauri/tauri.conf.json': '{}',
+    'app/README.md': 'Comparado con Vue.\n'
+  });
+  assert.deepEqual(ids(await detectSignals(root, { git: false })), ['tauri', 'typescript']);
+});
+
+test('pyproject.toml packages come only from dependency declarations', async t => {
+  const root = await tree(t, {
+    'meta/pyproject.toml': '[project]\nname = "x"\nkeywords = ["flask", "django"]\ndescription = "como fastapi"\ndependencies = []\n',
+    'pep621/pyproject.toml': '[project]\nname = "y"\ndependencies = [\n  "fastapi[all]>=0.110",\n  \'requests\',\n]\n[project.optional-dependencies]\nweb = ["flask>=3"]\n',
+    'poetry/pyproject.toml': '[tool.poetry.dependencies]\npython = "^3.12"\nDjango = { version = "^5" }\n[tool.poetry.group.dev.dependencies]\npytest = "*"\n[tool.black]\nflask = "no"\n'
+  });
+  const result = await detectSignals(root, { git: false });
+  assert.deepEqual(ids(result), ['django', 'fastapi', 'flask', 'python']);
+  assert.deepEqual(result.signals.find(s => s.id === 'django').sources, ['poetry/pyproject.toml (django)']);
+  assert.deepEqual(result.signals.find(s => s.id === 'flask').sources, ['pep621/pyproject.toml (flask)']);
+  assert.deepEqual(result.signals.find(s => s.id === 'python').sources, ['meta/pyproject.toml', 'pep621/pyproject.toml', 'poetry/pyproject.toml']);
+});
