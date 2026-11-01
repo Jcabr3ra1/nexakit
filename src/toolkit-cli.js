@@ -2,6 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 import { pathToFileURL } from 'node:url';
+import { resolveProjectRoot } from './project-root.js';
 import { loadSkillCatalog } from './skill-catalog.js';
 import {
   applyToolkitDetach,
@@ -147,8 +148,10 @@ export async function runToolkitCli(
         ? pathToFileURL(path.join(options.toolkitRoot, 'catalogs/skills.json'))
         : undefined;
       const catalog = await loadSkillCatalog(catalogUrl ? { catalogUrl } : {});
+      // Skills are installed at the repository root, so they are removed from there too.
+      const { root } = await resolveProjectRoot(parsed.projectRoot, options.homeDirectory ? { homeDirectory: options.homeDirectory } : {});
       const plan = await planToolkitDetach({
-        projectRoot: parsed.projectRoot,
+        projectRoot: root,
         includeGlobal: parsed.global,
         agent: parsed.agent,
         catalog,

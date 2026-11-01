@@ -119,10 +119,9 @@ test('malformed package.json, unconfirmed config files, non-Node manifests and s
     'Cargo.toml': '[package]\nname = "rust-app"\n'
   });
   const brokenInspection = await inspectSkillProject(broken, { toolkitRoot: TOOLKIT_ROOT });
-  assert.deepEqual(brokenInspection.signals, []);
+  assert.deepEqual(brokenInspection.signals.map(s => s.id), ['rust'], 'Cargo.toml is covered now');
   assert.equal(brokenInspection.limits.some(l => /package\.json/u.test(l)), true);
   assert.equal(brokenInspection.limits.some(l => /next\.config\.mjs/u.test(l)), true);
-  assert.equal(brokenInspection.limits.some(l => /Cargo\.toml/u.test(l)), true);
 
   const customCatalogData = structuredClone(baseCatalog);
   const fd = customCatalogData.skills.find(s => s.name === 'frontend-design');
@@ -724,4 +723,46 @@ test('the catalog knows the new signals and api-design-principles uses the Pytho
   assert.equal(SIGNAL_LABELS['rest-api'], 'API REST');
   assert.equal(SIGNAL_LABELS.django, 'Django');
   assert.equal(catalog.skills.find(s => s.name === 'nodejs-backend-patterns').matching.anySignals.join(), 'express,fastify,hono');
+});
+
+async function gitProject(t, files) {
+  const root = await tempProject(t, files);
+  const { execFileSync } = await import('node:child_process');
+  execFileSync('git', ['init', '-q', root], { stdio: 'ignore' });
+  const home = path.join(root, '.home-for-test');
+  await fs.mkdir(home);
+  return { repo: root, home };
+}
+
+test('from a subfolder, inspection and recommendations target the repository root', async t => {
+  const { inspectSkillProject, recommendSkills } = await import('../src/skill-recommendations.js');
+  const { repo, home } = await gitProject(t, { 'frontend/README.md': 'Interfaz en React.\n' });
+  const inspection = await inspectSkillProject(path.join(repo, 'frontend'), { toolkitRoot: TOOLKIT_ROOT, homeDirectory: home });
+  assert.equal(inspection.projectRoot, repo);
+  assert.equal(inspection.project.fromSubfolder, true);
+  assert.equal(inspection.project.git, true);
+  assert.equal(inspection.projectName, inspection.project.displayName, 'no package.json at the root: the folder name');
+  const report = recommendSkills({ catalog: await loadSkillCatalog(), inspection });
+  assert.equal(report.candidates[0].name, 'frontend-design');
+  assert.deepEqual(report.candidates.find(c => c.name === 'vercel-react-best-practices').reasons, ['React (frontend/README.md)']);
+});
+
+test('candidates are ordered by how many detected signals they match', async t => {
+  const { inspectSkillProject, recommendSkills } = await import('../src/skill-recommendations.js');
+  const root = await tempProject(t, { 'README.md': 'React con Next.js y Express.\n' });
+  const inspection = await inspectSkillProject(root, { toolkitRoot: TOOLKIT_ROOT });
+  const list = recommendSkills({ catalog: await loadSkillCatalog(), inspection }).candidates.map(c => [c.name, c.matchedSignals.length]);
+  assert.deepEqual(list.slice(0, 4), [['frontend-design', 2], ['vercel-composition-patterns', 2], ['vercel-react-best-practices', 2], ['web-design-guidelines', 2]]);
+  assert.deepEqual(list.slice(4), [['api-design-principles', 1], ['nodejs-backend-patterns', 1]]);
+});
+
+test('detach run from a subfolder plans the removal at the repository root', async t => {
+  const { runToolkitCli } = await import('../src/toolkit-cli.js');
+  const { repo, home } = await gitProject(t, { 'frontend/README.md': 'React\n' });
+  let json = '';
+  const code = await runToolkitCli(['detach', '--project', path.join(repo, 'frontend'), '--json'], {
+    out: text => { json += text; }, err: () => {}, options: { toolkitRoot: TOOLKIT_ROOT, homeDirectory: home }
+  });
+  assert.equal(code, 0);
+  assert.equal(JSON.parse(json).projectRoot, repo);
 });

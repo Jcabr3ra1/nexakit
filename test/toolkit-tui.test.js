@@ -345,14 +345,14 @@ test('final configuration preserves skill choices, discards drafts, and installs
     setupOptions: { homeDirectory: env.homeDirectory, codexHome: env.codexHome, toolkitRoot: env.toolkitRoot, environment: { PATH: '' } } });
   t.after(() => tty.sendKey('\x03'));
   await tty.waitFor(/Paso 1 de 3/u);
-  tty.sendKey(' '); // explicitly select nodejs-backend-patterns; leave api-design-principles unchecked
+  tty.sendKey(' '); // explicitly select api-design-principles; leave nodejs-backend-patterns unchecked
   tty.sendKey('\r');
   await tty.waitFor(/Paso 2 de 3/u);
   tty.sendKey(' '); // select differential-review
   tty.sendKey('\r');
   await tty.waitFor(/Paso 3 de 3/u);
-  assert.match(tty.getFrame(), /nodejs-backend-patterns/u);
-  assert.doesNotMatch(tty.getFrame(), /api-design-principles/u);
+  assert.match(tty.getFrame(), /api-design-principles/u);
+  assert.doesNotMatch(tty.getFrame(), /nodejs-backend-patterns/u);
 
   tty.sendKey('e');
   await tty.waitFor(/Editar configuración/u);
@@ -371,7 +371,7 @@ test('final configuration preserves skill choices, discards drafts, and installs
   await tty.waitFor(/\[Enter \/ s\] confirmar e instalar/u);
   assert.match(tty.getFrame(), /Solo Claude Code/u);
   assert.match(tty.getFrame(), /skills-lock\.json/u);
-  assert.doesNotMatch(tty.getFrame(), /api-design-principles/u);
+  assert.doesNotMatch(tty.getFrame(), /nodejs-backend-patterns/u);
   assert.deepEqual(await fs.readdir(env.homeDirectory), []);
   assert.equal(await fs.access(path.join(env.projectRoot, '.agent-toolkit')).then(() => true, () => false), false);
 
@@ -380,8 +380,8 @@ test('final configuration preserves skill choices, discards drafts, and installs
   assert.match(tty.getFrame(), /\[x\] differential-review/u);
   tty.sendKey('\x7f');
   await tty.waitFor(/Paso 1 de 3/u);
-  assert.match(tty.getFrame(), /\[ \] api-design-principles/u);
-  assert.match(tty.getFrame(), /\[x\] nodejs-backend-patterns/u);
+  assert.match(tty.getFrame(), /\[ \] nodejs-backend-patterns/u);
+  assert.match(tty.getFrame(), /\[x\] api-design-principles/u);
   tty.sendKey('\r');
   await tty.waitFor(/Paso 2 de 3/u);
   tty.sendKey('\r');
@@ -391,9 +391,9 @@ test('final configuration preserves skill choices, discards drafts, and installs
   tty.sendKey('q');
   assert.equal(await running, 0);
   const lock = JSON.parse(await fs.readFile(path.join(env.projectRoot, '.agent-toolkit/skills-lock.json'), 'utf8'));
-  assert.ok(lock.skills['nodejs-backend-patterns']);
+  assert.ok(lock.skills['api-design-principles']);
   assert.ok(lock.skills['differential-review']);
-  assert.equal(lock.skills['api-design-principles'], undefined);
+  assert.equal(lock.skills['nodejs-backend-patterns'], undefined);
   assert.equal(await fs.access(path.join(env.projectRoot, '.agents/skills')).then(() => true, () => false), false);
   assert.equal((await fs.lstat(path.join(env.projectRoot, '.claude/skills/differential-review'))).isSymbolicLink(), false);
 });

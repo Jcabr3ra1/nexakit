@@ -6,6 +6,8 @@ import { acquireLock } from './install-lock.js';
 import { isRegistered, readRegistry, recordEntries } from './install-registry.js';
 import { classifyLink, relinkIfUnchanged } from './link-states.js';
 import { IS_WINDOWS } from './platform.js';
+import { detectSignals, SIGNAL_LABELS } from './project-signals.js';
+import { resolveProjectRoot } from './project-root.js';
 import { loadSkillCatalog } from './skill-catalog.js';
 import { actualRoot, ensureStableInstall, nexakitDir } from './stable-install.js';
 import { TOOLKIT_ROOT, globalSkillTarget, resolveRoots } from './toolkit-setup.js';
@@ -34,82 +36,7 @@ const IGNORE_BLOCK_END = '# <<< agent-toolkit (managed) <<<';
 const LEVEL_AGENT_HEADER = '# Generado por `agent-toolkit-inbox agentes`.';
 const LEVEL_AGENT_NAMES = ['nivel_ligero.toml', 'nivel_normal.toml', 'nivel_exigente.toml', 'nivel_alto.toml'];
 
-export const SIGNAL_LABELS = Object.freeze({
-  nodejs: 'Node.js',
-  typescript: 'TypeScript',
-  'mcp-sdk': 'MCP SDK',
-  react: 'React',
-  nextjs: 'Next.js',
-  tailwindcss: 'Tailwind CSS',
-  astro: 'Astro',
-  vue: 'Vue',
-  svelte: 'Svelte',
-  supabase: 'Supabase',
-  postgres: 'PostgreSQL',
-  express: 'Express',
-  fastify: 'Fastify',
-  hono: 'Hono',
-  playwright: 'Playwright',
-  vitest: 'Vitest',
-  django: 'Django',
-  fastapi: 'FastAPI',
-  flask: 'Flask',
-  tauri: 'Tauri',
-  python: 'Python',
-  rust: 'Rust',
-  'rest-api': 'API REST'
-});
-
-const PACKAGE_TO_SIGNAL = Object.freeze({
-  '@modelcontextprotocol/sdk': 'mcp-sdk',
-  '@modelcontextprotocol/server': 'mcp-sdk',
-  '@modelcontextprotocol/client': 'mcp-sdk',
-  fastmcp: 'mcp-sdk',
-  next: 'nextjs',
-  react: 'react',
-  'react-dom': 'react',
-  tailwindcss: 'tailwindcss',
-  '@tailwindcss/postcss': 'tailwindcss',
-  '@tailwindcss/vite': 'tailwindcss',
-  typescript: 'typescript',
-  astro: 'astro',
-  vue: 'vue',
-  nuxt: 'vue',
-  svelte: 'svelte',
-  '@sveltejs/kit': 'svelte',
-  '@supabase/supabase-js': 'supabase',
-  '@supabase/ssr': 'supabase',
-  pg: 'postgres',
-  postgres: 'postgres',
-  '@neondatabase/serverless': 'postgres',
-  'drizzle-orm': 'postgres',
-  '@prisma/client': 'postgres',
-  express: 'express',
-  fastify: 'fastify',
-  hono: 'hono',
-  '@hono/node-server': 'hono',
-  playwright: 'playwright',
-  '@playwright/test': 'playwright',
-  vitest: 'vitest'
-});
-
-const FRAMEWORK_CONFIG_HINTS = Object.freeze([
-  ['next.config.js', 'nextjs'],
-  ['next.config.mjs', 'nextjs'],
-  ['next.config.ts', 'nextjs'],
-  ['tailwind.config.js', 'tailwindcss'],
-  ['tailwind.config.ts', 'tailwindcss'],
-  ['astro.config.mjs', 'astro'],
-  ['svelte.config.js', 'svelte']
-]);
-
-const OUT_OF_COVERAGE_MANIFESTS = Object.freeze([
-  'Cargo.toml',
-  'pyproject.toml',
-  'go.mod',
-  'composer.json',
-  'Gemfile'
-]);
+export { SIGNAL_LABELS };
 
 const normalizedPath = value => (IS_WINDOWS ? value.toLowerCase() : value);
 const lstatOrNull = target => fs.lstat(target).catch(err => {
@@ -253,84 +180,36 @@ async function inspectProjectSkills(projectRoot, toolkitRoot, catalogByName, cli
   }));
 }
 
-export async function inspectSkillProject(projectRoot, { client, toolkitRoot = TOOLKIT_ROOT, catalog } = {}) {
+async function rootPackageName(root) {
+  const info = await lstatOrNull(path.join(root, 'package.json'));
+  if (!info?.isFile() || info.isSymbolicLink() || info.size > MAX_MANIFEST_BYTES) return null;
+  try {
+    const name = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'))?.name;
+    return typeof name === 'string' && name.trim() ? name.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function inspectSkillProject(projectRoot, { client, toolkitRoot = TOOLKIT_ROOT, catalog, homeDirectory } = {}) {
   if (client !== undefined && !VALID_CLIENTS.has(client)) {
     throw new Error('El filtro --client solo admite codex o claude.');
   }
-  const root = await fs.realpath(projectRoot);
+  // The project is the whole Git repository, even when nexakit runs from one of its subfolders.
+  const project = await resolveProjectRoot(projectRoot, homeDirectory ? { homeDirectory } : {});
+  const root = project.root;
   const resolvedToolkit = await fs.realpath(toolkitRoot);
   const activeCatalog = catalog ?? await loadSkillCatalog();
   const catalogByName = new Map(activeCatalog.skills.map(s => [s.name, s]));
-
-  const signalSources = new Map();
-  const addSignal = (id, source) => {
-    const list = signalSources.get(id) ?? [];
-    if (!list.includes(source)) list.push(source);
-    signalSources.set(id, list);
-  };
-
-  const limits = [];
-  let projectName = path.basename(root);
-
-  const pkgPath = path.join(root, 'package.json');
-  const pkgInfo = await lstatOrNull(pkgPath);
-  if (pkgInfo) {
-    if (!pkgInfo.isFile() || pkgInfo.isSymbolicLink() || pkgInfo.size > MAX_MANIFEST_BYTES) {
-      limits.push('package.json excede el límite o no es un archivo regular; no se inspeccionó.');
-    } else {
-      let pkg = null;
-      try {
-        pkg = JSON.parse(await fs.readFile(pkgPath, 'utf8'));
-      } catch {
-        limits.push('package.json no contiene JSON válido; no se dedujeron dependencias Node.');
-      }
-      if (pkg && typeof pkg === 'object' && !Array.isArray(pkg)) {
-        if (typeof pkg.name === 'string' && pkg.name.trim()) projectName = pkg.name.trim();
-        addSignal('nodejs', 'package.json');
-        for (const field of ['dependencies', 'devDependencies', 'peerDependencies']) {
-          const deps = pkg[field];
-          if (!deps || typeof deps !== 'object' || Array.isArray(deps)) continue;
-          for (const depName of Object.keys(deps)) {
-            const mapped = PACKAGE_TO_SIGNAL[depName];
-            if (mapped) addSignal(mapped, `package.json (${depName})`);
-          }
-        }
-      }
-    }
-  }
-
-  const tsconfigInfo = await lstatOrNull(path.join(root, 'tsconfig.json'));
-  if (tsconfigInfo?.isFile() && !tsconfigInfo.isSymbolicLink()) {
-    addSignal('typescript', 'tsconfig.json');
-  }
-
-  for (const [configFile, expectedSignal] of FRAMEWORK_CONFIG_HINTS) {
-    const info = await lstatOrNull(path.join(root, configFile));
-    if (info?.isFile() && !info.isSymbolicLink() && !signalSources.has(expectedSignal)) {
-      limits.push(`Configuración observada sin dependencia confirmada en package.json: ${configFile}.`);
-    }
-  }
-
-  for (const foreignManifest of OUT_OF_COVERAGE_MANIFESTS) {
-    const info = await lstatOrNull(path.join(root, foreignManifest));
-    if (info && !info.isSymbolicLink()) {
-      limits.push(`Stack fuera de cobertura automática observada: ${foreignManifest}.`);
-    }
-  }
-
-  if (!pkgInfo && signalSources.size === 0 && limits.length === 0) {
-    limits.push('No se detectó package.json en la raíz; cobertura automática inicial enfocada en Node.js.');
-  }
-
-  const signals = [...signalSources.entries()]
-    .map(([id, sources]) => ({ id, label: SIGNAL_LABELS[id] ?? id, sources }))
-    .sort((a, b) => a.id.localeCompare(b.id));
+  const { signals, limits } = await detectSignals(root, { git: project.git });
+  const projectName = await rootPackageName(root) ?? project.displayName;
 
   const installed = await inspectProjectSkills(root, resolvedToolkit, catalogByName, client);
   const coupling = await inspectProjectCoupling(root, resolvedToolkit);
 
   return {
     projectRoot: root,
+    project,
     projectName,
     signals,
     installed,
@@ -614,6 +493,7 @@ export function recommendSkills({ catalog, inspection, profile, client, clients 
       revision: skill.revision,
       installedPath: skill.installedPath,
       reasons,
+      matchedSignals,
       overlapsWith: [...skill.overlapsWith],
       reviewStatus: skill.review.status,
       reviewNotes: skill.review.notes,
@@ -646,6 +526,10 @@ export function recommendSkills({ catalog, inspection, profile, client, clients 
   }
 
   optional.sort((a, b) => a.name.localeCompare(b.name));
+  // The skills that match more of what was detected come first; ties by name.
+  const byMatches = (a, b) => b.matchedSignals.length - a.matchedSignals.length || a.name.localeCompare(b.name);
+  recommended.sort(byMatches);
+  candidates.sort(byMatches);
 
   const externalCandidates = [];
   for (const ref of catalog.externalReferences) {

@@ -50,15 +50,24 @@ test('a README-only project gets its technologies from each README', async t => 
   assert.deepEqual(result.limits, []);
 });
 
-test('a manifest is cited before a README for the same signal', async t => {
+test('a folder with a manifest is described by it, not by its README', async t => {
   const root = await tree(t, {
+    'README.md': 'Proyecto con Django.\n',
     'backend/requirements.txt': '# deps\nDjango>=5.1\nfastapi[all]==0.115 ; python_version > "3.10"\nrequests\n',
-    'backend/README.md': 'API con Django.\n'
+    'backend/README.md': 'API con Django; el cliente usa React.\n',
+    'tool/package.json': { name: 'tool' },
+    'tool/README.md': 'Documenta React, Vue, Supabase y Playwright.\n'
   });
   const result = await detectSignals(root, { git: false });
-  assert.deepEqual(result.signals.find(s => s.id === 'django').sources, ['backend/requirements.txt (django)', 'backend/README.md']);
+  assert.deepEqual(ids(result), ['django', 'fastapi', 'nodejs', 'python']);
+  assert.deepEqual(result.signals.find(s => s.id === 'django').sources, ['backend/requirements.txt (django)', 'README.md'], 'manifests first');
   assert.deepEqual(result.signals.find(s => s.id === 'fastapi').sources, ['backend/requirements.txt (fastapi)']);
   assert.deepEqual(result.signals.find(s => s.id === 'python').sources, ['backend/requirements.txt']);
+});
+
+test('an out-of-coverage manifest also stops its README from being read', async t => {
+  const root = await tree(t, { 'svc/go.mod': 'module x\n', 'svc/README.md': 'Panel en React.\n' });
+  assert.deepEqual(ids(await detectSignals(root, { git: false })), []);
 });
 
 test('Python, Rust and Tauri manifests give their signals', async t => {

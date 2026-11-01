@@ -1,5 +1,6 @@
-// Detects the technologies of a project from its root and its first-level subfolders: manifests first, README
-// keywords second. Each signal keeps where it came from, so a suggestion can say why. Read-only and bounded.
+// Detects the technologies of a project from its root and its first-level subfolders: from the manifests, or from
+// the README keywords in a folder without manifests. Each signal keeps where it came from, so a suggestion can
+// say why. Read-only and bounded.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -87,6 +88,10 @@ const FRAMEWORK_CONFIG_HINTS = Object.freeze([
 ]);
 
 const OUT_OF_COVERAGE_MANIFESTS = Object.freeze(['go.mod', 'composer.json', 'Gemfile']);
+// A folder with any of these is described by them; its README is read only when it has none. A README often lists
+// technologies it documents or talks about (nexakit's own README names every catalog technology) without using them.
+const PROJECT_MANIFESTS = Object.freeze(['package.json', 'requirements.txt', 'pyproject.toml', 'manage.py', 'Cargo.toml',
+  'src-tauri/Cargo.toml', ...OUT_OF_COVERAGE_MANIFESTS]);
 
 // README dictionary. Case-insensitive, whole words only: "Reactor", "vue-router" or "flask_utils" do not count,
 // "Express.js" does.
@@ -225,6 +230,7 @@ async function scanFolder(root, folder, add, limits) {
     if (info && !info.isSymbolicLink()) limits.push(`Stack fuera de cobertura automática observada: ${shown(foreign)}.`);
   }
 
+  for (const manifest of PROJECT_MANIFESTS) if (await fileInfo(manifest)) return;
   const entries = await fs.readdir(dir, { withFileTypes: true });
   const readme = entries.filter(entry => entry.name.toLowerCase() === 'readme.md').map(entry => entry.name).sort()[0];
   if (readme && isPlainFile(await fileInfo(readme))) {
