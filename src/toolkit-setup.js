@@ -46,11 +46,12 @@ export async function resolveRoots({ toolkitRoot, homeDirectory }) {
   const ephemeral = isEphemeralPath(sourceRoot);
   return { sourceRoot, linkRoot: ephemeral ? actualRoot(homeDirectory) : sourceRoot, ephemeral };
 }
-// A node inside an npx cache disappears with it, so it is never the one registered.
+// A node inside an npx cache disappears with it, so it is never the one registered, not even through a link.
+const outsideNpxCache = async file => !isEphemeralPath(file) && !isEphemeralPath(await fs.realpath(file).catch(() => file));
 export async function resolveNodeExecutable(environment) {
-  const stable = await findExecutable('node', environment, file => !isEphemeralPath(file));
+  const stable = await findExecutable('node', environment, outsideNpxCache);
   if (stable) return stable;
-  return isEphemeralPath(process.execPath) ? 'node' : process.execPath;
+  return (await outsideNpxCache(process.execPath)) ? process.execPath : 'node';
 }
 async function baseSkillNames(root) {
   const names = (await fs.readdir(path.join(root, 'skills'), { withFileTypes: true }))
@@ -292,7 +293,7 @@ async function findExecutable(name, environment, accept = () => true) {
     : [''];
   for (const folder of (environment.PATH ?? '').split(path.delimiter).filter(Boolean)) {
     for (const extension of extensions) {
-      try { const file = path.join(folder, name + extension); await fs.access(file, constants.X_OK); if ((await fs.stat(file)).isFile() && accept(file)) return file; } catch {}
+      try { const file = path.join(folder, name + extension); await fs.access(file, constants.X_OK); if ((await fs.stat(file)).isFile() && await accept(file)) return file; } catch {}
     }
   }
   return null;

@@ -389,3 +389,16 @@ test('the node registered for the MCP is never one inside an npx cache', async t
   assert.equal(await resolveNodeExecutable({ PATH: [ephemeral, stable].join(path.delimiter) }), path.join(stable, 'node'));
   assert.equal(await resolveNodeExecutable({ PATH: ephemeral }), process.execPath, 'falls back to the node running nexakit when it is not ephemeral');
 });
+
+test('a node reached through a link into an npx cache is not registered either', async t => {
+  const f = await fixture(t), { resolveNodeExecutable } = await import(moduleUrl);
+  const cached = path.join(f.root, '.npm/_npx/abc/node_modules/.bin/node');
+  await fs.mkdir(path.dirname(cached), { recursive: true });
+  await fs.writeFile(cached, '', { mode: 0o755 });
+  const viaLink = path.join(f.root, 'enlace'), stable = path.join(f.root, 'estable');
+  await fs.mkdir(viaLink);
+  await fs.mkdir(stable);
+  await fs.symlink(cached, path.join(viaLink, 'node'));
+  await fs.writeFile(path.join(stable, 'node'), '', { mode: 0o755 });
+  assert.equal(await resolveNodeExecutable({ PATH: [viaLink, stable].join(path.delimiter) }), path.join(stable, 'node'));
+});

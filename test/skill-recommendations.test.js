@@ -686,9 +686,30 @@ test('a project apply checks it still holds the lock right before each write', a
   const { applyProjectSkillInstall } = await import('../src/skill-recommendations.js');
   const s = await projectSetup(t);
   let checks = 0;
-  const acquire = async () => ({ release: async () => {}, assertHeld: async () => { if (++checks > 1) throw Object.assign(new Error('perdido'), { code: 'perdido' }); } });
+  // Two checks per link: before creating its folder and before writing it. The third one is lost.
+  const acquire = async () => ({ release: async () => {}, assertHeld: async () => { if (++checks > 2) throw Object.assign(new Error('perdido'), { code: 'perdido' }); } });
   await assert.rejects(applyProjectSkillInstall(await plan(s, { skillNames: ['frontend-design'] }), { acquire }), { code: 'perdido' });
   const made = [];
   for (const folder of ['.agents', '.claude']) if (await exists(path.join(s.project, folder, 'skills/frontend-design'))) made.push(folder);
   assert.deepEqual(made, ['.agents'], 'only the first link, written while the lock was held');
+});
+
+test('a copy and the project metadata stop writing as soon as the lock is lost', async t => {
+  const { applyProjectSkillInstall } = await import('../src/skill-recommendations.js');
+  const losing = keep => async () => {
+    let checks = 0;
+    return { release: async () => {}, assertHeld: async () => { if (++checks > keep) throw Object.assign(new Error('perdido'), { code: 'perdido' }); } };
+  };
+  // Copy mode: the lock holds for the parent folders and the copy folder, then is lost before the first file.
+  const s = await projectSetup(t);
+  await assert.rejects(applyProjectSkillInstall(await plan(s, { skillNames: ['vercel-react-best-practices'], agent: 'claude', mode: 'copy' }), { acquire: losing(2) }), { code: 'perdido' });
+  const target = path.join(s.project, '.claude/skills/vercel-react-best-practices');
+  const files = await fs.readdir(target, { recursive: true }).catch(() => []);
+  assert.deepEqual(files.filter(name => name.includes('.')), [], 'no file of the copy was written after the lock was lost');
+
+  // Link mode: the link is written while the lock holds; the metadata is not once it is lost.
+  const l = await projectSetup(t);
+  await assert.rejects(applyProjectSkillInstall(await plan(l, { skillNames: ['frontend-design'], agent: 'claude' }), { acquire: losing(2) }), { code: 'perdido' });
+  assert.equal(await exists(path.join(l.project, '.claude/skills/frontend-design')), true);
+  assert.equal(await exists(path.join(l.project, '.agent-toolkit')), false, 'the metadata folder is not created without the lock');
 });

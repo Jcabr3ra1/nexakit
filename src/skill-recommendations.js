@@ -881,7 +881,8 @@ export async function planProjectSkillInstall({
   };
 }
 
-async function copyVerifiedSkillDirectory(sourceDir, targetDir, catalogEntry) {
+async function copyVerifiedSkillDirectory(sourceDir, targetDir, catalogEntry, lock) {
+  await lock?.assertHeld();
   await fs.mkdir(targetDir, { recursive: true, mode: 0o755 });
   if (catalogEntry) {
     for (const file of catalogEntry.files) {
@@ -892,15 +893,18 @@ async function copyVerifiedSkillDirectory(sourceDir, targetDir, catalogEntry) {
       if (actualHash !== file.sha256) {
         throw new Error(`Integridad SHA-256 rechazada durante la copia de ${catalogEntry.name} (${file.path}).`);
       }
+      await lock?.assertHeld();
       await fs.mkdir(path.dirname(dstFile), { recursive: true, mode: 0o755 });
       await fs.writeFile(dstFile, bytes, { mode: 0o644 });
     }
   } else {
+    await lock?.assertHeld();
     await fs.cp(sourceDir, targetDir, { recursive: true, dereference: false });
   }
 }
 
-async function writeSkillsLockfile(lockfilePath, activeEntriesBySkill) {
+async function writeSkillsLockfile(lockfilePath, activeEntriesBySkill, lock) {
+  await lock?.assertHeld();
   await fs.mkdir(path.dirname(lockfilePath), { recursive: true, mode: 0o755 });
   const existingInfo = await lstatOrNull(lockfilePath);
   if (existingInfo && (!existingInfo.isFile() || existingInfo.isSymbolicLink())) {
@@ -941,6 +945,7 @@ async function writeSkillsLockfile(lockfilePath, activeEntriesBySkill) {
     generatedBy: 'nexakit',
     skills: sortedSkills
   };
+  await lock?.assertHeld();
   await fs.writeFile(lockfilePath, JSON.stringify(payload, null, 2) + '\n', { mode: 0o644 });
   return true;
 }
@@ -950,13 +955,15 @@ async function writeProjectManifestAndIgnore({
   mode,
   gitIgnore,
   prevManifest,
-  coupledEntriesMap
+  coupledEntriesMap,
+  lock
 }) {
   const stateDir = path.join(projectRoot, PROJECT_TOOLKIT_DIR);
   const stateStat = await lstatOrNull(stateDir);
   if (stateStat && (!stateStat.isDirectory() || stateStat.isSymbolicLink())) {
     return { manifestWritten: false, gitIgnoreUpdated: false };
   }
+  await lock?.assertHeld();
   await fs.mkdir(stateDir, { recursive: true, mode: 0o755 });
 
   const entries = [...coupledEntriesMap.values()].sort((a, b) =>
@@ -969,17 +976,20 @@ async function writeProjectManifestAndIgnore({
   if (gitIgnore !== 'none') {
     const info = await inspectGitIgnoreTarget(projectRoot, gitIgnore);
     if (!info.conflict && !info.unavailable && info.targetPath) {
+      await lock?.assertHeld();
       await fs.mkdir(path.dirname(info.targetPath), { recursive: true, mode: 0o755 });
       const currentStat = await lstatOrNull(info.targetPath);
       if (!currentStat) {
         if (gitIgnore === 'gitignore') createdIgnoreFile = true;
         const nextText = upsertManagedIgnoreBlock('', entries.map(e => e.relativePath));
+        await lock?.assertHeld();
         await fs.writeFile(info.targetPath, nextText, { mode: 0o644 });
         gitIgnoreUpdated = true;
       } else if (currentStat.isFile() && !currentStat.isSymbolicLink()) {
         const prevText = await fs.readFile(info.targetPath, 'utf8');
         const nextText = upsertManagedIgnoreBlock(prevText, entries.map(e => e.relativePath));
         if (nextText !== prevText) {
+          await lock?.assertHeld();
           await fs.writeFile(info.targetPath, nextText, { mode: 0o644 });
         }
         gitIgnoreUpdated = true;
@@ -994,6 +1004,7 @@ async function writeProjectManifestAndIgnore({
           const otherText = await fs.readFile(otherInfo.targetPath, 'utf8');
           const cleaned = removeManagedIgnoreBlock(otherText);
           if (cleaned.changed) {
+            await lock?.assertHeld();
             if (!cleaned.content && otherStrategy === 'gitignore' && prevManifest?.createdIgnoreFile) {
               await fs.unlink(otherInfo.targetPath).catch(() => {});
               createdIgnoreFile = false;
@@ -1014,6 +1025,7 @@ async function writeProjectManifestAndIgnore({
     createdIgnoreFile,
     entries
   };
+  await lock?.assertHeld();
   await fs.writeFile(
     path.join(stateDir, PROJECT_MANIFEST_FILE),
     JSON.stringify(manifestPayload, null, 2) + '\n',
@@ -1108,6 +1120,7 @@ async function applyProjectSkillInstallLocked(plan, { registryEntries, lock, wri
       continue;
     }
 
+    await lock?.assertHeld();
     await ensureSafeProjectParents(plan.projectRoot, item.target, true);
     let literal;
     if (mode === 'symlink') {
@@ -1149,8 +1162,7 @@ async function applyProjectSkillInstallLocked(plan, { registryEntries, lock, wri
           continue;
         }
       }
-      await lock?.assertHeld();
-      await copyVerifiedSkillDirectory(item.source, item.target, catalogEntry);
+      await copyVerifiedSkillDirectory(item.source, item.target, catalogEntry, lock);
     }
 
     created++;
@@ -1176,10 +1188,10 @@ async function applyProjectSkillInstallLocked(plan, { registryEntries, lock, wri
       if (catalogEntry) activeMap.set(skillName, { catalogEntry, clients });
     }
     if (activeMap.size > 0) {
-      await lock?.assertHeld();
       lockfileWritten = await writeSkillsLockfile(
         plan.lockfilePath ?? path.join(plan.projectRoot, PROJECT_TOOLKIT_DIR, PROJECT_LOCKFILE_NAME),
-        activeMap
+        activeMap,
+        lock
       );
     }
   }
@@ -1187,13 +1199,13 @@ async function applyProjectSkillInstallLocked(plan, { registryEntries, lock, wri
   let manifestWritten = false;
   let gitIgnoreUpdated = false;
   if (writeMetadata && !plan.stateDirConflict && (coupledEntriesMap.size > 0 || lockfileWritten)) {
-    await lock?.assertHeld();
     const res = await writeProjectManifestAndIgnore({
       projectRoot: plan.projectRoot,
       mode,
       gitIgnore,
       prevManifest,
-      coupledEntriesMap
+      coupledEntriesMap,
+      lock
     });
     manifestWritten = res.manifestWritten;
     gitIgnoreUpdated = res.gitIgnoreUpdated;

@@ -51,22 +51,14 @@ async function createExclusive(file, record) {
   }
 }
 
-// Called only for an owner judged dead. The removal happens under a second, short-lived guard, so two
-// recoverers can never act at once: otherwise one could remove a lock another process had just taken.
-// Under the guard only the dead lock can be at `file`: acquirers create it only when it is absent, and its
-// dead owner will not release it. Returns 'recuperado', or 'ocupado' when someone else is recovering it.
-async function recover(file, judgedMark, { record, hostname, isAlive }) {
+// Called only for an owner judged dead. The removal happens under a second guard, so two recoverers can never
+// act at once. Under the guard only the dead lock can be at `file`: acquirers create it only when it is absent,
+// and its dead owner will not release it. The guard itself is never removed by anyone but its holder: a guard
+// left by a process that died in the middle of a recovery (a few milliseconds) must be removed by hand, because
+// removing it by reading and deleting would reopen the same race. Returns 'recuperado' or 'ocupado'.
+async function recover(file, judgedMark, { record }) {
   const guard = `${file}.recuperando`;
-  if (!(await createExclusive(guard, record))) {
-    const holder = await readOwner(guard);
-    if (holder.state === 'ok' && holder.owner.equipo === hostname && !isAlive(holder.owner.pid)) {
-      // A recoverer died mid-recovery. Its guard is removed only if it is still the one judged dead.
-      const again = await readOwner(guard);
-      if (again.state === 'ok' && again.owner.marca === holder.owner.marca) await fs.unlink(guard).catch(ignoreMissing);
-      return 'recuperado';
-    }
-    return 'ocupado';
-  }
+  if (!(await createExclusive(guard, record))) return 'ocupado';
   try {
     const again = await readOwner(file);
     if (again.state === 'ok' && again.owner.marca === judgedMark) await fs.unlink(file).catch(ignoreMissing);
@@ -102,12 +94,18 @@ export async function acquireLock(nexakitDir, {
         throw new LockError('otro-equipo', `El bloqueo de nexakit lo creó otro equipo (${owner.equipo}). Si no hay ninguna instalación en curso, bórralo a mano: ${file}`);
       }
       // Age never decides: a live owner keeps the lock however long it takes.
-      if (!isAlive(owner.pid) && await recover(file, owner.marca, { record, hostname, isAlive }) === 'recuperado') {
+      if (!isAlive(owner.pid) && await recover(file, owner.marca, { record }) === 'recuperado') {
         if (++recoveries > MAX_RECOVERIES) throw busy(file, false);
         continue;
       }
     }
-    if (Date.now() >= deadline) throw busy(file, current.state === 'unreadable');
+    if (Date.now() >= deadline) {
+      const guard = await readOwner(`${file}.recuperando`);
+      if (guard.state === 'ok' && guard.owner.equipo === hostname && !isAlive(guard.owner.pid)) {
+        throw new LockError('ocupado', `Se interrumpió una recuperación anterior del bloqueo de nexakit. Si no hay ninguna instalación en curso, borra a mano: ${file}.recuperando`);
+      }
+      throw busy(file, current.state === 'unreadable');
+    }
     await sleep(Math.max(1, Math.min(pollMs, deadline - Date.now())));
   }
 }

@@ -123,13 +123,16 @@ test('while another live process recovers a dead lock, the rest wait and touch n
   assert.equal(JSON.parse(await fs.readFile(guard, 'utf8')).marca, 'otro-recuperador');
 });
 
-test('the guard of a recoverer that died is cleared and the lock is recovered', async t => {
+test('a guard left by a recoverer that died is never removed automatically; the error says where it is', async t => {
   const f = await fixture(t), { acquireLock } = await import(moduleUrl);
   await f.write({ pid: 9999 });
-  await fs.writeFile(path.join(f.dir, 'bloqueo.recuperando'), JSON.stringify({ pid: 8888, equipo: os.hostname(), hora: new Date().toISOString(), marca: 'recuperador-muerto' }));
-  const lock = await acquireLock(f.dir, { ...fast, pid: 1111, isAlive: pid => ![9999, 8888].includes(pid) });
-  assert.equal((await f.read()).marca, lock.token);
-  assert.deepEqual(await fs.readdir(f.dir), ['bloqueo']);
+  const guard = path.join(f.dir, 'bloqueo.recuperando');
+  await fs.writeFile(guard, JSON.stringify({ pid: 8888, equipo: os.hostname(), hora: new Date().toISOString(), marca: 'recuperador-muerto' }));
+  const lock = before => fs.readFile(before, 'utf8');
+  const [lockBefore, guardBefore] = [await lock(f.file), await lock(guard)];
+  await assert.rejects(acquireLock(f.dir, { ...fast, pid: 1111, isAlive: pid => ![9999, 8888].includes(pid) }),
+    error => error.code === 'ocupado' && error.message.includes(guard));
+  assert.deepEqual([await lock(f.file), await lock(guard)], [lockBefore, guardBefore], 'nothing is removed by guessing');
 });
 
 test('many runs recovering the same dead lock at once still end with exactly one owner', async t => {
