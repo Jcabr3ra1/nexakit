@@ -147,46 +147,69 @@ async function foldersToScan(root, git, limits) {
   return ['.', ...names.slice(0, MAX_SUBFOLDERS)];
 }
 
+// Reads the TOML array that starts at `text[0]` ('['). Returns where it ends and the strings it holds directly or in
+// nested arrays, skipping comments and inline tables (`{ include-group = "dev" }` names a group, not a package).
+// Double-quoted strings honour backslash escapes; single-quoted ones are literal.
+function tomlArrayStrings(text) {
+  const strings = [];
+  let depth = 0, braces = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '"' || ch === "'") {
+      let value = '', j = i + 1;
+      for (; j < text.length && text[j] !== ch && text[j] !== '\n'; j++) {
+        if (ch === '"' && text[j] === '\\' && j + 1 < text.length) j++;
+        value += text[j];
+      }
+      if (braces === 0) strings.push(value);
+      i = j;
+    } else if (ch === '#') {
+      const newline = text.indexOf('\n', i);
+      if (newline < 0) break;
+      i = newline;
+    } else if (ch === '{') braces++;
+    else if (ch === '}') braces--;
+    else if (ch === '[') depth++;
+    else if (ch === ']' && --depth === 0) return { end: i, strings };
+  }
+  return { end: -1, strings: [] };
+}
+
 // Dependency names declared in a pyproject.toml, without a TOML parser: PEP 621 `[project] dependencies`,
 // `[project.optional-dependencies]` and `[dependency-groups]` arrays, and Poetry `[tool.poetry.*dependencies]` keys.
 // Metadata such as `keywords` or `description` is never read.
 function pyprojectDependencies(text) {
   const names = new Set();
   const nameOf = spec => spec.match(/^\s*([A-Za-z0-9._-]+)/u)?.[1].toLowerCase().replace(/_/gu, '-');
+  const lines = text.split(/\r?\n/u);
   let table = '';
-  let array = null; // text of a dependency array being collected, until its closing bracket
-  for (const raw of text.split(/\r?\n/u)) {
-    if (array !== null) {
-      array += `\n${raw}`;
-    } else {
-      const header = raw.match(/^\s*\[\[?\s*([^\]]+?)\s*\]\]?\s*(?:#.*)?$/u);
-      if (header) { table = header[1].replace(/["'\s]/gu, ''); continue; }
-      const key = raw.match(/^\s*["']?([A-Za-z0-9._-]+)["']?\s*=\s*(.*)$/u);
-      if (!key) continue;
-      const arrayTable = table === 'project.optional-dependencies' || table === 'dependency-groups';
-      if ((table === 'project' && key[1] === 'dependencies') || arrayTable) {
-        if (key[2].trimStart().startsWith('[')) array = key[2];
-      } else if (/^tool\.poetry(?:\.group\.[^.]+)?\.(?:dev-)?dependencies$/u.test(table)) {
-        const name = nameOf(key[1]);
-        if (name) names.add(name);
-      }
-      if (array === null) continue;
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    const header = line.match(/^\s*(\[\[?)\s*([^\]]+?)\s*\]\]?\s*(?:#.*)?$/u);
+    if (header) {
+      // Arrays of tables ([[…]]) never hold dependencies here; quoted parts stay quoted so they never match.
+      table = header[1] === '[[' ? null : header[2].replace(/\s+/gu, '');
+      continue;
     }
-    // Close the array at the bracket that balances the first one, ignoring brackets inside strings ("pkg[extra]").
-    let depth = 0, quote = null, end = -1;
-    for (let i = 0; i < array.length && end < 0; i++) {
-      const ch = array[i];
-      if (quote) { if (ch === quote) quote = null; } else if (ch === '"' || ch === "'") quote = ch;
-      else if (ch === '#') { const nl = array.indexOf('\n', i); if (nl < 0) break; i = nl; }
-      else if (ch === '[') depth++;
-      else if (ch === ']' && --depth === 0) end = i;
+    const key = line.match(/^\s*([A-Za-z0-9._-]+|"[^"]*"|'[^']*')\s*=\s*(.*)$/u);
+    if (!key || table === null) continue;
+    const keyName = key[1].replace(/^["']|["']$/gu, '');
+    if (/^tool\.poetry(?:\.group\.[^.]+)?\.(?:dev-)?dependencies$/u.test(table)) {
+      const name = nameOf(keyName);
+      if (name) names.add(name);
+      continue;
     }
+    const holdsArray = (table === 'project' && keyName === 'dependencies')
+      || table === 'project.optional-dependencies' || table === 'dependency-groups';
+    if (!holdsArray || !key[2].trimStart().startsWith('[')) continue;
+    const rest = [key[2].trimStart(), ...lines.slice(index + 1)].join('\n');
+    const { end, strings } = tomlArrayStrings(rest);
     if (end < 0) continue;
-    for (const match of array.slice(0, end).matchAll(/"([^"]*)"|'([^']*)'/gu)) {
-      const name = nameOf(match[1] ?? match[2]);
+    for (const spec of strings) {
+      const name = nameOf(spec);
       if (name) names.add(name);
     }
-    array = null;
+    index += rest.slice(0, end).split('\n').length - 1;
   }
   return names;
 }

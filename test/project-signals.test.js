@@ -194,3 +194,16 @@ test('pyproject.toml packages come only from dependency declarations', async t =
   assert.deepEqual(result.signals.find(s => s.id === 'flask').sources, ['pep621/pyproject.toml (flask)']);
   assert.deepEqual(result.signals.find(s => s.id === 'python').sources, ['meta/pyproject.toml', 'pep621/pyproject.toml', 'poetry/pyproject.toml']);
 });
+
+test('pyproject.toml: comments, escapes, include-group and other tables do not invent packages', async t => {
+  const root = await tree(t, {
+    'comentado/pyproject.toml': '[project]\ndependencies = [\n# "flask",\n  "requests",  # "django"\n]\n',
+    'escape/pyproject.toml': '[project]\ndependencies = ["requests; os_name == \\"x]y\\"", "fastapi"]\n',
+    'grupos/pyproject.toml': '[dependency-groups]\nflask = ["requests"]\ndev = [{include-group = "flask"}, "django>=5"]\n',
+    'tablas/pyproject.toml': '[[project.optional-dependencies]]\nweb = ["flask"]\n["project.optional-dependencies"]\nweb = ["flask"]\n'
+  });
+  const result = await detectSignals(root, { git: false });
+  assert.deepEqual(ids(result), ['django', 'fastapi', 'python']);
+  assert.deepEqual(result.signals.find(s => s.id === 'django').sources, ['grupos/pyproject.toml (django)']);
+  assert.deepEqual(result.signals.find(s => s.id === 'fastapi').sources, ['escape/pyproject.toml (fastapi)']);
+});
