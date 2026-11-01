@@ -361,7 +361,7 @@ test('a registration command is never suggested for a stable copy that does not 
   const preview = await setupToolkit(options);
   assert.deepEqual([preview.mcp.registrationCommands, preview.mcp.registrationPending], [{}, ['claude']]);
   const applied = await setupToolkit({ ...options, apply: true });
-  assert.match(applied.mcp.registrationCommands.claude, /\.nexakit\/actual\/bin\/agent-toolkit-mcp\.js/u);
+  assert.match(applied.mcp.registrationCommands.claude, /\.nexakit[\\/]actual[\\/]bin[\\/]agent-toolkit-mcp\.js/u);
   assert.equal(applied.mcp.registrationPending, undefined);
 });
 
