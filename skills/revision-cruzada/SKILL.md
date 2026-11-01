@@ -264,73 +264,32 @@ aprobación, y anuncia igualmente la recomendación en tu terminal.
 
 ## Guía de recomendación
 
-Recomienda la configuración más ligera que pueda hacer bien el trabajo; no elijas
-la máxima por defecto. Escribe siempre el **nombre exacto** que la terminal
-acepta en `/model`; nunca «modelo estándar», «modelo ligero» ni una familia
-genérica.
+Para el modelo y el esfuerzo de cada trabajo (el tuyo y el del revisor), sigue la
+skill `elegir-modelo`: ejecuta su script para tener los nombres reales de Claude,
+Codex y Antigravity y aplica sus tablas. Es la única fuente de ese criterio; aquí
+solo queda lo propio de la revisión cruzada.
 
-- **Claude:** `haiku`, `sonnet` u `opus`; esfuerzo `low`, `medium`, `high`,
-  `xhigh` o `max`.
-- **Codex:** los modelos que muestra su `/model`. **Antes de recomendar,
-  ejecuta** `node <toolkit>/bin/agent-toolkit-inbox.js modelos`: lee la lista
-  real de Codex y su configuración actual y genera la tabla de niveles con los
-  nombres vigentes. Usa esa tabla; la de abajo es solo el ejemplo del
-  2026-10-26 (`gpt-6-luna`, `gpt-6.1-sol` y `gpt-6-astra`).
-  Esfuerzo `low`, `medium`, `high`, `xhigh`, `max` o `ultra` (`ultra` solo en
-  los modelos que lo muestran en `/model`).
-- Si no conoces los modelos de la otra terminal, dilo y pide al usuario que los
-  mire en su `/model`; no inventes nombres.
+**Nivel de cada trabajo.** Los encargos, las rondas y el plugin `niveles` usan
+cuatro niveles; se deducen de lo que decida `elegir-modelo`:
 
-### Clasificar la tarea
+| Nivel | Modelo | Esfuerzo |
+| --- | --- | --- |
+| Ligero | el ligero | el por defecto, o `low` |
+| Normal | el de uso diario | el por defecto |
+| Exigente | el de uso diario | `high`: verificar importa o un error escondido costaría caro |
+| Alto | el más capaz | el por defecto, o `high` si además verificar importa |
 
-Clasifica **cada trabajo por separado** (el tuyo y el del revisor) con estos
-cinco criterios. No estimes a ojo: puntúa, suma y aplica las reglas.
+Reglas propias de la revisión cruzada:
 
-| Criterio | 0 | 1 | 2 |
-| --- | --- | --- | --- |
-| Riesgo | Texto, estilo, documentación | Lógica normal | Seguridad, autenticación, permisos, datos o migraciones, dinero, concurrencia, hardware físico o producción |
-| Tamaño | 1 archivo y menos de 30 líneas | 2 a 5 archivos o menos de 200 líneas | Más que eso |
-| Ambigüedad | Instrucciones exactas | Hay que decidir detalles | Hay que diseñar o investigar |
-| Contexto | El cambio se entiende solo | Requiere leer pruebas o llamadores | Cruza módulos o servicios |
-| Tipo de trabajo | Coordinar | Revisar o escribir código | Planificar o diseñar arquitectura |
-
-Total de 0 a 10 → nivel (ejemplo; usa la tabla que genera `modelos`):
-
-| Total | Nivel | Claude | Codex |
-| --- | --- | --- | --- |
-| 0–2 | Ligero | `haiku`, `low` | `gpt-6-luna`, `low` |
-| 3–4 | Normal | `sonnet`, `medium` | `gpt-6.1-sol`, `medium` |
-| 5–6 | Exigente | `sonnet`, `high` | `gpt-6.1-sol`, `high` |
-| 7–10 | Alto | `opus`, `high` | `gpt-6-astra`, `high` |
-
-Reglas que corrigen el total:
-
-1. **Riesgo 2 fija un mínimo de Exigente**, aunque el cambio sea pequeño: un
-   error en seguridad, datos o hardware cuesta más que el modelo.
-2. **Sube un nivel solo si el intento de corrección falló**: las pruebas siguen
-   en rojo, o la revisión nueva encuentra sin resolver el mismo hallazgo de
-   severidad alta. Un primer hallazgo alto no sube de nivel: se corrige con la
-   misma configuración, porque encontrarlo es justo para lo que sirve la
-   revisión.
-3. **Coordinar nunca pasa de Normal**: solo se reparte trabajo y se leen
-   informes.
-4. `xhigh` solo cuando `high` ya falló en esa tarea en Alto; `max` (Claude y
-   Codex) solo cuando `xhigh` también falló, y `ultra` (Codex) solo cuando `max`
-   falló.
-5. Ante la duda entre dos niveles, elige el menor y dilo; el revisor y la
+1. **Coordinar nunca pasa de Normal**: solo se reparte trabajo y se leen informes.
+2. **Un primer hallazgo alto no sube de nivel**: se corrige con la misma
+   configuración, porque encontrarlo es justo para lo que sirve la revisión. Si
+   el intento de corrección falla, diagnostica como indica `elegir-modelo`: si
+   faltó saber, sube el modelo; si faltó verificar, el esfuerzo.
+3. **Alto se justifica con una línea**: qué hace falta saber que el modelo de uso
+   diario no sabe. Si no puedes decirlo, baja a Exigente.
+4. Ante la duda entre dos niveles, elige el menor y dilo; el revisor y la
    reevaluación lo corregirán si se queda corto.
-6. **Alto se justifica con una línea**: qué criterio puntúa 2 y por qué no basta
-   Exigente. Si no puedes decirlo, baja un nivel.
-
-Si dos reglas chocan, manda el número menor de la lista salvo la 3, que siempre
-limita el trabajo de coordinar.
-
-Ejemplo: corregir la validación de firma de `firma-meta.guard.ts` y sus pruebas
-→ riesgo 2, tamaño 1, ambigüedad 0, contexto 1, escribir código 1 = 5 →
-Exigente → Claude `sonnet`, `high`. Revisar ese cambio → la misma suma → Codex
-`gpt-6.1-sol`, `high`. Coordinar el encargo → riesgo 2, tamaño 0, ambigüedad
-0, contexto 0, coordinar 0 = 2, pero la regla 1 lo subiría a Exigente y la
-regla 3 lo limita a Normal → `sonnet`, `medium`.
 
 ## Formatos
 
@@ -341,26 +300,24 @@ Usa estos formatos tal cual, en Markdown, sin añadir párrafos alrededor.
 ```markdown
 **Configuración recomendada**
 
-| Agente | Trabajo | Riesgo | Tamaño | Ambigüedad | Contexto | Tipo | Total | Nivel | Modelo | Esfuerzo |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Claude (principal) | Corregir la validación de firma | 2 | 1 | 0 | 1 | 1 | 5 | Exigente | `sonnet` | `high` |
-| Codex (revisor) | Revisar ese cambio | 2 | 1 | 0 | 1 | 1 | 5 | Exigente | `gpt-6.1-sol` | `high` |
+| Agente | Trabajo | Nivel | Modelo | Esfuerzo | Por qué |
+| --- | --- | --- | --- | --- | --- |
+| Claude (principal) | Corregir la validación de firma | Exigente | `sonnet` | `high` | Bug en código existente: verificar importa |
+| Codex (revisor) | Revisar ese cambio | Exigente | `gpt-6.1-sol` | `high` | La misma razón |
 
-Reglas aplicadas: riesgo 2 → mínimo Exigente.
-Ahora uso: `sonnet`, `low` → **conviene cambiar con `/model`** (o «no lo puedo comprobar»).
-Para cambiarla: Codex → `/model` · Claude → `Esc`, `/model` y otra vez `/revision-cruzada atender`.
+Guardado ahora: Claude `sonnet` · `medium` → **conviene cambiar con `/effort high`**; Codex `gpt-6.1-sol` · `medium` → cambiar con `/model`.
+Para cambiarla: Codex → `/model` · Claude → `/model` y `/effort`; se comprueba con `/effort status`.
 
 ¿La confirmas o prefieres otra?
 ```
 
-Con Ligero o Normal en ambos lados, usa solo una línea y sigue: «Claude
-(principal): Normal (4), `sonnet`, `medium` · Codex (revisor): Normal (3),
-`gpt-6.1-sol`, `medium`. Empiezo; interrúmpeme si prefieres otra.»
+Si ambos trabajos quedan en Ligero o Normal, usa solo una línea y sigue: «Claude
+(principal): Normal, `sonnet`, `medium` · Codex (revisor): Normal,
+`gpt-6.1-sol`, el por defecto (`low`). Empiezo; interrúmpeme si prefieres otra.»
 
-Adapta los nombres de agente a quién es principal. Para saber tu configuración
-actual: el comando `modelos` muestra el modelo y el esfuerzo que Codex tiene
-configurados y los que Claude dejó guardados con `/model` (una sesión iniciada
-con `--model` puede diferir). Si no puedes comprobarla, escríbelo así.
+Adapta los nombres de agente a quién es principal. Lo guardado lo da el script
+de `elegir-modelo`; una sesión abierta con otro `--model` o cambiada después
+puede diferir. Si no puedes comprobarla, escríbelo así.
 
 ### Encargo listo para enviar
 
@@ -454,7 +411,7 @@ con la memoria del proyecto».
    - Si no coincide, **no lo reclames**. Escribe «Recomendado: <modelo>,
      <esfuerzo>. Esta sesión usa <tu modelo>. Cambia el modelo y vuelve a
      ejecutar atender» y detente. El encargo sigue pendiente.
-   - Si coincide, compara también tu esfuerzo guardado, que muestra `modelos`; si no coincide con
+   - Si coincide, compara también tu esfuerzo guardado, que muestra el script de `elegir-modelo`; si no coincide con
      el recomendado, avísalo, y continúa.
 4. Llama `claim_peer_review` con el `taskId` y el `reviewId` recibidos **antes**
    de leer archivos. Guarda el `claimToken` solo para la entrega.

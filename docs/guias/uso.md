@@ -373,6 +373,7 @@ La arquitectura inicial del sistema de memoria está en [`docs/memoria/project-m
 - `decision-records`: documenta decisiones confirmadas con contexto y consecuencias.
 - `project-handoff`: prepara traspasos breves y verificables entre sesiones o agentes.
 - `quality-gate`: verifica entregas contra requisitos, riesgos y evidencia fresca antes de afirmar cierre o aprobación.
+- `elegir-modelo`: recomienda y comprueba el modelo y el esfuerzo de Claude Code, Codex y Antigravity con el criterio de Anthropic: el esfuerzo es el por defecto de cada modelo salvo para iterar, verificar o trabajo crítico desatendido, y el modelo sube cuando hace falta saber más.
 
 Las equivalencias de proceso y reglas de convivencia con el plugin opcional Superpowers están en [Integración y adaptación de Superpowers](../skills/superpowers-integration.md).
 
