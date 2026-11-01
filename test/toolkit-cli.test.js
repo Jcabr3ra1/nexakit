@@ -142,6 +142,7 @@ test('--si applies the suggested answers, and then everything is ready', async t
   assert.equal(code, 0, c.io.err);
   assert.match(c.io.out, /◇ Memoria creada/u);
   assert.match(c.io.out, /Comprobación final: todo responde/u);
+  assert.equal(c.io.out.match(/Comprobación final/gu).length, 1, 'the final check is printed once');
   assert.equal(await exists(path.join(w.home, 'nexakit-memorias', 'punto-motos', 'project-memory.json')), true);
   const again = capture();
   assert.equal(await runToolkitCli(['--project', w.repo], { ...again, isTTY: false, options: w.options }), 0);

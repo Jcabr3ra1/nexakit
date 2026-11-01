@@ -307,7 +307,8 @@ async function runSetup(parsed, { out, err, input, output, isTTY, options }) {
     const result = await applySetup(stateOptions, answers, {
       ...applyOptions,
       onProgress: async (id, phase, message) => {
-        if (phase === 'done') await out(`  ◇ ${labels[id] ?? id}\n`);
+        // The final check prints its own line with the result, below.
+        if (phase === 'done' && id !== 'final-check') await out(`  ◇ ${labels[id] ?? id}\n`);
         if (phase === 'failed') await err(`  ✗ ${labels[id] ?? id}: ${message}\n`);
       }
     });
