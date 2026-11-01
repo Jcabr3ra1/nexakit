@@ -107,3 +107,38 @@ test('memory "later" and unchecked skills are respected', async t => {
   const saved = JSON.parse(await fs.readFile(path.join(w.repo, '.agent-toolkit/manifest.json'), 'utf8')).answers;
   assert.deepEqual(saved, answers);
 });
+
+test('from an npx cache: the stable copy comes first and everything points at it, so clearing the cache breaks nothing', async t => {
+  const { writeFakeInstall } = await import('../test-support/fake-npm.js');
+  const w = await world(t);
+  // A small nexakit inside an npx cache: its catalog, the skills it names, the launchers and package.json.
+  const ephemeral = path.join(w.base, '.npm/_npx/abc/node_modules/nexakit');
+  const catalog = JSON.parse(await fs.readFile(path.join(TOOLKIT_ROOT, 'catalogs/skills.json'), 'utf8'));
+  await fs.mkdir(path.join(ephemeral, 'catalogs'), { recursive: true });
+  await fs.writeFile(path.join(ephemeral, 'catalogs/skills.json'), JSON.stringify(catalog));
+  for (const entry of catalog.skills) await fs.cp(path.join(TOOLKIT_ROOT, entry.installedPath), path.join(ephemeral, entry.installedPath), { recursive: true });
+  await fs.cp(path.join(TOOLKIT_ROOT, 'bin'), path.join(ephemeral, 'bin'), { recursive: true });
+  await fs.copyFile(path.join(TOOLKIT_ROOT, 'package.json'), path.join(ephemeral, 'package.json'));
+  const { version } = JSON.parse(await fs.readFile(path.join(ephemeral, 'package.json'), 'utf8'));
+  const calls = [];
+  const runNpm = async args => {
+    calls.push(args);
+    const installed = await writeFakeInstall(args[args.indexOf('--prefix') + 1], { version, skills: [] });
+    await fs.cp(ephemeral, installed, { recursive: true, force: true });
+    return { status: 0, stderr: '' };
+  };
+  const options = { ...w.options, toolkitRoot: ephemeral };
+  const state = await gatherSetupState(options);
+  const answers = { ...suggestedAnswers(state), agents: ['claude'], memory: { decision: 'later' } };
+  const result = await applySetup(options, answers, { runNpm });
+  assert.equal(result.ok, true, JSON.stringify(result.failed));
+  assert.equal(result.done[0], 'stable-copy');
+  assert.equal(calls.length, 1);
+  const actual = await fs.realpath(path.join(w.home, '.nexakit/actual'));
+  assert.equal(await fs.realpath(path.join(w.repo, '.claude/skills/frontend-design')), path.join(actual, 'skills/frontend-design'));
+  if (process.platform !== 'win32') {
+    assert.match(await fs.readFile(path.join(w.home, '.nexakit/nexakit'), 'utf8'), /\.nexakit\/actual\/bin\/nexakit\.js/u, 'the launcher follows the stable copy');
+  }
+  await fs.rm(path.join(w.base, '.npm'), { recursive: true });
+  assert.equal(await exists(path.join(w.repo, '.claude/skills/frontend-design/SKILL.md')), true);
+});

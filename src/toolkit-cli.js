@@ -11,7 +11,11 @@ import {
   planToolkitDetach,
   recommendSkills
 } from './skill-recommendations.js';
-import { formatRecommendationReport, runToolkitTui } from './toolkit-tui.js';
+import { formatRecommendationReport } from './recommend-report.js';
+import { applySetup } from './setup-apply.js';
+import { buildConfirmation, suggestedAnswers } from './setup-plan.js';
+import { gatherSetupState } from './setup-state.js';
+import { runSetupTui } from './setup-tui.js';
 import { doctorToolkit, setupToolkit } from './toolkit-setup.js';
 import { applyLegacyRepair, planLegacyRepair } from './legacy-repair.js';
 import { READY_LINK_STATES } from './link-states.js';
@@ -19,30 +23,24 @@ import { READY_LINK_STATES } from './link-states.js';
 const PROFILE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const RECOMMEND_PROFILES = ['frontend', 'backend', 'mcp', 'security'];
 
-const HELP = `Uso: npx nexakit [tui] [--project <ruta>] [--agent codex|claude|all] [--perfil-codex <nombre>]
+const HELP = `Uso: npx nexakit [--project <ruta>] [--si]
+     npx nexakit quitar [--project <ruta>] [--global] [--agent codex|claude|antigravity|all] [--apply] [--json]
      npx nexakit recommend [--project <ruta>] [--profile frontend|backend|mcp|security] [--client codex|claude] [--dry-run] [--json]
-     npx nexakit detach [--project <ruta>] [--global] [--agent codex|claude|antigravity|all] [--apply] [--json]
      npx nexakit reparar --desde <ruta> [--agent codex|claude|antigravity|all]
      npx nexakit doctor [--agent codex|claude|antigravity|all] [--perfil-codex <nombre>] [--json]
      npx nexakit setup [--agent codex|claude|antigravity|all] [--perfil-codex <nombre>] [--apply] [--json]
 
+npx nexakit hace tres preguntas con la respuesta ya sugerida (skills, memoria e IA)
+y, con una sola confirmación, deja listo el proyecto: skills, memoria conectada a
+tus IA y la orden ~/.nexakit/nexakit. Si todo está listo, no pregunta nada.
+Sin terminal interactiva muestra lo que haría; --si lo aplica sin preguntas.
+quitar (o detach) retira las skills del proyecto, .agent-toolkit/ y su bloque de
+.gitignore sin tocar archivos tuyos (--apply para ejecutar; --global incluye las globales).
+recommend inspecciona el proyecto en solo lectura.
+reparar re-apunta enlaces rotos de una instalación anterior (--desde es la carpeta
+que ya no existe); lista lo que encontró y siempre pregunta.
+doctor y setup comprueban y preparan las skills base globales.
 (Alias local compatible: agent-toolkit)
-En una terminal interactiva, npx nexakit abre el asistente por pasos:
-detecta el stack del proyecto, sugiere skills verificadas por SHA-256,
-guarda su estado aislado e ignorado en Git bajo .agent-toolkit/ y aplica
-instalaciones o desacoplados ([d]) tras vista previa segura.
-recommend inspecciona el proyecto en solo lectura sin escribir ni usar red.
-detach retira las skills acopladas, .agent-toolkit/ y el bloque de ignore sin
-tocar archivos propios (--apply para ejecutar; --global incluye ~/.claude y ~/.codex).
-reparar re-apunta los enlaces rotos de una instalación anterior (--desde es la carpeta que ya no
-existe). No puede comprobar que sean de nexakit, así que lista lo que encontró y siempre pregunta.
-setup prepara enlaces globales de las skills base; --apply los crea sin reemplazar
-archivos existentes. Imprime los comandos MCP para registrar por separado.
-doctor comprueba instalación local sin iniciar modelos. Reinicia los clientes
-tras registrar el MCP. Con Codex, también indica si su sandbox deja escribir en
-~/.agent-toolkit (lo necesita $revisar) y el comando para permitirlo. Si abres
-Codex con --profile, indica ese perfil con --perfil-codex.
-Superpowers es un plugin opcional independiente.
 `;
 
 export async function runToolkitCli(
@@ -54,37 +52,19 @@ export async function runToolkitCli(
     return 0;
   }
 
-  if (argv.length === 0 || argv[0] === 'tui') {
-    const rest = argv[0] === 'tui' ? argv.slice(1) : [];
-    const parsed = { agent: 'all', projectRoot: process.cwd() };
+  if (argv.length === 0 || argv[0] === 'tui' || argv[0].startsWith('--')) {
+    const rest = argv[0] === 'tui' ? argv.slice(1) : argv;
+    const parsed = { projectRoot: process.cwd(), yes: false };
     const seen = new Set();
     for (let i = 0; i < rest.length; i++) {
       const flag = rest[i];
       if (seen.has(flag)) { await err(HELP); return 2; }
       seen.add(flag);
       if (flag === '--project' && rest[i + 1]) parsed.projectRoot = rest[++i];
-      else if (flag === '--agent' && ['codex', 'claude', 'all'].includes(rest[i + 1])) parsed.agent = rest[++i];
-      else if (flag === '--perfil-codex' && PROFILE_RE.test(rest[i + 1] ?? '')) parsed.codexProfile = rest[++i];
+      else if (flag === '--si') parsed.yes = true;
       else { await err(HELP); return 2; }
     }
-    const interactive = Boolean(isTTY ?? (input?.isTTY && output?.isTTY));
-    if (!interactive) {
-      await err(HELP);
-      return 2;
-    }
-    try {
-      return await runToolkitTui({
-        input,
-        output,
-        projectRoot: parsed.projectRoot,
-        agent: parsed.agent,
-        codexProfile: parsed.codexProfile,
-        setupOptions: options
-      });
-    } catch {
-      await err('No se pudo abrir la interfaz interactiva. Revisa la ruta del proyecto y los permisos.\n');
-      return 1;
-    }
+    return runSetup(parsed, { out, err, input, output, isTTY, options });
   }
 
   const [command, ...rest] = argv;
@@ -129,7 +109,7 @@ export async function runToolkitCli(
 
   if (command === 'reparar') return runRepair(rest, { out, err, input, output, isTTY, options });
 
-  if (command === 'detach' || command === 'unlink') {
+  if (command === 'detach' || command === 'unlink' || command === 'quitar') {
     const parsed = { projectRoot: process.cwd(), agent: 'all', global: false, apply: false, json: false };
     const seen = new Set();
     for (let i = 0; i < rest.length; i++) {
@@ -294,6 +274,48 @@ async function runRepair(rest, { out, err, input, output, isTTY, options }) {
     return result.changed || result.skipped.length ? 1 : 0;
   } catch {
     await err('No se pudo comprobar ni reparar. Revisa rutas y permisos; no se reemplazan destinos.\n');
+    return 1;
+  }
+}
+
+// Options tests and callers pass (homeDirectory, toolkitRoot, codexHome, environment, runCommand, runNpm, ...).
+function setupStateOptions(projectRoot, options) {
+  const { runNpm, packageSpec, acquire, ...rest } = options;
+  return { stateOptions: { ...rest, start: projectRoot }, applyOptions: { ...(runNpm && { runNpm }), ...(packageSpec && { packageSpec }), ...(acquire && { acquire }) } };
+}
+
+async function runSetup(parsed, { out, err, input, output, isTTY, options }) {
+  const { stateOptions, applyOptions } = setupStateOptions(parsed.projectRoot, options);
+  const interactive = Boolean(isTTY ?? (input?.isTTY && output?.isTTY));
+  try {
+    if (interactive && !parsed.yes) return await runSetupTui({ input, output, options: stateOptions, applyOptions });
+    const state = await gatherSetupState(stateOptions);
+    const answers = suggestedAnswers(state);
+    const confirmation = buildConfirmation(state, answers);
+    const title = `nexakit · ${state.project.displayName}${state.project.fromSubfolder ? ' (repositorio completo)' : ''}`;
+    if (confirmation.allReady) {
+      await out(`${title}\nTodo está listo.\n${confirmation.lines.map(line => `  ${line.mark} ${line.text}`).join('\n')}\n`);
+      return 0;
+    }
+    if (!parsed.yes) {
+      await out(`${title}\nCon las respuestas sugeridas prepararía:\n${confirmation.lines.map(line => `  ${line.mark} ${line.text}`).join('\n')}\n\n` +
+        'No hay una terminal interactiva para preguntarte.\nPara aplicarlo sin preguntas: npx nexakit --si\n');
+      return 2;
+    }
+    await out(`${title}\n`);
+    const labels = Object.fromEntries(confirmation.blocks.map(block => [block.id, block.label]));
+    const result = await applySetup(stateOptions, answers, {
+      ...applyOptions,
+      onProgress: async (id, phase, message) => {
+        if (phase === 'done') await out(`  ◇ ${labels[id] ?? id}\n`);
+        if (phase === 'failed') await err(`  ✗ ${labels[id] ?? id}: ${message}\n`);
+      }
+    });
+    if (result.finalCheck) await out(`  ${result.finalCheck.ok ? '◇' : '!'} Comprobación final: ${result.finalCheck.message}\n`);
+    if (result.ok) await out('Listo. Cierra y abre tu IA para que cargue las skills y la memoria.\n');
+    return result.ok ? 0 : 1;
+  } catch (error) {
+    await err(`No se pudo preparar el proyecto: ${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
   }
 }
