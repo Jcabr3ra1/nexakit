@@ -111,3 +111,35 @@ test('two runs recovering the same dead lock end with exactly one owner', async 
   await won[0].value.assertHeld();
   assert.deepEqual(await fs.readdir(f.dir), ['bloqueo']);
 });
+
+test('while another live process recovers a dead lock, the rest wait and touch nothing', async t => {
+  const f = await fixture(t), { acquireLock } = await import(moduleUrl);
+  await f.write({ pid: 9999 });
+  const guard = path.join(f.dir, 'bloqueo.recuperando');
+  await fs.writeFile(guard, JSON.stringify({ pid: 4242, equipo: os.hostname(), hora: new Date().toISOString(), marca: 'otro-recuperador' }));
+  const before = await fs.readFile(f.file, 'utf8');
+  await assert.rejects(acquireLock(f.dir, { ...fast, pid: 1111, isAlive: pid => pid === 4242 }), { code: 'ocupado' });
+  assert.equal(await fs.readFile(f.file, 'utf8'), before, 'the dead lock is not touched while someone else recovers it');
+  assert.equal(JSON.parse(await fs.readFile(guard, 'utf8')).marca, 'otro-recuperador');
+});
+
+test('the guard of a recoverer that died is cleared and the lock is recovered', async t => {
+  const f = await fixture(t), { acquireLock } = await import(moduleUrl);
+  await f.write({ pid: 9999 });
+  await fs.writeFile(path.join(f.dir, 'bloqueo.recuperando'), JSON.stringify({ pid: 8888, equipo: os.hostname(), hora: new Date().toISOString(), marca: 'recuperador-muerto' }));
+  const lock = await acquireLock(f.dir, { ...fast, pid: 1111, isAlive: pid => ![9999, 8888].includes(pid) });
+  assert.equal((await f.read()).marca, lock.token);
+  assert.deepEqual(await fs.readdir(f.dir), ['bloqueo']);
+});
+
+test('many runs recovering the same dead lock at once still end with exactly one owner', async t => {
+  const f = await fixture(t), { acquireLock } = await import(moduleUrl);
+  await f.write({ pid: 9999 });
+  const isAlive = pid => pid !== 9999;
+  const results = await Promise.allSettled(Array.from({ length: 6 }, (_, i) => acquireLock(f.dir, { ...fast, pid: 2000 + i, isAlive })));
+  const won = results.filter(result => result.status === 'fulfilled');
+  assert.equal(won.length, 1);
+  assert.ok(results.filter(result => result.status === 'rejected').every(result => result.reason.code === 'ocupado'));
+  await won[0].value.assertHeld();
+  assert.deepEqual(await fs.readdir(f.dir), ['bloqueo']);
+});

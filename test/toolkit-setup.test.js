@@ -364,3 +364,28 @@ test('a registration command is never suggested for a stable copy that does not 
   assert.match(applied.mcp.registrationCommands.claude, /\.nexakit\/actual\/bin\/agent-toolkit-mcp\.js/u);
   assert.equal(applied.mcp.registrationPending, undefined);
 });
+
+// A lock that is lost after `keep` checks, to prove each write checks it first.
+const losingLock = keep => {
+  let checks = 0;
+  return async () => ({ token: 'x', release: async () => {}, assertHeld: async () => { if (++checks > keep) throw Object.assign(new Error('perdido'), { code: 'perdido' }); } });
+};
+
+test('setup checks it still holds the lock right before writing each link', async t => {
+  const f = await fixture(t), { setupToolkit } = await import(moduleUrl);
+  await fs.mkdir(path.join(f.toolkitRoot, 'skills', 'b'));
+  await fs.writeFile(path.join(f.toolkitRoot, 'skills', 'b', 'SKILL.md'), 'x');
+  await assert.rejects(setupToolkit({ ...f, agent: 'claude', apply: true, environment: { PATH: '' }, acquire: losingLock(1) }), { code: 'perdido' });
+  assert.deepEqual(await fs.readdir(path.join(f.homeDirectory, '.claude/skills')), ['b'], 'only the link written while the lock was held');
+});
+
+test('the node registered for the MCP is never one inside an npx cache', async t => {
+  const f = await fixture(t), { resolveNodeExecutable } = await import(moduleUrl);
+  const ephemeral = path.join(f.root, '.npm/_npx/abc/node_modules/.bin'), stable = path.join(f.root, 'bin');
+  for (const dir of [ephemeral, stable]) {
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, 'node'), '', { mode: 0o755 });
+  }
+  assert.equal(await resolveNodeExecutable({ PATH: [ephemeral, stable].join(path.delimiter) }), path.join(stable, 'node'));
+  assert.equal(await resolveNodeExecutable({ PATH: ephemeral }), process.execPath, 'falls back to the node running nexakit when it is not ephemeral');
+});

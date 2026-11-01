@@ -222,3 +222,43 @@ test('validatePackageRoot accepts a good install and names what is wrong with a 
   await assert.rejects(validatePackageRoot(foreign, '1.2.3'), /no es nexakit/u);
   await assert.rejects(validatePackageRoot(path.join(f.root, 'no-existe'), '1.2.3'), { name: 'StableInstallError' });
 });
+
+test('replacing the pointer the Windows way never loses it, even when the second rename fails', async t => {
+  const f = await fixture(t), { replacePointer } = await import(moduleUrl);
+  const dirType = process.platform === 'win32' ? 'junction' : 'dir';
+  const setup = async () => {
+    const v1 = path.join(f.root, 'v1'), v2 = path.join(f.root, 'v2'), actual = path.join(f.root, 'actual'), temporary = path.join(f.root, 'actual.nuevo');
+    for (const dir of [v1, v2]) await fs.mkdir(dir, { recursive: true });
+    await fs.rm(actual, { force: true });
+    await fs.rm(temporary, { force: true });
+    await fs.symlink(v1, actual, dirType);
+    await fs.symlink(v2, temporary, dirType);
+    return { v1, v2, actual, temporary };
+  };
+  const failing = plan => {
+    let call = 0;
+    return async (from, to) => {
+      const outcome = plan[call++];
+      if (outcome) throw Object.assign(new Error(outcome), { code: outcome });
+      return fs.rename(from, to);
+    };
+  };
+  const leftovers = async () => (await fs.readdir(f.root)).filter(name => name.startsWith('actual.anterior'));
+
+  // Rename over the link refused, then the second rename fails: the old pointer is put back.
+  let p = await setup();
+  await assert.rejects(replacePointer(p.temporary, p.actual, { windows: true, rename: failing(['EPERM', null, 'EIO', null]) }), { code: 'EIO' });
+  assert.equal(await fs.readlink(p.actual), p.v1);
+  assert.deepEqual(await leftovers(), []);
+
+  // Rename over the link refused, the rest works: the pointer moves and nothing is left aside.
+  p = await setup();
+  await replacePointer(p.temporary, p.actual, { windows: true, rename: failing(['EPERM']) });
+  assert.equal(await fs.readlink(p.actual), p.v2);
+  assert.deepEqual(await leftovers(), []);
+
+  // Elsewhere a refused rename is an error and nothing is moved aside.
+  p = await setup();
+  await assert.rejects(replacePointer(p.temporary, p.actual, { windows: false, rename: failing(['EPERM']) }), { code: 'EPERM' });
+  assert.equal(await fs.readlink(p.actual), p.v1);
+});

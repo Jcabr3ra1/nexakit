@@ -32,10 +32,11 @@ export async function planLegacyRepair({
 // Repoints the links of the plan to the copy of nexakit in use and records them as nexakit's own.
 // Each link is read again right before writing: one that changed since the plan is left alone.
 export async function applyLegacyRepair(plan, {
-  homeDirectory = os.homedir(), toolkitRoot = TOOLKIT_ROOT, environment = process.env, runNpm, packageSpec, lockOptions
+  homeDirectory = os.homedir(), toolkitRoot = TOOLKIT_ROOT, environment = process.env, runNpm, packageSpec, lockOptions,
+  acquire = acquireLock
 } = {}) {
   const home = await fs.realpath(homeDirectory);
-  const lock = await acquireLock(nexakitDir(home), lockOptions);
+  const lock = await acquire(nexakitDir(home), lockOptions);
   try {
     if (plan.ephemeral && plan.links.length) {
       await ensureStableInstall({
@@ -48,6 +49,7 @@ export async function applyLegacyRepair(plan, {
     for (const link of plan.links) {
       const source = path.join(plan.activeRoot, 'skills', link.name);
       if (!(await exists(path.join(source, 'SKILL.md')))) { skipped.push(link.name); continue; }
+      await lock.assertHeld();
       if (await relinkIfUnchanged({ target: link.target, expectedLiteral: link.literal, source }) === 'cambio') { changed++; continue; }
       entries.push({ destino: link.target, apunta: await fs.readlink(link.target), raiz: plan.activeRoot });
     }

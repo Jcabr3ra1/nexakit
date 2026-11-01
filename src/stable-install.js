@@ -138,6 +138,27 @@ async function publishVersion({ stagingDir, versionDir, version, packageSpec, ru
   }
 }
 
+// Puts the link `temporary` where `actual` is. Renaming over the old link is atomic; Windows refuses that for a
+// junction, so there the old pointer is moved aside first and put back if the second rename fails: the pointer
+// can be missing for an instant there, but it is never lost.
+export async function replacePointer(temporary, actual, { windows = IS_WINDOWS, rename = fs.rename } = {}) {
+  try {
+    await rename(temporary, actual);
+    return;
+  } catch (error) {
+    if (!windows || !['EPERM', 'EEXIST', 'ENOTEMPTY'].includes(error.code)) throw error;
+  }
+  const aside = `${actual}.anterior.${crypto.randomUUID()}`;
+  await rename(actual, aside);
+  try {
+    await rename(temporary, actual);
+  } catch (error) {
+    await rename(aside, actual).catch(() => {});
+    throw error;
+  }
+  await fs.unlink(aside).catch(() => {});
+}
+
 async function movePointer({ base, actual, packageRoot, lock }) {
   const current = await ensurePointerSlot(actual);
   if (current) {
@@ -149,12 +170,7 @@ async function movePointer({ base, actual, packageRoot, lock }) {
   await fs.symlink(packageRoot, temporary, IS_WINDOWS ? 'junction' : 'dir');
   try {
     await lock.assertHeld();
-    try { await fs.rename(temporary, actual); } catch (error) {
-      // A junction cannot be renamed over on Windows; that window is not atomic there.
-      if (!IS_WINDOWS || !['EPERM', 'EEXIST', 'ENOTEMPTY'].includes(error.code)) throw error;
-      await fs.unlink(actual);
-      await fs.rename(temporary, actual);
-    }
+    await replacePointer(temporary, actual);
   } catch (error) {
     await fs.unlink(temporary).catch(() => {});
     throw error;

@@ -46,8 +46,11 @@ export async function resolveRoots({ toolkitRoot, homeDirectory }) {
   const ephemeral = isEphemeralPath(sourceRoot);
   return { sourceRoot, linkRoot: ephemeral ? actualRoot(homeDirectory) : sourceRoot, ephemeral };
 }
+// A node inside an npx cache disappears with it, so it is never the one registered.
 export async function resolveNodeExecutable(environment) {
-  return (await findExecutable('node', environment)) ?? process.execPath;
+  const stable = await findExecutable('node', environment, file => !isEphemeralPath(file));
+  if (stable) return stable;
+  return isEphemeralPath(process.execPath) ? 'node' : process.execPath;
 }
 async function baseSkillNames(root) {
   const names = (await fs.readdir(path.join(root, 'skills'), { withFileTypes: true }))
@@ -89,7 +92,7 @@ export function registrationCommand(client, current, nodePath, entry) {
 // moves or repairs only what nexakit can prove is its own. Conflicts are skipped and reported, never replaced.
 export async function setupToolkit({ agent = 'all', apply = false, homeDirectory = os.homedir(), toolkitRoot = TOOLKIT_ROOT,
   environment = process.env, codexHome = environment.CODEX_HOME ?? path.join(homeDirectory, '.codex'), codexProfile,
-  runNpm, packageSpec, lockOptions } = {}) {
+  runNpm, packageSpec, lockOptions, acquire = acquireLock } = {}) {
   const home = await fs.realpath(homeDirectory);
   const clients = await clientsFor(agent, environment, home);
   const { sourceRoot, linkRoot, ephemeral } = await resolveRoots({ toolkitRoot, homeDirectory: home });
@@ -126,7 +129,7 @@ export async function setupToolkit({ agent = 'all', apply = false, homeDirectory
   const mcpPending = Object.keys(mcpStates).filter(client => ACTIONABLE_LINK_STATES.includes(mcpStates[client].state));
   let applied = false, changed = 0, created = 0, stableInstall;
   if (apply) {
-    const lock = await acquireLock(nexakitDir(home), lockOptions);
+    const lock = await acquire(nexakitDir(home), lockOptions);
     try {
       if (ephemeral && !usingOtherCopy && (pending.length || mcpPending.length)) {
         stableInstall = await ensureStableInstall({
@@ -137,6 +140,7 @@ export async function setupToolkit({ agent = 'all', apply = false, homeDirectory
       const entries = [];
       for (const item of pending) {
         await parents(home, item.target, true);
+        await lock.assertHeld();
         const outcome = await relinkIfUnchanged({ target: item.target, expectedLiteral: item.state === 'falta' ? null : item.literal, source: item.source });
         if (outcome === 'cambio') { changed++; continue; }
         // The registry keeps what readlink returns, the value later compared.
@@ -282,13 +286,13 @@ async function inspectMcp(client, home, codexHome, { activeRoots, isOwned }) {
   }
   return { state: 'falta' };
 }
-async function findExecutable(name, environment) {
+async function findExecutable(name, environment, accept = () => true) {
   const extensions = IS_WINDOWS
     ? ['', ...(environment.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean).map(extension => extension.toLowerCase())]
     : [''];
   for (const folder of (environment.PATH ?? '').split(path.delimiter).filter(Boolean)) {
     for (const extension of extensions) {
-      try { const file = path.join(folder, name + extension); await fs.access(file, constants.X_OK); if ((await fs.stat(file)).isFile()) return file; } catch {}
+      try { const file = path.join(folder, name + extension); await fs.access(file, constants.X_OK); if ((await fs.stat(file)).isFile() && accept(file)) return file; } catch {}
     }
   }
   return null;

@@ -22,6 +22,14 @@ const lstatOrNull = file => fs.lstat(file).catch(error => {
 
 export const isEphemeralPath = value => path.resolve(value).split(path.sep).includes('_npx');
 
+// A copy of nexakit inside an npx cache: `…/_npx/<hash>/node_modules/nexakit` (or the old name, agent-toolkit).
+// Anything else under `_npx` belongs to another package and is never treated as nexakit's.
+export function isEphemeralNexakitRoot(root) {
+  const parts = path.resolve(root).split(path.sep);
+  const n = parts.length;
+  return n >= 4 && parts[n - 4] === '_npx' && parts[n - 2] === 'node_modules' && PACKAGE_NAMES.has(parts[n - 1]);
+}
+
 export async function readLink(target) {
   const info = await lstatOrNull(target);
   if (!info) return { exists: false, isLink: false };
@@ -70,10 +78,11 @@ export async function classifyReference({ target, literal, absolute = path.resol
   const base = { target, suffix };
   const resolved = await realpathOrNull(absolute);
 
-  // Before `instalado`, so a link into the cache this run came from is never taken as good.
-  if (isEphemeralPath(absolute) || (resolved && isEphemeralPath(resolved))) {
-    return { ...base, state: 'efimero', literal, root: rootFrom(resolved ?? absolute, suffix) ?? undefined };
-  }
+  // Before `instalado`, so a link into the cache this run came from is never taken as good. It must point at
+  // exactly `<copy of nexakit in an npx cache>/<suffix>`; another package there is not nexakit's to move.
+  const ephemeralRoot = [absolute, resolved].filter(Boolean)
+    .map(candidate => rootFrom(candidate, suffix)).find(root => root && isEphemeralNexakitRoot(root));
+  if (ephemeralRoot) return { ...base, state: 'efimero', literal, root: ephemeralRoot };
 
   if (resolved) {
     const tail = path.normalize(suffix);

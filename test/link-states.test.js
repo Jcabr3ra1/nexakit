@@ -208,3 +208,20 @@ test('relinkIfUnchanged can write a link relative to its own folder', async t =>
   assert.equal(await relinkIfUnchanged({ target: f.target('rel'), expectedLiteral: old, source: path.join(other, 'skills/example'), relative: true }), 'hecho');
   assert.equal(await fs.realpath(f.target('rel')), path.join(other, 'skills/example'));
 });
+
+test('only a copy of nexakit inside an npx cache is ephemeral; another package there is left alone', async t => {
+  const f = await fixture(t), { classifyLink } = await import(moduleUrl);
+  const run = (name, suffix = 'skills/example') => classifyLink({ target: f.target(name), suffix, activeRoots: [], isOwned: () => false });
+  const other = await makeCopy(path.join(f.root, 'home/.npm/_npx/abc/node_modules/otro-paquete'), 'otro-paquete');
+  await link(path.join(other, 'skills/example'), f.target('otro'));
+  assert.equal((await run('otro')).state, 'conflicto');
+  await link(path.join(f.root, 'home/.npm/_npx/zzz/node_modules/otro-paquete/skills/example'), f.target('otro-borrado'));
+  assert.equal((await run('otro-borrado')).state, 'roto-ajeno');
+  // A nexakit copy in the cache, but not where this suffix says the link should point.
+  const cache = await makeCopy(path.join(f.root, 'home/.npm/_npx/def/node_modules/nexakit'));
+  await link(path.join(cache, 'skills/example'), f.target('sufijo'));
+  assert.equal((await run('sufijo', 'catalogs/skills/example')).state, 'conflicto');
+  const legacyName = await makeCopy(path.join(f.root, 'home/.npm/_npx/ghi/node_modules/agent-toolkit'), 'agent-toolkit');
+  await link(path.join(legacyName, 'skills/example'), f.target('antiguo'));
+  assert.equal((await run('antiguo')).state, 'efimero');
+});

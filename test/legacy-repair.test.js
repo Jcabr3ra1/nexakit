@@ -165,3 +165,14 @@ test('the command lists what it found, asks, and only on "s" repoints the links'
   const none = await run(['reparar', '--desde', path.join(f.root, 'Nada')], interactive('s\n'));
   assert.deepEqual([none.code, none.text()], [0, `No encontré enlaces rotos hacia ${path.join(f.root, 'Nada')}.\n`]);
 });
+
+test('reparar checks it still holds the lock right before writing each link', async t => {
+  const f = await legacySetup(t), { planLegacyRepair, applyLegacyRepair } = await import(moduleUrl);
+  const plan = await planLegacyRepair({ ...f.options, from: f.dead });
+  let checks = 0;
+  const acquire = async () => ({ release: async () => {}, assertHeld: async () => { if (++checks > 1) throw Object.assign(new Error('perdido'), { code: 'perdido' }); } });
+  await assert.rejects(applyLegacyRepair(plan, { ...f.options, acquire }), { code: 'perdido' });
+  const repointed = [];
+  for (const link of plan.links) if (await fs.readlink(link.target) !== link.literal) repointed.push(link.name);
+  assert.deepEqual(repointed, ['alfa'], 'only the first link, written while the lock was held');
+});

@@ -193,7 +193,8 @@ test('supports both symlink mode and verified copy + skills-lock.json mode, pres
     agent: 'all',
     mode: 'copy',
     catalog,
-    toolkitRoot: TOOLKIT_ROOT
+    toolkitRoot: TOOLKIT_ROOT,
+    homeDirectory: await tempProject(t)
   });
   assert.equal(copyPlan.conflicts, 1);
   assert.equal(copyPlan.willWriteLockfile, true);
@@ -225,7 +226,8 @@ test('supports both symlink mode and verified copy + skills-lock.json mode, pres
     agent: 'all',
     mode: 'copy',
     catalog,
-    toolkitRoot: TOOLKIT_ROOT
+    toolkitRoot: TOOLKIT_ROOT,
+    homeDirectory: await tempProject(t)
   });
   assert.equal(repeatPlan.links.every(l => l.state === 'installed'), true);
 
@@ -300,7 +302,8 @@ test('git ignore management (.gitignore & .git/info/exclude) and safe decoupling
   const detachPlanA = await planToolkitDetach({
     projectRoot: projA,
     catalog,
-    toolkitRoot: TOOLKIT_ROOT
+    toolkitRoot: TOOLKIT_ROOT,
+    homeDirectory: await tempProject(t)
   });
   assert.equal(detachPlanA.applied, false);
   assert.equal(detachPlanA.removeStateDir, true);
@@ -331,7 +334,8 @@ test('git ignore management (.gitignore & .git/info/exclude) and safe decoupling
     mode: 'copy',
     gitIgnore: 'git-exclude',
     catalog,
-    toolkitRoot: TOOLKIT_ROOT
+    toolkitRoot: TOOLKIT_ROOT,
+    homeDirectory: await tempProject(t)
   });
   await applyProjectSkillInstall(planB);
 
@@ -608,4 +612,83 @@ test('detach recognizes project and global links into the stable copy, for Antig
   const claude = await detach('claude');
   assert.deepEqual(claude.items.map(i => `${i.scope}:${i.client}:${i.action}`), ['project:claude:remove-link', 'project:claude:remove-link']);
   await assert.rejects(detach('gemini'), /antigravity/u);
+});
+
+test('a manifest entry proves ownership only of the exact link it recorded', async t => {
+  const { applyProjectSkillInstall } = await import('../src/skill-recommendations.js');
+  const s = await projectSetup(t);
+  await applyProjectSkillInstall(await plan(s, { skillNames: ['frontend-design'], agent: 'claude' }));
+  const manifest = JSON.parse(await fs.readFile(path.join(s.project, '.agent-toolkit/manifest.json'), 'utf8'));
+  const at = path.join(s.project, '.claude/skills/frontend-design');
+  assert.equal(manifest.entries[0].apunta, await fs.readlink(at), 'the manifest records where the link pointed');
+
+  // Someone replaces nexakit's link with a broken one of their own: it is not nexakit's any more.
+  await fs.rm(at);
+  await fs.symlink(path.join(s.base, 'mio/skills/frontend-design'), at, linkType);
+  await fs.rm(path.join(s.home, '.nexakit'), { recursive: true, force: true });
+  const replaced = await plan(s, { skillNames: ['frontend-design'], agent: 'claude' });
+  assert.equal(replaced.links[0].linkState, 'roto-ajeno');
+  await applyProjectSkillInstall(replaced);
+  assert.equal(await fs.readlink(at), path.join(s.base, 'mio/skills/frontend-design'));
+
+  // An entry from 0.1.0 has no recorded link: then only a link with nexakit's own shape counts as nexakit's.
+  await fs.writeFile(path.join(s.project, '.agent-toolkit/manifest.json'), JSON.stringify({ ...manifest, entries: [{ client: 'claude', name: 'frontend-design', relativePath: '.claude/skills/frontend-design', mode: 'symlink' }] }));
+  await fs.rm(at);
+  await fs.symlink(path.join(s.base, 'mio/otra-cosa'), at, linkType);
+  assert.equal((await plan(s, { skillNames: ['frontend-design'], agent: 'claude' })).links[0].linkState, 'roto-ajeno');
+});
+
+test('copy mode replaces a link only when it is nexakit\'s, and never a link of the user', async t => {
+  const { applyProjectSkillInstall } = await import('../src/skill-recommendations.js');
+  const s = await projectSetup(t);
+  const mine = path.join(s.base, 'mi-skill');
+  await fs.mkdir(mine);
+  await fs.writeFile(path.join(mine, 'SKILL.md'), 'mía');
+  const userLink = path.join(s.project, '.claude/skills/frontend-design');
+  await fs.mkdir(path.dirname(userLink), { recursive: true });
+  await fs.symlink(mine, userLink, linkType);
+  const ourLink = path.join(s.project, '.agents/skills/frontend-design');
+  await fs.mkdir(path.dirname(ourLink), { recursive: true });
+  await fs.symlink(path.join(TOOLKIT_ROOT, 'skills/frontend-design'), ourLink, linkType);
+
+  const result = await plan(s, { skillNames: ['frontend-design'], mode: 'copy' });
+  assert.deepEqual(result.links.map(l => `${l.client}:${l.state}`), ['codex:replace', 'claude:conflict']);
+  const applied = await applyProjectSkillInstall(result);
+  assert.equal(applied.created, 1);
+  assert.equal(await fs.readlink(userLink), mine, 'the user\'s link is untouched');
+  assert.equal(await fs.readFile(path.join(mine, 'SKILL.md'), 'utf8'), 'mía');
+  const copied = await fs.lstat(ourLink);
+  assert.equal(copied.isDirectory() && !copied.isSymbolicLink(), true, 'nexakit\'s link became a verified copy');
+});
+
+test('an apply that writes anything takes the lock; one with nothing to write touches nothing', async t => {
+  const { applyProjectSkillInstall } = await import('../src/skill-recommendations.js');
+  const { acquireLock } = await import('../src/install-lock.js');
+  const s = await projectSetup(t);
+  let acquired = 0;
+  const acquire = (...args) => { acquired++; return acquireLock(...args); };
+  await applyProjectSkillInstall(await plan(s, { skillNames: ['frontend-design'], mode: 'copy' }), { acquire });
+  assert.equal(acquired, 1, 'copy mode writes copies and metadata under the lock');
+
+  const t2 = await projectSetup(t);
+  await applyProjectSkillInstall(await plan(t2, { skillNames: ['frontend-design'] }), { acquire });
+  assert.equal(acquired, 2);
+  const manifest = path.join(t2.project, '.agent-toolkit/manifest.json');
+  const before = await fs.stat(manifest);
+  await applyProjectSkillInstall(await plan(t2, { skillNames: ['frontend-design'] }), { acquire });
+  assert.equal(acquired, 2, 'nothing to write: no lock');
+  assert.equal((await fs.stat(manifest)).mtimeMs, before.mtimeMs, 'and the manifest is not rewritten');
+  await applyProjectSkillInstall(await plan(t2, { skillNames: ['frontend-design'], gitIgnore: 'git-exclude' }), { acquire });
+  assert.equal(acquired, 3, 'a changed setting is a write too');
+});
+
+test('a project apply checks it still holds the lock right before each write', async t => {
+  const { applyProjectSkillInstall } = await import('../src/skill-recommendations.js');
+  const s = await projectSetup(t);
+  let checks = 0;
+  const acquire = async () => ({ release: async () => {}, assertHeld: async () => { if (++checks > 1) throw Object.assign(new Error('perdido'), { code: 'perdido' }); } });
+  await assert.rejects(applyProjectSkillInstall(await plan(s, { skillNames: ['frontend-design'] }), { acquire }), { code: 'perdido' });
+  const made = [];
+  for (const folder of ['.agents', '.claude']) if (await exists(path.join(s.project, folder, 'skills/frontend-design'))) made.push(folder);
+  assert.deepEqual(made, ['.agents'], 'only the first link, written while the lock was held');
 });

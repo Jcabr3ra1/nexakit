@@ -51,18 +51,30 @@ async function createExclusive(file, record) {
   }
 }
 
-// Called only for an owner judged dead. Renaming is the step only one process can win.
-async function recover(file, judgedMark) {
-  const again = await readOwner(file);
-  if (again.state !== 'ok' || again.owner.marca !== judgedMark) return;
-  const moved = `${file}.abandonado.${crypto.randomUUID()}`;
-  try { await fs.rename(file, moved); } catch (error) { return ignoreMissing(error); }
-  const taken = await readOwner(moved);
-  if (!(taken.state === 'ok' && taken.owner.marca === judgedMark)) {
-    // Another run replaced the lock between the check and the rename: put its lock back if the name is free.
-    try { await fs.link(moved, file); } catch (error) { if (error.code !== 'EEXIST') throw error; }
+// Called only for an owner judged dead. The removal happens under a second, short-lived guard, so two
+// recoverers can never act at once: otherwise one could remove a lock another process had just taken.
+// Under the guard only the dead lock can be at `file`: acquirers create it only when it is absent, and its
+// dead owner will not release it. Returns 'recuperado', or 'ocupado' when someone else is recovering it.
+async function recover(file, judgedMark, { record, hostname, isAlive }) {
+  const guard = `${file}.recuperando`;
+  if (!(await createExclusive(guard, record))) {
+    const holder = await readOwner(guard);
+    if (holder.state === 'ok' && holder.owner.equipo === hostname && !isAlive(holder.owner.pid)) {
+      // A recoverer died mid-recovery. Its guard is removed only if it is still the one judged dead.
+      const again = await readOwner(guard);
+      if (again.state === 'ok' && again.owner.marca === holder.owner.marca) await fs.unlink(guard).catch(ignoreMissing);
+      return 'recuperado';
+    }
+    return 'ocupado';
   }
-  await fs.unlink(moved).catch(() => {});
+  try {
+    const again = await readOwner(file);
+    if (again.state === 'ok' && again.owner.marca === judgedMark) await fs.unlink(file).catch(ignoreMissing);
+    return 'recuperado';
+  } finally {
+    const current = await readOwner(guard);
+    if (current.state === 'ok' && current.owner.marca === record.marca) await fs.unlink(guard).catch(ignoreMissing);
+  }
 }
 
 const busy = (file, unreadable) => new LockError('ocupado', unreadable
@@ -90,9 +102,8 @@ export async function acquireLock(nexakitDir, {
         throw new LockError('otro-equipo', `El bloqueo de nexakit lo creó otro equipo (${owner.equipo}). Si no hay ninguna instalación en curso, bórralo a mano: ${file}`);
       }
       // Age never decides: a live owner keeps the lock however long it takes.
-      if (!isAlive(owner.pid)) {
+      if (!isAlive(owner.pid) && await recover(file, owner.marca, { record, hostname, isAlive }) === 'recuperado') {
         if (++recoveries > MAX_RECOVERIES) throw busy(file, false);
-        await recover(file, owner.marca);
         continue;
       }
     }
