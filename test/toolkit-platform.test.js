@@ -20,7 +20,7 @@ test('Windows executable detection uses case-insensitive PATHEXT and defaults', 
  assert.equal(await executable('absent',{PATH:root}),false);
 });
 
-test('setup creates, preserves and replaces links without deleting targets; real folders conflict', async t=>{
+test('setup creates and preserves links without deleting targets; foreign links and real folders conflict', async t=>{
  const {setupToolkit}=await import('../src/toolkit-setup.js');
  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'toolkit-links-')));
  const homeDirectory=path.join(root,'home'), toolkitRoot=path.join(root,'toolkit'), other=path.join(root,'other');
@@ -34,15 +34,16 @@ test('setup creates, preserves and replaces links without deleting targets; real
  t.after(async()=>{ try { if((await fs.lstat(target)).isSymbolicLink()) await fs.unlink(target); } catch(e) {if(e.code!=='ENOENT') throw e;} await fs.rm(root,{recursive:true,force:true}); });
  assert.equal((await setupToolkit(options)).applied,true);
  const before=await fs.lstat(target);
- assert.equal((await setupToolkit(options)).skills[0].state,'installed');
+ assert.equal((await setupToolkit(options)).skills[0].state,'instalado');
  assert.equal((await fs.lstat(target)).birthtimeMs,before.birthtimeMs);
  await fs.unlink(target);
  await fs.symlink(path.resolve(other),target,process.platform==='win32'?'junction':'dir');
+ // A link to an existing folder that is not a copy of nexakit belongs to the user: it is never repointed.
  const preview=await setupToolkit({...options,apply:false});
- assert.equal(preview.skills[0].state,'replace');
+ assert.equal(preview.skills[0].state,'conflicto');
+ const kept=await setupToolkit(options);
+ assert.deepEqual([kept.applied,kept.conflicts],[true,1]);
  assert.equal(await fs.realpath(target),other);
- assert.equal((await setupToolkit(options)).applied,true);
- assert.equal(await fs.realpath(target),path.join(toolkitRoot,'skills/example'));
  assert.equal(await fs.readFile(path.join(other,'keep'),'utf8'),'preserve');
  await fs.unlink(target); await fs.mkdir(target); await fs.writeFile(path.join(target,'keep'),'original');
  assert.equal((await setupToolkit(options)).conflicts,1);

@@ -9,12 +9,12 @@ const write = async (file, content) => {
 // Lays out what `npm install --prefix <prefix> nexakit@<version>` leaves behind, with a minimal copy of the
 // three dependencies the stable install probes. `broken` makes one specific part wrong:
 // 'bin' | 'dependencia' | 'version' | 'skill'.
-export async function writeFakeInstall(prefix, { version = '9.9.9', name = 'nexakit', broken = null } = {}) {
+export async function writeFakeInstall(prefix, { version = '9.9.9', name = 'nexakit', broken = null, skills = ['example'] } = {}) {
   const modules = path.join(prefix, 'node_modules');
   const root = path.join(modules, 'nexakit');
   await write(path.join(root, 'package.json'), JSON.stringify({ name, version: broken === 'version' ? '0.0.1' : version }));
   if (broken !== 'bin') await write(path.join(root, 'bin/agent-toolkit-mcp.js'), '');
-  await write(path.join(root, 'skills/example/SKILL.md'), 'x');
+  for (const skill of skills) await write(path.join(root, 'skills', skill, 'SKILL.md'), 'x');
   await write(path.join(root, 'catalogs/skills/catalogada', broken === 'skill' ? 'LEEME.md' : 'SKILL.md'), 'x');
   if (broken !== 'dependencia') {
     await write(path.join(modules, 'ajv/package.json'), JSON.stringify({ name: 'ajv', version: '1.0.0' }));
@@ -28,12 +28,12 @@ export async function writeFakeInstall(prefix, { version = '9.9.9', name = 'nexa
 }
 
 // A stand-in for the `runNpm` option: same contract as the real one, `{ status, stderr }`, and it records its calls.
-export function fakeNpm({ version = '9.9.9', fail = false, broken = null } = {}) {
+export function fakeNpm({ version = '9.9.9', fail = false, broken = null, skills } = {}) {
   const calls = [];
   const runNpm = async args => {
     calls.push(args);
     if (fail) return { status: 1, stderr: 'npm ERR! fallo simulado\n' };
-    await writeFakeInstall(args[args.indexOf('--prefix') + 1], { version, broken });
+    await writeFakeInstall(args[args.indexOf('--prefix') + 1], { version, broken, ...(skills && { skills }) });
     return { status: 0, stderr: '' };
   };
   return Object.assign(runNpm, { calls });

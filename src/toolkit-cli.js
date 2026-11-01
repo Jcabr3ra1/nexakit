@@ -10,6 +10,7 @@ import {
 } from './skill-recommendations.js';
 import { formatRecommendationReport, runToolkitTui } from './toolkit-tui.js';
 import { doctorToolkit, setupToolkit } from './toolkit-setup.js';
+import { READY_LINK_STATES } from './link-states.js';
 
 const PROFILE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const RECOMMEND_PROFILES = ['frontend', 'backend', 'mcp', 'security'];
@@ -17,8 +18,8 @@ const RECOMMEND_PROFILES = ['frontend', 'backend', 'mcp', 'security'];
 const HELP = `Uso: npx nexakit [tui] [--project <ruta>] [--agent codex|claude|all] [--perfil-codex <nombre>]
      npx nexakit recommend [--project <ruta>] [--profile frontend|backend|mcp|security] [--client codex|claude] [--dry-run] [--json]
      npx nexakit detach [--project <ruta>] [--global] [--agent codex|claude|all] [--apply] [--json]
-     npx nexakit doctor [--agent codex|claude|all] [--perfil-codex <nombre>] [--json]
-     npx nexakit setup [--agent codex|claude|all] [--perfil-codex <nombre>] [--apply] [--json]
+     npx nexakit doctor [--agent codex|claude|antigravity|all] [--perfil-codex <nombre>] [--json]
+     npx nexakit setup [--agent codex|claude|antigravity|all] [--perfil-codex <nombre>] [--apply] [--json]
 
 (Alias local compatible: agent-toolkit)
 En una terminal interactiva, npx nexakit abre el asistente por pasos:
@@ -190,7 +191,7 @@ export async function runToolkitCli(
     const flag = rest[i];
     if (seen.has(flag)) { await err(HELP); return 2; }
     seen.add(flag);
-    if (flag === '--agent' && ['codex', 'claude', 'all'].includes(rest[i + 1])) parsed.agent = rest[++i];
+    if (flag === '--agent' && ['codex', 'claude', 'antigravity', 'all'].includes(rest[i + 1])) parsed.agent = rest[++i];
     else if (flag === '--json') parsed.json = true;
     else if (flag === '--perfil-codex' && PROFILE_RE.test(rest[i + 1] ?? '')) parsed.codexProfile = rest[++i];
     else if (flag === '--apply' && command === 'setup') parsed.apply = true;
@@ -204,8 +205,8 @@ export async function runToolkitCli(
       : result.node.supported &&
         Object.values(result.dependencies).every(Boolean) &&
         Object.values(result.clients).every(c => c.available) &&
-        Object.values(result.mcp).every(m => m.state === 'configured') &&
-        result.skills.every(s => s.state === 'installed') &&
+        Object.values(result.mcp).every(m => READY_LINK_STATES.includes(m.state)) &&
+        result.skills.every(s => READY_LINK_STATES.includes(s.state)) &&
         (!result.codexSandbox || ['allowed', 'not-needed', 'unknown'].includes(result.codexSandbox.state))
         ? 0
         : 1;

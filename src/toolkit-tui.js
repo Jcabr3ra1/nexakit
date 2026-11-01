@@ -13,6 +13,7 @@ import {
 import { levelAgentPlan, writeLevelAgents } from './level-agents.js';
 import { getToolkitCommandsGuide } from './toolkit-commands-guide.js';
 import { doctorToolkit, setupToolkit, TOOLKIT_ROOT } from './toolkit-setup.js';
+import { ACTIONABLE_LINK_STATES, READY_LINK_STATES } from './link-states.js';
 
 const AGENTS_CYCLE = ['all', 'claude', 'codex'];
 const AGENT_LABELS = Object.freeze({
@@ -140,7 +141,7 @@ function buildSkillItem(entry, linksForSkill, { isFundamental }) {
 }
 
 export function createToolkitTuiModel(snapshot) {
-  const pendingGlobal = snapshot.setupPreview.skills.filter(s => ['missing', 'replace'].includes(s.state)).length;
+  const pendingGlobal = snapshot.setupPreview.skills.filter(s => ACTIONABLE_LINK_STATES.includes(s.state)).length;
   const conflictGlobal = snapshot.setupPreview.conflicts;
   const newLevels = snapshot.codexLevels.files.filter(f => f.state === 'nuevo').length;
   const globalNeedsSync = (pendingGlobal > 0 && conflictGlobal === 0) || newLevels > 0;
@@ -299,7 +300,7 @@ export function renderToolkitTuiFrame(model, { columns = 96, color = true } = {}
     outside();
   }
 
-  outside(`${doc.node.supported ? '✓' : '!'} Node ${doc.node.version}  ${Object.entries(doc.clients).map(([name, info]) => `${info.available ? '✓' : '○'} ${name}`).join('  ')}  ${Object.values(doc.mcp).every(m => m.state === 'configured') ? '✓ MCP' : '○ MCP pendiente'}`);
+  outside(`${doc.node.supported ? '✓' : '!'} Node ${doc.node.version}  ${Object.entries(doc.clients).map(([name, info]) => `${info.available ? '✓' : '○'} ${name}`).join('  ')}  ${Object.values(doc.mcp).every(m => READY_LINK_STATES.includes(m.state)) ? '✓ MCP' : '○ MCP pendiente'}`);
   const signals = model.snapshot.inspection.signals;
   outside(`Stack: ${signals.length ? signals.map(s => s.label).join(', ') : 'sin señales Node en la raíz'}`, c.dim);
   for (const signal of model.snapshot.recommendation.unmatchedSignals) outside(`${signal.label}: sin skill empaquetada aún.`, c.dim);
@@ -472,9 +473,9 @@ export async function computeInstallPreview(model, setupOptions = {}) {
       ...(model.snapshot.codexProfile && { codexProfile: model.snapshot.codexProfile })
     });
     for (const s of freshSetupPreview.skills) {
-      if (['missing', 'replace'].includes(s.state)) {
+      if (ACTIONABLE_LINK_STATES.includes(s.state)) {
         actions.push({ kind: 'create', label: `[global ${s.client}] ${s.name} → ${s.target}` });
-      } else if (s.state === 'conflict') {
+      } else if (['conflicto', 'roto-ajeno'].includes(s.state)) {
         conflictsCount++;
         actions.push({ kind: 'conflict', label: `[conflicto global ${s.client}] ${s.target} (no se toca)` });
       }
@@ -543,8 +544,8 @@ export async function computeInstallPreview(model, setupOptions = {}) {
   }
 
   const manualCommands = [];
-  for (const [client, state] of Object.entries(model.snapshot.doctor.mcp)) {
-    if ((activeAgent === 'all' || activeAgent === client) && state.state !== 'configured' && model.snapshot.doctor.registrationCommands[client]) {
+  for (const client of Object.keys(model.snapshot.doctor.mcp)) {
+    if ((activeAgent === 'all' || activeAgent === client) && model.snapshot.doctor.registrationCommands[client]) {
       manualCommands.push(model.snapshot.doctor.registrationCommands[client]);
     }
   }

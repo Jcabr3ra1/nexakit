@@ -5,6 +5,9 @@ import { IS_WINDOWS } from './platform.js';
 
 // Evaluated in this order; the first one that holds wins.
 export const LINK_STATES = Object.freeze(['falta', 'conflicto', 'efimero', 'instalado', 'otra-copia', 'roto-propio', 'roto-ajeno']);
+// What an apply acts on, and what counts as ready.
+export const ACTIONABLE_LINK_STATES = Object.freeze(['falta', 'efimero', 'roto-propio']);
+export const READY_LINK_STATES = Object.freeze(['instalado', 'otra-copia']);
 
 const PACKAGE_NAMES = new Set(['nexakit', 'agent-toolkit']);
 const MAX_PACKAGE_BYTES = 1_048_576;
@@ -55,12 +58,17 @@ async function realpathOrNull(file) {
 }
 
 export async function classifyLink({ target, suffix, activeRoots = [], isOwned = () => false }) {
-  const base = { target, suffix };
   const link = await readLink(target);
-  if (!link.exists) return { ...base, state: 'falta' };
-  if (!link.isLink) return { ...base, state: 'conflicto' };
-  const { literal, absolute } = link;
-  const resolved = await realpathOrNull(target);
+  if (!link.exists) return { target, suffix, state: 'falta' };
+  if (!link.isLink) return { target, suffix, state: 'conflicto' };
+  return classifyReference({ target, literal: link.literal, absolute: link.absolute, suffix, activeRoots, isOwned });
+}
+
+// Classifies a path that points into a copy of nexakit without being a link itself, such as the script
+// an MCP entry runs. `target` identifies the reference for `isOwned`; `absolute` defaults to the literal.
+export async function classifyReference({ target, literal, absolute = path.resolve(literal), suffix, activeRoots = [], isOwned = () => false }) {
+  const base = { target, suffix };
+  const resolved = await realpathOrNull(absolute);
 
   // Before `instalado`, so a link into the cache this run came from is never taken as good.
   if (isEphemeralPath(absolute) || (resolved && isEphemeralPath(resolved))) {

@@ -177,3 +177,21 @@ test('relinkIfUnchanged with a null literal only creates a link that does not ex
   assert.equal(await relinkIfUnchanged({ target: f.target('nuevo'), expectedLiteral: null, source: path.join(next, 'skills/example') }), 'hecho');
   assert.equal(await fs.realpath(f.target('nuevo')), path.join(next, 'skills/example'));
 });
+
+test('classifyReference classifies a path that is not a link, such as an MCP script', async t => {
+  const f = await fixture(t), { classifyReference } = await import(moduleUrl);
+  const suffix = 'bin/agent-toolkit-mcp.js';
+  const active = await makeCopy(path.join(f.root, 'active'));
+  const dev = await makeCopy(path.join(f.root, 'dev'));
+  const run = (literal, owned = false) => classifyReference({ target: 'mcp:claude:agent-toolkit-workflow', literal, suffix, activeRoots: [active], isOwned: () => owned });
+  assert.equal((await run(path.join(active, suffix))).state, 'instalado');
+  const other = await run(path.join(dev, suffix));
+  assert.deepEqual([other.state, other.root], ['otra-copia', dev]);
+  assert.equal((await run(path.join(f.root, '.npm/_npx/abc/node_modules/nexakit', suffix))).state, 'efimero');
+  const dead = path.join(f.root, 'muerta', suffix);
+  assert.equal((await run(dead, true)).state, 'roto-propio');
+  const foreign = await run(dead);
+  assert.deepEqual([foreign.state, foreign.root, foreign.literal], ['roto-ajeno', path.join(f.root, 'muerta'), dead]);
+  await fs.writeFile(path.join(f.root, 'suelto.js'), '');
+  assert.equal((await classifyReference({ target: 'x', literal: path.join(f.root, 'suelto.js'), suffix, activeRoots: [active] })).state, 'conflicto');
+});
