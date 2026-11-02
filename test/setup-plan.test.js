@@ -166,3 +166,10 @@ test('saving the answers is announced when no project skill is written', () => {
   assert.ok(marks(confirmation).includes('+ Guardar tus respuestas en .agent-toolkit (ignorado en Git)'));
   assert.ok(blockIds(confirmation).includes('answers'));
 });
+
+test('home paths are shortened with either separator', async () => {
+  const { shortPath } = await import('../src/setup-plan.js');
+  assert.equal(shortPath('/home/juan/x/y', '/home/juan'), '~/x/y');
+  assert.equal(shortPath('C:\\Users\\juan\\x', 'C:\\Users\\juan'), '~\\x');
+  assert.equal(shortPath('/home/juanito/x', '/home/juan'), '/home/juanito/x');
+});

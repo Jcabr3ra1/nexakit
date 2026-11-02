@@ -33,9 +33,10 @@ test('finds memories registered in Claude, Codex and Antigravity', async t => {
   const c = await vault(path.join(h, 'vaults', 'C-MEMORY'), { id: 'c', repositoryPath: path.join(h, 'code', 'c') });
   await write(path.join(h, '.claude.json'), JSON.stringify({ mcpServers: { 'a-memory': filesystem(a), railway: { command: 'railway', args: ['mcp'] } } }));
   await write(path.join(h, '.codex', 'config.toml'), [
-    '[mcp_servers.a-memory]', 'command = "npx"', `args = ["-y", "@modelcontextprotocol/server-filesystem", "${a}"]`, '',
+    // JSON strings are valid TOML basic strings, with Windows backslashes escaped as the real Codex writes them.
+    '[mcp_servers.a-memory]', 'command = "npx"', `args = ["-y", "@modelcontextprotocol/server-filesystem", ${JSON.stringify(a)}]`, '',
     '[mcp_servers.b-memory]', 'command = "/usr/local/bin/node"',
-    `args = ["/x/nexakit/bin/project-memory-mcp.js", "--manifest", "${path.join(b, 'project-memory.json')}"]`, ''
+    `args = ["/x/nexakit/bin/project-memory-mcp.js", "--manifest", ${JSON.stringify(path.join(b, 'project-memory.json'))}]`, ''
   ].join('\n'));
   await write(path.join(h, '.gemini', 'config', 'mcp_config.json'), JSON.stringify({ mcpServers: { 'c-memory': { command: 'npx', args: filesystem(c).args } } }));
 

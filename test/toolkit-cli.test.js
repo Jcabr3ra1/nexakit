@@ -128,7 +128,7 @@ test('without a terminal it prints the plan and exits 2 without writing', async 
   const code = await runToolkitCli(['--project', path.join(w.repo, 'frontend')], { ...c, isTTY: false, options: w.options });
   assert.equal(code, 2);
   assert.match(c.io.out, /^nexakit · Punto Motos \(repositorio completo\)$/mu);
-  assert.match(c.io.out, /^  \+ Memoria nueva en ~\/nexakit-memorias\/punto-motos$/mu);
+  assert.match(c.io.out, /^  \+ Memoria nueva en ~[\\/]nexakit-memorias[\\/]punto-motos$/mu);
   assert.match(c.io.out, /npx nexakit --si/u);
   assert.deepEqual(await fs.readdir(w.home), [], 'nothing written in the home');
   assert.equal(await exists(path.join(w.repo, '.agent-toolkit')), false);

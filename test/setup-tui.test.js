@@ -123,7 +123,7 @@ test('another folder for the memory: typed with ~, checked, and refused when it 
   for (const char of '~/memorias/pm') model = press(model, char);
   const { effect, path: target } = handleSetupKey(model, '\r');
   assert.equal(effect, 'check-path');
-  assert.equal(target, `${HOME}/memorias/pm`);
+  assert.equal(target, path.resolve(path.join(HOME, 'memorias/pm')));
   assert.match(frame(applyMemoryPathCheck(model, target, 'invalid')), /no está vacía y no es una memoria/u);
   const accepted = applyMemoryPathCheck(model, target, 'new');
   assert.equal(accepted.step, 'agents');

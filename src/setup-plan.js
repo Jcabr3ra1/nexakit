@@ -11,8 +11,10 @@ const PENDING_LINKS = new Set(['missing', 'replace']);
 export function joinNames(names) {
   return names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} y ${names.at(-1)}`;
 }
+// ~/… for paths under the home folder, with either separator (Windows uses \\).
 export const shortPath = (target, homeDirectory) =>
-  (homeDirectory && (target === homeDirectory || target.startsWith(`${homeDirectory}/`)) ? `~${target.slice(homeDirectory.length)}` : target);
+  (homeDirectory && (target === homeDirectory || target.startsWith(`${homeDirectory}/`) || target.startsWith(`${homeDirectory}\\`))
+    ? `~${target.slice(homeDirectory.length)}` : target);
 const plural = (count, one, many) => (count === 1 ? one : many);
 
 // "frontend usa React", "el README menciona Tauri": the reason for a suggestion, from where the signal was found.
