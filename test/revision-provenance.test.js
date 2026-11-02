@@ -15,3 +15,13 @@ test('Codex provenance matches both execution id and originator, never the newes
  assert.equal(await readRevisionProvenance({client:'codex',executionId:'missing',homeDirectory:home}),null);
  assert.equal(await readRevisionProvenance({client:'codex',executionId:'../escape',homeDirectory:home}),null);
 });
+test('a sandbox denial must come from a correlated tool output, never the agent report',async t=>{
+ const {readCodexProbeDenial}=await import('../src/revision-provenance.js');
+ const home=await fs.mkdtemp(path.join(os.tmpdir(),'revision-denial-'));t.after(()=>fs.rm(home,{recursive:true,force:true}));
+ const dir=path.join(home,'.codex','sessions');await fs.mkdir(dir,{recursive:true});const file=path.join(dir,'rollout-test.jsonl');
+ const meta={type:'session_meta',payload:{id:'test',originator:'codex_exec'}};
+ await fs.writeFile(file,[meta,{type:'response_item',payload:{type:'message',content:'operation not permitted'}}].map(JSON.stringify).join('\n'));
+ assert.equal(await readCodexProbeDenial({executionId:'test',homeDirectory:home}),false);
+ await fs.appendFile(file,'\n'+JSON.stringify({type:'response_item',payload:{type:'custom_tool_call_output',output:[{type:'input_text',text:JSON.stringify({result:{exit_code:1,output:'operation not permitted: target'}})}]}}));
+ assert.equal(await readCodexProbeDenial({executionId:'test',homeDirectory:home}),true);
+});
