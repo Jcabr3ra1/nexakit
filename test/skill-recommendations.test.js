@@ -851,3 +851,13 @@ test('answers are never written through a manifest that is a link', async t => {
   await assert.rejects(withLock(s.home, lock => writeSetupAnswers(s.project, ANSWERS, lock)), /no se guardaron/u);
   assert.equal(await fs.readFile(mine, 'utf8'), 'mío');
 });
+
+test('a temporary file that is not ours is never removed', async t => {
+  const { writeSetupAnswers } = await import('../src/skill-recommendations.js');
+  const s = await projectSetup(t);
+  await fs.mkdir(path.join(s.project, '.agent-toolkit'));
+  const stray = path.join(s.project, '.agent-toolkit', `manifest.json.${process.pid}.tmp`);
+  await fs.writeFile(stray, 'ajeno');
+  await assert.rejects(withLock(s.home, lock => writeSetupAnswers(s.project, ANSWERS, lock)), { code: 'EEXIST' });
+  assert.equal(await fs.readFile(stray, 'utf8'), 'ajeno');
+});

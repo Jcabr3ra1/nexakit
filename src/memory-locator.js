@@ -72,7 +72,9 @@ export async function registeredServers({ homeDirectory, codexHome = path.join(h
     result[client] = {};
     for (const [name, server] of await serversOf(client, { homeDirectory, codexHome })) {
       const candidate = manifestCandidate(server);
-      result[client][name] = candidate ? await fs.realpath(path.dirname(candidate)).catch(() => null) : null;
+      const vault = candidate ? await fs.realpath(path.dirname(candidate)).catch(() => null) : null;
+      const kind = !candidate ? null : (server.args ?? []).some(arg => typeof arg === 'string' && arg.replaceAll('\\', '/').endsWith(`/${MEMORY_SCRIPT}`)) ? 'guard' : 'filesystem';
+      result[client][name] = vault && { vault, kind };
     }
   }
   return result;

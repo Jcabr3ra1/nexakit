@@ -38,8 +38,8 @@ export async function writeStableCommand(plan, lock) {
   await lock.assertHeld();
   await fs.mkdir(path.dirname(plan.path), { recursive: true, mode: 0o700 });
   const temporary = `${plan.path}.${process.pid}.tmp`;
+  await fs.writeFile(temporary, plan.content, { mode: 0o755, flag: 'wx' });
   try {
-    await fs.writeFile(temporary, plan.content, { mode: 0o755, flag: 'wx' });
     await fs.chmod(temporary, 0o755);
     await lock.assertHeld();
     // Read again right before replacing: something that became a link or a folder meanwhile is left alone.

@@ -34,9 +34,9 @@ test('applies the blocks in the fixed order, reports progress, and a second run 
   const progress = [];
   const result = await applySetup(w.options, answers, { onProgress: (id, phase) => progress.push(`${id}:${phase}`) });
   assert.equal(result.ok, true, JSON.stringify(result.failed));
-  assert.deepEqual(result.done, ['stable-command', 'project-skills', 'answers', 'global-skills:claude', 'global-skills:codex', 'global-skills:antigravity',
+  assert.deepEqual(result.done, ['answers', 'stable-command', 'project-skills', 'global-skills:claude', 'global-skills:codex', 'global-skills:antigravity',
     'memory-init', 'memory-connect:claude', 'memory-connect:codex', 'memory-connect:antigravity', 'final-check']);
-  assert.deepEqual(progress.slice(0, 2), ['stable-command:start', 'stable-command:done']);
+  assert.deepEqual(progress.slice(0, 2), ['answers:start', 'answers:done']);
   assert.equal(result.finalCheck.ok, true, result.finalCheck.message);
 
   const vault = path.join(w.home, 'nexakit-memorias', 'punto-motos');
@@ -144,7 +144,7 @@ test('from an npx cache: the stable copy comes first and everything points at it
   const answers = { ...suggestedAnswers(state), agents: ['claude'], memory: { decision: 'later' } };
   const result = await applySetup(options, answers, { runNpm });
   assert.equal(result.ok, true, JSON.stringify(result.failed));
-  assert.equal(result.done[0], 'stable-copy');
+  assert.equal(result.done[1], 'stable-copy');
   assert.equal(calls.length, 1);
   const actual = await fs.realpath(path.join(w.home, '.nexakit/actual'));
   assert.equal(await fs.realpath(path.join(w.repo, '.claude/skills/frontend-design')), path.join(actual, 'skills/frontend-design'));
@@ -213,4 +213,22 @@ test('a final check that still finds something pending makes the run fail', asyn
   assert.equal(result.ok, false);
   assert.equal(result.failed, undefined);
   assert.match(result.finalCheck.message, /quedó pendiente/u);
+});
+
+test('a memory MCP with the right name and vault but the wrong kind of server for that agent is a conflict', async t => {
+  const w = await world(t);
+  const claudeOnly = { ...suggestedAnswers(await gatherSetupState(w.options)), agents: ['claude'] };
+  assert.equal((await applySetup(w.options, claudeOnly)).ok, true);
+  const vault = path.join(w.home, 'nexakit-memorias', 'punto-motos');
+  // Antigravity already has the name, serving this vault, but through server-filesystem (it could write).
+  await fs.mkdir(path.dirname(w.clis.files.agyFile), { recursive: true });
+  await fs.writeFile(w.clis.files.agyFile, JSON.stringify({ mcpServers: { 'punto-motos-memory': {
+    command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem@2026.8.31', vault] } } }));
+  const manifestBefore = await fs.readFile(path.join(vault, 'project-memory.json'), 'utf8');
+  const state = await gatherSetupState(w.options);
+  assert.equal(state.memory.connections[vault].antigravity, 'conflict');
+  const all = { ...claudeOnly, agents: ['claude', 'antigravity'] };
+  assert.ok(!buildConfirmation(state, all).blocks.some(block => block.id === 'memory-connect:antigravity'));
+  await applySetup(w.options, all);
+  assert.equal(await fs.readFile(path.join(vault, 'project-memory.json'), 'utf8'), manifestBefore, 'the manifest is not touched');
 });

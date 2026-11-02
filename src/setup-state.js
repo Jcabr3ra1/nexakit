@@ -46,8 +46,12 @@ async function readMemoryManifest(vaultPath) {
 async function newConnection(agent, { mcpName, vaultPath, servers, agentsFound }) {
   if (!agentsFound[agent]) return 'unavailable';
   if (!Object.hasOwn(servers[agent] ?? {}, mcpName)) return 'create';
+  // Taken by this same vault with the server this agent's connection uses (Antigravity: nexakit's read-only
+  // server; Claude and Codex: server-filesystem) is fine; anything else under that name is a conflict.
   const real = await fs.realpath(vaultPath).catch(() => path.resolve(vaultPath));
-  return servers[agent][mcpName] === real ? 'create' : 'conflict';
+  const current = servers[agent][mcpName];
+  const expected = agent === 'antigravity' ? 'guard' : 'filesystem';
+  return current?.vault === real && current.kind === expected ? 'create' : 'conflict';
 }
 
 // How an existing memory is connected to each agent: unchanged, create, conflict or unavailable (no CLI). An agent

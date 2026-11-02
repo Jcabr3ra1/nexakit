@@ -925,12 +925,12 @@ async function writeProjectManifestAndIgnore({
     return { manifestWritten: false, gitIgnoreUpdated };
   }
   const temporary = `${manifestPath}.${process.pid}.tmp`;
+  await fs.writeFile(temporary, JSON.stringify(manifestPayload, null, 2) + '\n', { mode: 0o644, flag: 'wx' });
   try {
-    await fs.writeFile(temporary, JSON.stringify(manifestPayload, null, 2) + '\n', { mode: 0o644, flag: 'wx' });
     await lock?.assertHeld();
     await fs.rename(temporary, manifestPath);
   } finally {
-    await fs.rm(temporary, { force: true });
+    await fs.rm(temporary, { force: true }); // ours: created exclusively above
   }
   return { manifestWritten: true, gitIgnoreUpdated };
 }

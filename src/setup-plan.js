@@ -94,8 +94,6 @@ export function buildConfirmation(state, answers) {
   }
   if (!toInstall.length && readySkills.length) add('✓', 'Skills del proyecto ya estaban listas');
   if (toInstall.length || removeSkills.length) block('project-skills', 'Skills del proyecto');
-  // The answers are saved right after the project skills, before anything that can fail, so a retry keeps them.
-  const answersAt = blocks.length;
 
   // Base skills of each chosen agent: only what is missing or repairable; conflicts are reported.
   const globalBlocks = [];
@@ -141,7 +139,8 @@ export function buildConfirmation(state, answers) {
   }
 
   if (answersChanged && (blocks.length || state.savedAnswers)) {
-    blocks.splice(answersAt, 0, { id: 'answers', label: 'Respuestas guardadas' });
+    // Saved first, before any block that can fail, so a retry starts from what the person decided.
+    blocks.unshift({ id: 'answers', label: 'Respuestas guardadas' });
     if (!blocks.some(item => item.id === 'project-skills')) add('+', 'Guardar tus respuestas en .agent-toolkit (ignorado en Git)');
   }
   if (blocks.length) block('final-check', 'Comprobación final');

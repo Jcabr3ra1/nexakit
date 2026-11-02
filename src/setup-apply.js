@@ -40,8 +40,8 @@ async function ensureMemoryAgent(vaultPath, agent, repositoryRoot, lock) {
   if (current) current.enabled = true;
   else manifest.agents.push({ id: agent, enabled: true, skillName: manifest.agents[0]?.skillName ?? manifest.project.id });
   const temporary = `${file}.${process.pid}.tmp`;
+  await fs.writeFile(temporary, `${JSON.stringify(manifest, null, 2)}\n`, { flag: 'wx' });
   try {
-    await fs.writeFile(temporary, `${JSON.stringify(manifest, null, 2)}\n`, { flag: 'wx' });
     await lock.assertHeld();
     await fs.rename(temporary, file);
   } finally {

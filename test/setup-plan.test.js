@@ -53,7 +53,7 @@ test('first run in Punto Motos: short lines in a fixed order, and the blocks to 
     '+ Memoria nueva en ~/programacion/Obsidian-Vaults/PUNTO-MOTOS-MEMORY',
     '+ Conectar la memoria a Claude Code y Codex'
   ]);
-  assert.deepEqual(blockIds(confirmation), ['stable-command', 'project-skills', 'answers', 'global-skills:claude', 'global-skills:codex',
+  assert.deepEqual(blockIds(confirmation), ['answers', 'stable-command', 'project-skills', 'global-skills:claude', 'global-skills:codex',
     'memory-init', 'memory-connect:claude', 'memory-connect:codex', 'final-check'], 'answers are saved before anything that can fail');
   assert.equal(confirmation.allReady, false);
 });
@@ -61,7 +61,7 @@ test('first run in Punto Motos: short lines in a fixed order, and the blocks to 
 test('running from npx first prepares the stable copy', () => {
   const state = puntoMotos({ stableCopy: { needed: true } });
   const confirmation = buildConfirmation(state, suggestedAnswers(state));
-  assert.equal(confirmation.blocks[0].id, 'stable-copy');
+  assert.equal(confirmation.blocks[1].id, 'stable-copy', 'right after saving the answers');
   assert.equal(marks(confirmation)[0], '+ Copia estable de nexakit en ~/.nexakit');
 });
 
