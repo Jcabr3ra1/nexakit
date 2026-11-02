@@ -4,10 +4,13 @@ import path from 'node:path';
 import { IS_WINDOWS } from './platform.js';
 
 // Evaluated in this order; the first one that holds wins.
-export const LINK_STATES = Object.freeze(['falta', 'conflicto', 'efimero', 'instalado', 'otra-copia', 'roto-propio', 'roto-ajeno']);
+export const LINK_STATES = Object.freeze(['falta', 'conflicto', 'efimero', 'instalado', 'otra-copia', 'roto-propio', 'roto-ajeno', 'quitada']);
 // What an apply acts on, and what counts as ready.
 export const ACTIONABLE_LINK_STATES = Object.freeze(['falta', 'efimero', 'roto-propio']);
 export const READY_LINK_STATES = Object.freeze(['instalado', 'otra-copia']);
+// `quitada`: nexakit instaló el enlace y el usuario lo quitó. No es pendiente: se respeta hasta que pida `--reponer`.
+export const REMOVED_BY_USER_STATE = 'quitada';
+export const SETTLED_LINK_STATES = Object.freeze([...READY_LINK_STATES, REMOVED_BY_USER_STATE]);
 
 const PACKAGE_NAMES = new Set(['nexakit', 'agent-toolkit']);
 const MAX_PACKAGE_BYTES = 1_048_576;

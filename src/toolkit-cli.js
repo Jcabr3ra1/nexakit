@@ -23,9 +23,10 @@ import { gatherSetupState } from './setup-state.js';
 import { runSetupTui } from './setup-tui.js';
 import { doctorToolkit, setupToolkit } from './toolkit-setup.js';
 import { applyLegacyRepair, planLegacyRepair } from './legacy-repair.js';
-import { READY_LINK_STATES } from './link-states.js';
+import { READY_LINK_STATES, REMOVED_BY_USER_STATE, SETTLED_LINK_STATES } from './link-states.js';
 
 const PROFILE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
+const SKILL_NAME_RE = /^[a-z0-9-]+$/u;
 const RECOMMEND_PROFILES = ['frontend', 'backend', 'mcp', 'security'];
 
 const HELP = `Uso: npx nexakit [--project <ruta>] [--si]
@@ -39,7 +40,7 @@ const HELP = `Uso: npx nexakit [--project <ruta>] [--si]
      npx nexakit recommend [--project <ruta>] [--profile frontend|backend|mcp|security] [--client codex|claude] [--dry-run] [--json]
      npx nexakit scan <carpeta de skill> [--json]
      npx nexakit doctor [--agent codex|claude|antigravity|all] [--perfil-codex <nombre>] [--json]
-     npx nexakit setup [--agent codex|claude|antigravity|all] [--perfil-codex <nombre>] [--apply] [--json]
+     npx nexakit setup [--agent codex|claude|antigravity|all] [--perfil-codex <nombre>] [--omitir <skill>] [--reponer <skill>] [--apply] [--json]
 
 npx nexakit hace tres preguntas con la respuesta ya sugerida (skills, memoria e IA)
 y, con una sola confirmación, deja listo el proyecto: skills, memoria conectada a
@@ -53,7 +54,8 @@ reparar re-apunta enlaces rotos de una instalación anterior (--desde es la carp
 que ya no existe); lista lo que encontró y siempre pregunta.
 memoria ejecuta los subcomandos de project-memory (init, connect, doctor, status, sync).
 revision y modelo piden una revisión a otra IA o consultan los modelos disponibles.
-recommend inspecciona el proyecto en solo lectura; setup prepara las skills base globales.
+recommend inspecciona el proyecto en solo lectura; setup prepara las skills base globales y respeta las que quitaste
+(--omitir <skill> declara quitada una que ya no tiene enlace; --reponer <skill> devuelve una; ambos se repiten).
 (Alias local compatible: agent-toolkit)
 `;
 
@@ -247,6 +249,16 @@ export async function runToolkitCli(
   const seen = new Set();
   for (let i = 0; i < rest.length; i++) {
     const flag = rest[i];
+    if ((flag === '--reponer' || flag === '--omitir') && command === 'setup') {
+      const name = rest[i + 1] ?? '';
+      if (!SKILL_NAME_RE.test(name)) {
+        await err(HELP);
+        return 2;
+      }
+      (parsed[flag === '--reponer' ? 'restore' : 'omit'] ??= []).push(name);
+      i++;
+      continue;
+    }
     if (seen.has(flag)) {
       await err(HELP);
       return 2;
@@ -274,7 +286,7 @@ export async function runToolkitCli(
       return result.node.supported &&
         Object.values(result.dependencies).every(Boolean) &&
         Object.values(result.clients).some((c) => c.available) &&
-        result.skills.every((s) => READY_LINK_STATES.includes(s.state)) &&
+        result.skills.every((s) => SETTLED_LINK_STATES.includes(s.state)) &&
         !(result.retiredSkills ?? []).some((s) => !s.owned)
         ? 0
         : 1;
@@ -283,7 +295,7 @@ export async function runToolkitCli(
       Object.values(result.dependencies).every(Boolean) &&
       Object.values(result.clients).every((c) => c.available) &&
       Object.values(result.mcp).every((m) => READY_LINK_STATES.includes(m.state)) &&
-      result.skills.every((s) => READY_LINK_STATES.includes(s.state)) &&
+      result.skills.every((s) => SETTLED_LINK_STATES.includes(s.state)) &&
       (!result.codexSandbox || ['allowed', 'not-needed', 'unknown'].includes(result.codexSandbox.state))
       ? 0
       : 1;
@@ -326,12 +338,18 @@ function formatComprobarReport(result, { homeDirectory }) {
       : '! No encontré ninguna IA instalada (claude, codex o agy)',
   );
   const readySkills = result.skills.filter((s) => READY_LINK_STATES.includes(s.state));
-  const pendingSkills = result.skills.filter((s) => !READY_LINK_STATES.includes(s.state));
+  const removedSkills = result.skills.filter((s) => s.state === REMOVED_BY_USER_STATE);
+  const pendingSkills = result.skills.filter((s) => !SETTLED_LINK_STATES.includes(s.state));
   if (pendingSkills.length === 0) {
     lines.push(`✓ Skills base listas (${readySkills.length})`);
   } else {
     lines.push(
       `! ${plural(pendingSkills.length, 'enlace de skill base pendiente o con problema', 'enlaces de skills base pendientes o con problema')} (ejecuta npx nexakit para revisarlos)`,
+    );
+  }
+  if (removedSkills.length > 0) {
+    lines.push(
+      `✓ ${plural(removedSkills.length, 'skill que quitaste', 'skills que quitaste')} (nexakit no las recrea; para devolver una: npx nexakit setup --reponer <nombre> --apply)`,
     );
   }
   for (const group of result.legacy ?? []) {
