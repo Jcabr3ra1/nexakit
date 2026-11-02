@@ -49,6 +49,16 @@ export function formatRecommendationReport(report) {
     }
   }
 
+  if (report.externalCandidates?.length > 0) {
+    lines.push('', `Disponibles fuera del catálogo, se instalan aparte (${report.externalCandidates.length}):`);
+    for (const ref of report.externalCandidates) {
+      lines.push(`  - ${ref.name} ← ${ref.reasons.join(', ')} · no probada`);
+      lines.push(`    Utilidad prevista: ${ref.summary}`);
+      lines.push(`    Dónde: ${ref.sourceUrl}`);
+      lines.push(`    Nota: ${ref.statusNote}`);
+    }
+  }
+
   if (report.addons.length > 0) {
     lines.push('', 'Añadidos opcionales:');
     for (const addon of report.addons) {

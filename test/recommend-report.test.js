@@ -21,3 +21,20 @@ test('recommend marca como no probadas las compatibles y las opcionales', () => 
   assert.match(text, /- opcional \(MIT\) ← perfil security · no probada/);
   assert.doesNotMatch(text, /- probada .*no probada/);
 });
+
+test('recommend muestra las referencias externas con su enlace y sin instalarlas', () => {
+  const text = formatRecommendationReport({
+    ...base,
+    externalCandidates: [{ name: 'ui-ux-pro-max', summary: 'Guía de diseño UI/UX.', sourceUrl: 'https://github.com/ejemplo/ui', reasons: ['React'], statusNote: 'Se instala como plugin de Claude.' }]
+  });
+  assert.match(text, /Disponibles fuera del catálogo, se instalan aparte \(1\):/);
+  assert.match(text, /  - ui-ux-pro-max ← React · no probada/);
+  assert.match(text, /    Utilidad prevista: Guía de diseño UI\/UX\./);
+  assert.match(text, /    Dónde: https:\/\/github\.com\/ejemplo\/ui/);
+  assert.match(text, /    Nota: Se instala como plugin de Claude\./);
+});
+
+test('recommend sin referencias externas no muestra el apartado', () => {
+  assert.doesNotMatch(formatRecommendationReport({ ...base, externalCandidates: [] }), /fuera del catálogo/);
+  assert.doesNotMatch(formatRecommendationReport(base), /fuera del catálogo/);
+});

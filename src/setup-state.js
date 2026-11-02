@@ -246,6 +246,8 @@ export async function gatherSetupState({
     project,
     signals: inspection.signals,
     skills,
+    // Suggested but installed outside NexaKit (for example as a Claude plugin): listed, never selectable.
+    externalSkills: recommendation.externalCandidates.map(ref => ({ name: ref.name, reason: ref.reasons[0] ?? null })),
     agentsFound,
     globalSkills,
     stableCopy,

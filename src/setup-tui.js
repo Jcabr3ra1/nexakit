@@ -242,7 +242,10 @@ function question(model) {
         text: row.more ? `◻ ver ${row.more} más…` : `${answers.skills.chosen.includes(row.skill.name) ? '◼' : '◻'} ${row.skill.name.padEnd(width)}  ${row.skill.reason ?? ''}${row.skill.tested === false ? ' · no probada' : ''}`.trimEnd()
       }));
       const current = rows[model.cursor]?.skill;
-      const info = model.info && current ? ['', ...wrapText(current.summary, 60), ...skillTrust(current)] : [];
+      const external = state.externalSkills?.length
+        ? ['', ...wrapText(`Se instalan aparte: ${state.externalSkills.map(ref => ref.name).join(', ')}`, 60)]
+        : [];
+      const info = [...(model.info && current ? ['', ...wrapText(current.summary, 60), ...skillTrust(current)] : []), ...external];
       return { title: '¿Qué skills quieres?', body, info, keys: 'espacio marcar · i qué hace · Enter seguir · q salir' };
     }
     case 'memory': {

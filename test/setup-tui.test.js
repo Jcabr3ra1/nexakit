@@ -262,3 +262,14 @@ test('skills without a passed check say «no probada», with review notes in the
     for (const line of stripVTControlCharacters(frame(press(model, 'i'), columns)).split('\n')) assert.ok(cellWidth(line) <= columns, `@${columns}: «${line}»`);
   }
 });
+
+test('the skills step lists external skills apart, as something installed separately', () => {
+  const external = [{ name: 'ui-ux-pro-max', reason: 'frontend usa React' }];
+  const model = createSetupModel(state({ externalSkills: external }));
+  const text = frame(model);
+  assert.match(text, /Se instalan aparte: ui-ux-pro-max/u);
+  assert.doesNotMatch(frame(createSetupModel(state())), /Se instalan aparte/u);
+  for (const columns of [40, 68]) {
+    for (const line of stripVTControlCharacters(frame(model, columns)).split('\n')) assert.ok(cellWidth(line) <= columns, `@${columns}: «${line}»`);
+  }
+});
