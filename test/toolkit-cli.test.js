@@ -158,7 +158,7 @@ test('--si in a project without Git does not create a memory', async t => {
   assert.doesNotMatch(c.io.out, /Memoria/u);
 });
 
-test('quitar behaves like detach', async t => {
+test('quitar behaves like detach and also accepts --si', async t => {
   const w = await world(t);
   const { runToolkitCli } = await import('../src/toolkit-cli.js');
   assert.equal(await runToolkitCli(['--si', '--project', w.repo], { ...capture(), isTTY: false, options: w.options }), 0);
@@ -166,6 +166,115 @@ test('quitar behaves like detach', async t => {
   assert.equal(await runToolkitCli(['quitar', '--project', w.repo, '--apply', '--json'], { ...c, options: w.options }), 0);
   assert.equal(JSON.parse(c.io.out).applied, true);
   assert.equal(await exists(path.join(w.repo, '.claude/skills/frontend-design')), false);
+
+  assert.equal(await runToolkitCli(['--si', '--project', w.repo], { ...capture(), isTTY: false, options: w.options }), 0);
+  assert.equal(await exists(path.join(w.repo, '.claude/skills/frontend-design')), true);
+  const si = capture();
+  assert.equal(await runToolkitCli(['quitar', '--project', w.repo, '--si', '--json'], { ...si, options: w.options }), 0);
+  assert.equal(JSON.parse(si.io.out).applied, true);
+  assert.equal(await exists(path.join(w.repo, '.claude/skills/frontend-design')), false);
+});
+
+test('comprobar prints a readable Spanish report with obsolete and legacy warnings, supports --json, and keeps doctor unchanged', async t => {
+  const w = await world(t);
+  const { runToolkitCli } = await import('../src/toolkit-cli.js');
+  assert.equal(await runToolkitCli(['--si', '--project', w.repo], { ...capture(), isTTY: false, options: w.options }), 0);
+
+  // Fresh install without old workflow MCP exits 0 with comprobar, while legacy doctor keeps its JSON contract.
+  const ok = capture();
+  assert.equal(await runToolkitCli(['comprobar'], { ...ok, options: w.options }), 0, ok.io.err);
+  assert.match(ok.io.out, /✓ Node\.js/u);
+  assert.match(ok.io.out, /✓ Skills base listas/u);
+
+  const json = capture();
+  assert.equal(await runToolkitCli(['comprobar', '--json'], { ...json, options: w.options }), 0);
+  assert.equal(JSON.parse(json.io.out).node.supported, true);
+
+  const doc = capture();
+  const docCode = await runToolkitCli(['doctor'], { ...doc, options: w.options });
+  assert.equal(docCode, 1, 'legacy doctor still checks the legacy workflow MCP');
+  assert.equal(JSON.parse(doc.io.out).node.supported, true);
+
+  // Add obsolete workflow MCP, obsolete level agent, and a group of 3 old broken links.
+  await fs.writeFile(
+    path.join(w.home, '.claude.json'),
+    JSON.stringify({
+      mcpServers: {
+        'agent-toolkit-workflow': {
+          command: 'node',
+          args: [path.join(TOOLKIT_ROOT, 'bin/agent-toolkit-mcp.js')],
+        },
+      },
+    }),
+  );
+  await fs.mkdir(path.join(w.home, '.codex/agents'), { recursive: true });
+  await fs.writeFile(path.join(w.home, '.codex/agents/nivel-normal.toml'), 'model = "gpt-6.1-sol"\n');
+  const deadRoot = path.join(w.home, 'viejo-toolkit');
+  for (const skill of ['depurar', 'revisar', 'quality-gate']) {
+    const link = path.join(w.home, '.claude/skills', skill);
+    await fs.rm(link, { force: true });
+    await fs.symlink(path.join(deadRoot, 'skills', skill), link);
+  }
+
+  const warn = capture();
+  assert.equal(await runToolkitCli(['comprobar'], { ...warn, options: w.options }), 1);
+  assert.match(warn.io.out, /! Ya no se usa; si quieres quitarlo: claude mcp remove agent-toolkit-workflow -s user/u);
+  assert.match(warn.io.out, /! Ya no se usa; si quieres quitarlo: .*nivel-normal\.toml/u);
+  assert.match(warn.io.out, /npx nexakit reparar --desde ~[\\/]viejo-toolkit/u);
+});
+
+test('memoria forwards subcommands and arguments untouched to project-memory', async t => {
+  const w = await world(t);
+  const { runToolkitCli } = await import('../src/toolkit-cli.js');
+  assert.equal(await runToolkitCli(['--si', '--project', w.repo], { ...capture(), isTTY: false, options: w.options }), 0);
+  const vault = path.join(w.home, 'nexakit-memorias', 'punto-motos');
+
+  const help = capture();
+  assert.equal(await runToolkitCli(['memoria', '--help'], { ...help, options: w.options }), 0);
+  assert.match(help.io.out, /project-memory/u);
+
+  const doc = capture();
+  assert.equal(await runToolkitCli(['memoria', 'doctor', vault, '--strict'], { ...doc, options: w.options }), 0);
+  assert.match(doc.io.out, /Project Memory Doctor: OK/u);
+
+  const status = capture();
+  assert.equal(await runToolkitCli(['memoria', 'status', vault, '--json'], { ...status, options: w.options }), 0);
+  assert.equal(JSON.parse(status.io.out).project.id, 'punto-motos');
+});
+
+test('memoria help and errors name npx nexakit memoria and keep project-memory as the compatible executable', async t => {
+  const w = await world(t);
+  const { runToolkitCli } = await import('../src/toolkit-cli.js');
+
+  for (const argv of [['memoria'], ['memoria', '--help'], ['memoria', '-h']]) {
+    const help = capture();
+    assert.equal(await runToolkitCli(argv, { ...help, options: w.options }), 0, argv.join(' '));
+    assert.match(help.io.out, /^npx nexakit memoria\n/u, argv.join(' '));
+    assert.match(help.io.out, /^ {2}npx nexakit memoria init <destino>/mu, argv.join(' '));
+    assert.match(help.io.out, /^ {2}npx nexakit memoria sync apply /mu, argv.join(' '));
+    assert.doesNotMatch(help.io.out, /^ {2}project-memory /mu, argv.join(' '));
+    assert.match(help.io.out, /project-memory.*compatible/iu, argv.join(' '));
+  }
+
+  const unknown = capture();
+  assert.equal(await runToolkitCli(['memoria', 'inventado'], { ...unknown, options: w.options }), 2);
+  assert.match(unknown.io.err, /Comando desconocido: inventado/u);
+  assert.match(unknown.io.err, /^ {2}npx nexakit memoria init <destino>/mu);
+  assert.doesNotMatch(unknown.io.err, /^ {2}project-memory /mu);
+});
+
+test('--help lists all Spanish subcommands and guide includes Antigravity and new commands', async () => {
+  const { runToolkitCli } = await import('../src/toolkit-cli.js');
+  const { getToolkitCommandsGuide } = await import('../src/toolkit-commands-guide.js');
+  const c = capture();
+  assert.equal(await runToolkitCli(['--help'], { ...c }), 0);
+  for (const sub of ['comprobar', 'quitar', 'reparar --desde', 'memoria', 'revision', 'modelo']) {
+    assert.match(c.io.out, new RegExp(sub, 'u'));
+  }
+  const guide = getToolkitCommandsGuide({ clients: { claude: { available: true }, codex: { available: true }, antigravity: { available: true } } });
+  assert.equal(guide.antigravityActive, true);
+  assert.equal(guide.cliCommands.some(item => item.command.includes('comprobar')), true);
+  assert.equal(guide.cliCommands.some(item => item.command.includes('memoria')), true);
 });
 
 test('unknown flags show the help and exit 2', async () => {

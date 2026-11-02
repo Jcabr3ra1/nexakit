@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <meta name="description" content="Aprende a iniciar NexaKit, elegir skills, crear tu memoria en Obsidian y conectarla con Claude Code y Codex. Guía con comandos copiables.">
-  <title>NexaKit · Del primer comando a tu memoria conectada</title>
+  <meta name="description" content="Inicia NexaKit en tres pasos: instala skills, crea y conecta tu memoria en Obsidian y trabaja con revisión automática entre Claude Code, Codex y Antigravity.">
+  <title>NexaKit · De cero a tu proyecto listo en tres pasos</title>
   <style>
     :root { --bg:#111015; --surface:#19171f; --raised:#211e2a; --line:#35303f; --text:#eeebf5; --muted:#aaa3b8; --accent:#c4b5fd; --purple:#7c3aed; --green:#a2d9bb; --mono:ui-monospace,"Cascadia Code","SFMono-Regular",Consolas,monospace; font-family:"Segoe UI Variable", "Segoe UI", sans-serif; color-scheme:dark; }
     * { box-sizing:border-box; }
@@ -58,7 +58,7 @@
     .reset { border:0; padding:4px 0; background:none; color:var(--muted); font-size:12px; text-decoration:underline; text-underline-offset:3px; }
     main { padding:54px clamp(28px,5vw,82px) 0; min-width:0; max-width:1160px; }
     .hero { padding-bottom:54px; }
-    .hero .lead { font-size:19px; line-height:1.7; color:var(--muted); max-width:600px; margin-bottom:26px; }
+    .hero .lead { font-size:19px; line-height:1.7; color:var(--muted); max-width:620px; margin-bottom:26px; }
     .hero-label { display:flex; gap:9px; align-items:center; color:var(--accent); font-size:13px; margin-bottom:23px; }
     .hero-label::before { content:""; width:7px; height:7px; border-radius:50%; background:var(--accent); }
     .button { display:inline-flex; justify-content:center; align-items:center; gap:10px; border:1px solid var(--line); border-radius:7px; padding:10px 17px; background:var(--surface); color:var(--text); font-size:14px; font-weight:600; text-decoration:none; min-height:44px; }
@@ -124,7 +124,7 @@
     .instructions { padding-left:22px; }
     .instructions li { padding:5px 0 5px 4px; color:var(--muted); }
     .instructions strong { color:var(--text); font-weight:550; }
-    .two-col { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+    .two-col { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:20px; }
     .two-col>div { min-width:0; }
     .two-col h3 { margin-top:10px; }
     .library-controls { display:flex; align-items:end; gap:12px; margin:24px 0 12px; }
@@ -152,7 +152,7 @@
 <a class="skip" href="#contenido">Saltar al contenido</a>
 <header class="topbar">
   <a class="brand" href="#inicio" aria-label="NexaKit, inicio de la guía"><svg viewBox="0 0 30 34" fill="none" aria-hidden="true"><path d="M15 1 28 8.5v17L15 33 2 25.5v-17L15 1Z" stroke="#a78bfa" stroke-width="1.5"/><path d="M9 23V11l12 12V11" stroke="#c4b5fd" stroke-width="2.5" stroke-linejoin="round"/></svg>NexaKit</a>
-  <span class="subtitle">Guía de inicio</span>
+  <span class="subtitle">Guía en 3 pasos</span>
   <nav class="toplinks" aria-label="Recursos"><a href="#comandos">Comandos</a><a href="https://github.com/Jcabr3ra1/nexakit">GitHub ↗</a></nav>
 </header>
 <div class="layout">
@@ -160,193 +160,117 @@
     <nav aria-label="Tu recorrido">
       <p class="nav-caption">Tu recorrido</p>
       <ol class="route">
-        <li><a href="#instalar"><span class="nav-num">1</span>Iniciar con npx</a></li>
-        <li><a href="#skills"><span class="nav-num">2</span>Elegir tus skills</a></li>
-        <li><a href="#memoria"><span class="nav-num">3</span>Crear la memoria</a></li>
-        <li><a href="#obsidian"><span class="nav-num">4</span>Abrir en Obsidian</a></li>
-        <li><a href="#conectar"><span class="nav-num">5</span>Conectar tus agentes</a></li>
-        <li><a href="#trabajar"><span class="nav-num">6</span>Empezar a trabajar</a></li>
+        <li><a href="#requisitos"><span class="nav-num">1</span>Requisitos</a></li>
+        <li><a href="#ejecutar"><span class="nav-num">2</span>Ejecutar npx nexakit</a></li>
+        <li><a href="#trabajar"><span class="nav-num">3</span>Reiniciar y trabajar</a></li>
       </ol>
-      <div class="sidebar-tools"><a href="#comandos">⌘ &nbsp; Biblioteca de comandos</a><a href="#fallos">? &nbsp; Resolver un problema</a><a href="https://github.com/Jcabr3ra1/nexakit/blob/main/docs/README.md">Documentación completa ↗</a></div>
+      <div class="sidebar-tools"><a href="#comandos">⌘ &nbsp; Biblioteca de comandos</a><a href="#fallos">? &nbsp; Si algo no encaja</a><a href="https://github.com/Jcabr3ra1/nexakit/blob/main/docs/README.md">Documentación completa ↗</a></div>
     </nav>
-    <div class="progress-box"><div class="progress-label"><span>Tu avance</span><span id="progress-count">0 de 6</span></div><progress id="progress" value="0" max="6" aria-label="Pasos marcados como completados"></progress><button class="reset" id="reset" type="button">Reiniciar marcas</button></div>
+    <div class="progress-box"><div class="progress-label"><span>Tu avance</span><span id="progress-count">0 de 3</span></div><progress id="progress" value="0" max="3" aria-label="Pasos marcados como completados"></progress><button class="reset" id="reset" type="button">Reiniciar marcas</button></div>
   </aside>
   <main id="contenido">
     <section class="hero" id="inicio" aria-labelledby="titulo">
-      <p class="hero-label">De cero a tu primer proyecto</p>
-      <h1 id="titulo">Un lugar para tus skills.<br>Memoria para lo que sigue.</h1>
-      <p class="lead">Prepara NexaKit, abre el contexto de tu proyecto en Obsidian y llévalo a Claude Code o Codex. Un paso a la vez, con el comando que necesitas.</p>
-      <div class="hero-actions"><a class="button primary" href="#instalar">Empezar la guía <span aria-hidden="true">↓</span></a><a class="button" href="#comandos">Consultar comandos</a></div>
-      <div class="map" aria-label="NexaKit prepara skills para tus agentes; Obsidian muestra la memoria del proyecto">
-        <div><strong>Tu proyecto</strong><span>Código y tecnologías</span></div><span class="connector" aria-hidden="true">→</span><div><strong>NexaKit + Obsidian</strong><span>Skills y contexto</span></div><span class="connector" aria-hidden="true">→</span><div><strong>Claude / Codex</strong><span>Trabajar con contexto</span></div>
+      <p class="hero-label">De cero a tu proyecto listo en tres pasos</p>
+      <h1 id="titulo">Un comando prepara tus skills, tu memoria y tus IA.</h1>
+      <p class="lead">Ejecuta <code>npx nexakit</code> en tu proyecto: detecta tecnologías en tus manifiestos y README, crea o conecta la memoria en Obsidian y deja listas tus IA (Claude Code, Codex y Antigravity CLI) con una sola confirmación.</p>
+      <div class="hero-actions"><a class="button primary" href="#requisitos">Empezar la guía <span aria-hidden="true">↓</span></a><a class="button" href="#comandos">Consultar comandos</a></div>
+      <div class="map" aria-label="Un comando prepara skills, memoria en Obsidian y tus tres IA">
+        <div><strong>1. Requisitos</strong><span>Node 24 + tu IA</span></div><span class="connector" aria-hidden="true">→</span><div><strong>2. npx nexakit</strong><span>Skills + memoria + MCP</span></div><span class="connector" aria-hidden="true">→</span><div><strong>3. Trabajar</strong><span>Revisión y seguimiento</span></div>
       </div>
-      <p class="footnote" style="margin:16px 0 0">Con los pasos 1 y 2 ya puedes usar las skills. La memoria es opcional; continúa desde el 3 para añadirla.</p>
     </section>
 
-    <section class="section" id="instalar" aria-labelledby="h-instalar">
-      <div class="section-head"><span class="step-number" aria-hidden="true">01</span><div><span class="step-meta">Desde tu proyecto · Terminal</span><h2 id="h-instalar">Abre NexaKit con npx</h2></div></div>
-      <p class="section-intro">Entra en la carpeta de tu proyecto y ejecuta NexaKit directamente. npx obtiene el paquete de npm y abre el asistente sin una instalación global.</p>
-      <ul class="requirements" aria-label="Requisitos"><li>Node.js 24 o superior</li><li>npm con npx</li><li>Git, para la memoria</li><li>Claude Code o Codex CLI</li><li>Obsidian, para el paso 4</li></ul>
-      <h3>Comprueba las herramientas</h3>
-      <div class="command"><div class="command-top"><span class="command-label">Terminal · cualquier carpeta</span><button class="copy" type="button">Copiar</button></div><pre><code>node --version
-npm --version
+    <section class="section" id="requisitos" aria-labelledby="h-requisitos">
+      <div class="section-head"><span class="step-number" aria-hidden="true">01</span><div><span class="step-meta">Antes de empezar · Terminal</span><h2 id="h-requisitos">Comprueba tus requisitos</h2></div></div>
+      <p class="section-intro">Solo necesitas Node.js 24 o superior, Git (si vas a usar memoria por proyecto) y al menos uno de los tres clientes de IA instalados.</p>
+      <ul class="requirements" aria-label="Requisitos"><li>Node.js 24 o superior</li><li>npm con npx</li><li>Git (para crear memoria)</li><li>Claude Code, Codex o Antigravity CLI</li><li>Obsidian (opcional, para ver la bóveda)</li></ul>
+      <div class="command"><div class="command-top"><span class="command-label">Terminal · comprobar versiones</span><button class="copy" type="button">Copiar</button></div><pre><code>node --version
 git --version</code></pre></div>
-      <p class="muted">Comprueba también <code>claude --version</code> o <code>codex --version</code>, según el cliente que utilices, e inicia sesión en él.</p>
-      <h3>Abre el asistente en tu proyecto</h3>
-      <div class="command"><div class="command-top"><span class="command-label">Terminal · sustituye la ruta por tu proyecto</span><button class="copy" type="button">Copiar</button></div><pre><code data-command="start">cd '/ruta/a/mi-proyecto'
-npx nexakit</code></pre></div>
-      <p class="muted">Si npm pide descargar el paquete, confirma para continuar. Necesitas conexión para la primera descarga y una terminal interactiva. Puedes adaptar las rutas en el paso 2.</p>
-      <div class="callout"><p><strong>Paquete público:</strong> <a href="https://www.npmjs.com/package/nexakit">nexakit en npm</a>. Abre el asistente desde la carpeta de tu aplicación. Revisa las skills y los cambios previstos antes de confirmar la instalación.</p></div>
-      <details><summary>¿Cómo ejecuto memoria y las demás herramientas con npx?</summary><div class="details-body"><p>El paquete tiene varios ejecutables. Para el asistente usa <code>npx nexakit</code>. Para otro ejecutable, indica el paquete explícitamente:</p><div class="command"><div class="command-top"><span class="command-label">Terminal · ayuda de memoria con npx</span><button class="copy" type="button">Copiar</button></div><pre><code>npx --package=nexakit project-memory --help</code></pre></div><p>npx conserva el paquete descargado en su caché. Los enlaces simbólicos y las recetas MCP que apuntan a esa ubicación dependen de que la caché siga disponible. Para las skills del proyecto puedes elegir <strong>copia</strong> en la revisión final. Si limpias la caché, vuelve a revisar la instalación y sus conexiones. <a href="https://docs.npmjs.com/cli/v11/commands/npm-exec/">Referencia de npm exec y npx</a>.</p></div></details>
-      <div class="completion"><label class="check"><input type="checkbox" data-complete="instalar">Ya abrí el asistente con npx</label><a class="next" href="#skills">Elegir skills ↓</a></div>
+      <p class="muted">Verifica también el cliente que uses habitualmente: <code>claude --version</code>, <code>codex --version</code> o <code>agy --version</code>.</p>
+      <div class="completion"><label class="check"><input type="checkbox" data-complete="requisitos">Tengo Node.js 24 y mi cliente de IA instalado</label><a class="next" href="#ejecutar">Ejecutar npx nexakit ↓</a></div>
     </section>
 
-    <section class="section" id="skills" aria-labelledby="h-skills">
-      <div class="section-head"><span class="step-number" aria-hidden="true">02</span><div><span class="step-meta">En cada proyecto · Terminal</span><h2 id="h-skills">Elige lo que necesita tu proyecto</h2></div></div>
-      <p class="section-intro">Abre el asistente sobre el repositorio en el que vas a trabajar. NexaKit detectará su stack y te explicará por qué encaja cada skill.</p>
+    <section class="section" id="ejecutar" aria-labelledby="h-ejecutar">
+      <div class="section-head"><span class="step-number" aria-hidden="true">02</span><div><span class="step-meta">En tu proyecto · Una sola confirmación</span><h2 id="h-ejecutar">Ejecuta npx nexakit en la carpeta del proyecto</h2></div></div>
+      <p class="section-intro">NexaKit inspecciona la raíz y las subcarpetas inmediatas (<code>package.json</code>, <code>pyproject.toml</code>, <code>requirements.txt</code>, <code>src-tauri/</code> y <code>README.md</code>), prepara una copia estable en <code>~/.nexakit</code> y te hace tres preguntas.</p>
       <form class="settings" id="settings">
-        <h3>Adapta los comandos a tu proyecto</h3><p>Las rutas iniciales son ejemplos. Sustitúyelas por rutas absolutas de tu equipo; se actualizarán los comandos de esta guía.</p>
+        <h3>Adapta los comandos a tu proyecto</h3><p>Sustituye las rutas de ejemplo por las tuyas para actualizar todos los comandos copiables de esta guía.</p>
         <div class="fields">
           <label class="field wide">Repositorio de tu proyecto<input type="text" name="project" value="/ruta/a/mi-proyecto" required spellcheck="false" autocomplete="off"></label>
-          <label class="field wide">Carpeta nueva para su memoria<input type="text" name="memory" value="/ruta/a/mi-proyecto-memory" required spellcheck="false" autocomplete="off"></label>
+          <label class="field wide">Carpeta de su memoria (bóveda)<input type="text" name="memory" value="/ruta/a/mi-proyecto-memory" required spellcheck="false" autocomplete="off"></label>
           <label class="field">Identificador del proyecto<input type="text" name="id" value="mi-proyecto" required pattern="[a-z0-9]+(-[a-z0-9]+)*" title="Usa minúsculas, números y guiones: mi-proyecto" spellcheck="false" autocomplete="off"></label>
           <label class="field">Sintaxis de tu terminal<select name="shell"><option value="posix">Bash / zsh</option><option value="powershell">PowerShell</option></select></label>
         </div>
         <div class="form-bottom"><button type="submit" class="button">Actualizar comandos</button><small id="settings-state" role="status">Usando rutas de ejemplo</small></div>
       </form>
-      <div class="choice-row"><p>¿Qué agente vas a preparar?</p><div class="segmented" role="group" aria-label="Agentes de los comandos"><button type="button" data-agent="all" aria-pressed="true">Ambos</button><button type="button" data-agent="claude" aria-pressed="false">Claude</button><button type="button" data-agent="codex" aria-pressed="false">Codex</button></div></div>
-      <p class="footnote">Esta elección adapta los ejemplos de la guía. Revisa también el agente destino en la pantalla final del asistente.</p>
-      <div class="command"><div class="command-top"><span class="command-label">Terminal · abrir el asistente</span><button class="copy" type="button">Copiar</button></div><pre><code data-command="tui">npx nexakit --project '/ruta/a/mi-proyecto' --agent all</code></pre></div>
+      <div class="choice-row"><p>¿Qué agente quieres filtrar en los ejemplos?</p><div class="segmented" role="group" aria-label="Agentes de los comandos"><button type="button" data-agent="all" aria-pressed="true">Todas</button><button type="button" data-agent="claude" aria-pressed="false">Claude</button><button type="button" data-agent="codex" aria-pressed="false">Codex</button><button type="button" data-agent="antigravity" aria-pressed="false">Antigravity</button></div></div>
+      <div class="command"><div class="command-top"><span class="command-label">Terminal · asistente interactivo</span><button class="copy" type="button">Copiar</button></div><pre><code data-command="start">cd '/ruta/a/mi-proyecto'
+npx nexakit</code></pre></div>
+      <div class="command"><div class="command-top"><span class="command-label">Lo que verás en pantalla (tres preguntas y una confirmación)</span><button class="copy" type="button">Copiar</button></div><pre><code>1. Skills para tu proyecto (detectadas por archivos y README)
+   [x] frontend-design — frontend/README menciona React
+   [x] supabase-postgres-best-practices — backend/requirements.txt usa PostgreSQL
+
+2. Memoria del proyecto
+   (•) Crear memoria nueva en ~/Obsidian-Vaults/MI-PROYECTO-MEMORY
+
+3. ¿En qué IA quieres dejarlo listo?
+   [x] Claude Code   [x] Codex   [x] Antigravity
+
+¿Aplicar estos cambios? [S/n]</code></pre></div>
+      <div class="keys"><span><kbd>↑</kbd> <kbd>↓</kbd> Moverte</span><span><kbd>Espacio</kbd> Marcar</span><span><kbd>Enter</kbd> Siguiente / Confirmar</span><span><kbd>Esc</kbd> Cancelar sin tocar nada</span></div>
+      <div class="callout"><p><strong>Modo directo sin preguntas:</strong> si prefieres aplicar directamente las respuestas sugeridas (o ejecutarlo en un script), usa <code>npx nexakit --si</code>.</p></div>
+      <div class="completion"><label class="check"><input type="checkbox" data-complete="ejecutar">Ya ejecuté npx nexakit y confirmé los cambios</label><a class="next" href="#trabajar">Reiniciar y trabajar ↓</a></div>
+    </section>
+
+    <section class="section" id="trabajar" aria-labelledby="h-trabajar">
+      <div class="section-head"><span class="step-number" aria-hidden="true">03</span><div><span class="step-meta">Uso diario · Sin comandos previos para programar</span><h2 id="h-trabajar">Reinicia tu agente y empieza a trabajar</h2></div></div>
+      <p class="section-intro">Cierra y vuelve a abrir tu agente para que cargue las skills, el MCP de memoria y las reglas globales de trabajo. A partir de ahí, habla y programa con total normalidad.</p>
+      <div class="two-col">
+        <div data-client="claude"><h3>En Claude Code</h3><div class="command"><div class="command-top"><span class="command-label">Terminal · abrir proyecto</span><button class="copy" type="button">Copiar</button></div><pre><code data-command="open-claude">cd '/ruta/a/mi-proyecto'
+claude</code></pre></div></div>
+        <div data-client="codex"><h3>En Codex</h3><div class="command"><div class="command-top"><span class="command-label">Terminal · abrir proyecto</span><button class="copy" type="button">Copiar</button></div><pre><code data-command="open-codex">cd '/ruta/a/mi-proyecto'
+codex</code></pre></div></div>
+        <div data-client="antigravity"><h3>En Antigravity</h3><div class="command"><div class="command-top"><span class="command-label">Terminal · abrir proyecto</span><button class="copy" type="button">Copiar</button></div><pre><code data-command="open-antigravity">cd '/ruta/a/mi-proyecto'
+agy</code></pre></div></div>
+      </div>
       <ol class="tui-steps">
-        <li><div><strong>Skills para tu proyecto</strong><p>Lee el motivo, la utilidad prevista y los solapamientos. Marca las que te ayuden con tu tarea.</p></div></li>
-        <li><div><strong>Skills opcionales</strong><p>Añade otras solo si las necesitas. Puedes continuar sin seleccionar ninguna.</p></div></li>
-        <li><div><strong>Revisar e instalar</strong><p>Comprueba agentes, enlaces o copias, reglas de Git y archivos previstos. Pulsa <kbd>e</kbd> para editar la configuración y confirma cuando esté correcta.</p></div></li>
+        <li><div><strong>Programa normalmente, sin comando especial</strong><p>Pide la tarea directamente en el chat. La IA consulta la memoria del proyecto en solo lectura, crea rama, escribe pruebas e implementa sin que tengas que invocar ningún comando previo.</p></div></li>
+        <li><div><strong>Revisión automática al terminar cambios de código</strong><p>Cuando termina una tarea con cambios de código, la IA pide automáticamente una revisión en solo lectura a otra IA. La primera vez en la sesión te pregunta <code>«¿A dónde mando la revisión?»</code> marcando la recomendada y conserva tu respuesta el resto de la conversación. Si en una tarea dices <code>«sin revisión»</code>, la omite. Si quieres pedir una revisión adicional en cualquier momento, escribe <code>/revisar</code> (o <code>$revisar</code> en Codex).</p></div></li>
+        <li><div><strong>Nota de seguimiento automática y cierre de memoria</strong><p>Si una tarea larga queda a medias (por pausa, cambio de IA, bloqueo o cierre), la IA escribe o actualiza la nota de seguimiento en <code>03-IMPLEMENTACION/Planes/&lt;fecha&gt;-&lt;slug&gt;-seguimiento.md</code> dentro de la bóveda (pidiendo una sola autorización por sesión) y te indica cuándo conviene abrir una sesión nueva. Al fusionar en <code>main</code>, usa <code>/cerrar-memoria</code> (o <code>$cerrar-memoria</code>) para llevar las decisiones a las notas permanentes y marcar el seguimiento como completado.</p></div></li>
       </ol>
-      <div class="keys"><span><kbd>↑</kbd> <kbd>↓</kbd> Moverte</span><span><kbd>Espacio</kbd> Marcar</span><span><kbd>Enter</kbd> Continuar</span><span><kbd>a</kbd> Todas / ninguna</span><span><kbd>q</kbd> Salir</span></div>
-      <div class="callout"><p><strong>Compatible y recomendada significan cosas distintas.</strong> Una compatible coincide con tu stack. Una recomendada exige además escenarios funcionales pasados para cada agente destino. El catálogo actual tiene 10 skills locales con hashes comprobados y aún no tiene esos escenarios validados.</p></div>
-      <p class="success">Al terminar, verás el resumen de instalación. Reinicia el agente para que cargue las skills nuevas.</p>
-      <details><summary>Solo quiero consultar sugerencias, sin instalar</summary><div class="details-body"><div class="command"><div class="command-top"><span class="command-label">Terminal · solo lectura</span><button class="copy" type="button">Copiar</button></div><pre><code data-command="recommend">npx nexakit recommend --project '/ruta/a/mi-proyecto'</code></pre></div><p>Puedes concretar el perfil con <code>--profile frontend</code>, <code>backend</code>, <code>mcp</code> o <code>security</code>. NexaKit consulta el catálogo incluido; actualmente no descarga skills de un registro remoto.</p></div></details>
-      <details><summary>Quiero revisar una skill antes de usarla</summary><div class="details-body"><div class="command"><div class="command-top"><span class="command-label">Terminal · solo lectura</span><button class="copy" type="button">Copiar</button></div><pre><code>npx nexakit scan '/ruta/a/la-skill'</code></pre></div><p>Revisa su contenido sin ejecutarla y avisa de caracteres ocultos, credenciales, descargas que se ejecutan o envío de datos. «Sin bloqueos» no garantiza que sea útil: una skill sin prueba funcional aparece como <strong>no probada</strong>.</p></div></details>
-      <div class="completion"><label class="check"><input type="checkbox" data-complete="skills">Ya revisé e instalé mis skills</label><a class="next" href="#memoria">Crear memoria ↓</a></div>
-    </section>
-
-    <section class="section" id="memoria" aria-labelledby="h-memoria">
-      <div class="section-head"><span class="step-number" aria-hidden="true">03</span><div><span class="step-meta">Opcional · Una memoria por proyecto</span><h2 id="h-memoria">Dale un lugar al contexto</h2></div></div>
-      <p class="section-intro">La memoria guarda decisiones, arquitectura y entregas en notas Markdown. Crea una carpeta separada del código; después la abrirás en Obsidian.</p>
-      <h3>Primero, revisa el plan</h3>
-      <div class="command"><div class="command-top"><span class="command-label">Terminal · vista previa, sin escribir</span><button class="copy" type="button">Copiar</button></div><pre><code data-command="init">npx --package=nexakit project-memory init '/ruta/a/mi-proyecto-memory' --source '/ruta/a/mi-proyecto' --project-id mi-proyecto --project-name 'Mi proyecto'</code></pre></div>
-      <h3>Después, crea la memoria</h3>
-      <div class="command"><div class="command-top"><span class="command-label">Terminal · crea archivos en la carpeta de memoria</span><button class="copy" type="button">Copiar</button></div><pre><code data-command="init-apply">npx --package=nexakit project-memory init '/ruta/a/mi-proyecto-memory' --source '/ruta/a/mi-proyecto' --project-id mi-proyecto --project-name 'Mi proyecto' --apply</code></pre></div>
-      <p class="muted">El proyecto fuente debe ser un repositorio Git existente. La carpeta de memoria debe estar fuera de él; tampoco puede contenerlo. Si ya tienes una memoria, ve a su diagnóstico sin volver a crearla.</p>
-      <h3>Comprueba que la estructura esté bien</h3>
-      <div class="command"><div class="command-top"><span class="command-label">Terminal · diagnóstico de la memoria</span><button class="copy" type="button">Copiar</button></div><pre><code data-command="memory-doctor">npx --package=nexakit project-memory doctor '/ruta/a/mi-proyecto-memory' --strict</code></pre></div>
-      <p class="success">Resuelve los errores o advertencias del diagnóstico antes de conectar el agente.</p>
-      <div class="callout"><p><strong>Qué acabas de crear:</strong> notas de partida, <code>project-memory.json</code> y una skill específica del proyecto. La creación no configura Git, sincronización ni MCP; las notas necesitan tu contexto real.</p></div>
-      <div class="completion"><label class="check"><input type="checkbox" data-complete="memoria">La memoria está creada y comprobada</label><a class="next" href="#obsidian">Abrir Obsidian ↓</a></div>
-    </section>
-
-    <section class="section" id="obsidian" aria-labelledby="h-obsidian">
-      <div class="section-head"><span class="step-number" aria-hidden="true">04</span><div><span class="step-meta">En Obsidian · Sin plugin adicional</span><h2 id="h-obsidian">Abre tu memoria como bóveda</h2></div></div>
-      <p class="section-intro">Obsidian es la forma visual de recorrer y editar estas notas. La carpeta que creó NexaKit ya es tu bóveda.</p>
-      <ol class="instructions">
-        <li>Abre Obsidian y entra en el <strong>gestor de bóvedas</strong>. Desde una bóveda abierta, usa el menú de la bóveda o “Abrir otra bóveda”.</li>
-        <li>Selecciona <strong>“Abrir carpeta como bóveda”</strong> (Open folder as vault).</li>
-        <li>Elige <code data-value="memory">/ruta/a/mi-proyecto-memory</code>, la carpeta que contiene <code>project-memory.json</code> y <code>00-INICIO</code>.</li>
-        <li>Abre <strong>00-INICIO / Inicio del proyecto.md</strong>. Completa el propósito y revisa <strong>Estado actual</strong> y <strong>Mapa de la memoria</strong>.</li>
-      </ol>
-      <pre class="tree"><span class="root" data-value="memory">/ruta/a/mi-proyecto-memory</span>
+      <details><summary>Abrir la memoria como bóveda en Obsidian</summary><div class="details-body">
+        <p>La carpeta de memoria que creó <code>npx nexakit</code> ya es una bóveda de Obsidian lista para abrir con <strong>“Abrir carpeta como bóveda”</strong>:</p>
+        <pre class="tree"><span class="root" data-value="memory">/ruta/a/mi-proyecto-memory</span>
 ├── project-memory.json
 ├── <span class="note">00-INICIO/Inicio del proyecto.md</span>
 ├── 01-PRODUCTO/
 ├── 02-ARQUITECTURA/
-├── 03-IMPLEMENTACION/
+├── 03-IMPLEMENTACION/Planes/
 ├── 04-DECISIONES/
-├── 05-ENTREGAS/
-└── …</pre>
-      <p class="muted">Abre la carpeta de memoria completa. <code>vault/</code> es el nombre dentro de la plantilla del repositorio; el comando <code>init</code> coloca sus notas directamente en tu carpeta de destino.</p>
-      <p class="footnote">Referencia: <a href="https://help.obsidian.md/manage-vaults">abrir una carpeta existente en Obsidian</a>. La conexión del agente se hace en el siguiente paso.</p>
-      <div class="completion"><label class="check"><input type="checkbox" data-complete="obsidian">Ya veo mis notas en Obsidian</label><a class="next" href="#conectar">Conectar agente ↓</a></div>
-    </section>
-
-    <section class="section" id="conectar" aria-labelledby="h-conectar">
-      <div class="section-head"><span class="step-number" aria-hidden="true">05</span><div><span class="step-meta">Terminal · Conexión de memoria</span><h2 id="h-conectar">Lleva el contexto a tu agente</h2></div></div>
-      <p class="section-intro">Conecta la memoria con el cliente que elegiste en el paso 2. NexaKit enlaza su skill y registra un MCP limitado a la lectura de esa bóveda.</p>
-      <h3>Revisa la conexión prevista</h3>
-      <div data-client="claude"><div class="command"><div class="command-top"><span class="command-label">Terminal · memoria para Claude Code</span><button class="copy" type="button">Copiar</button></div><pre><code data-command="connect-claude">npx --package=nexakit project-memory connect '/ruta/a/mi-proyecto-memory' --agent claude</code></pre></div></div>
-      <div data-client="codex"><div class="command"><div class="command-top"><span class="command-label">Terminal · memoria para Codex</span><button class="copy" type="button">Copiar</button></div><pre><code data-command="connect-codex">npx --package=nexakit project-memory connect '/ruta/a/mi-proyecto-memory' --agent codex</code></pre></div></div>
-      <h3>Aplica la conexión</h3>
-      <p class="muted">Este paso cambia la configuración personal del agente. Si aparece un conflicto con una conexión o skill existente, revisa las rutas que muestra antes de continuar.</p>
-      <div data-client="claude"><div class="command"><div class="command-top"><span class="command-label">Terminal · aplicar en Claude Code</span><button class="copy" type="button">Copiar</button></div><pre><code data-command="connect-claude-apply">npx --package=nexakit project-memory connect '/ruta/a/mi-proyecto-memory' --agent claude --apply</code></pre></div></div>
-      <div data-client="codex"><div class="command"><div class="command-top"><span class="command-label">Terminal · aplicar en Codex</span><button class="copy" type="button">Copiar</button></div><pre><code data-command="connect-codex-apply">npx --package=nexakit project-memory connect '/ruta/a/mi-proyecto-memory' --agent codex --apply</code></pre></div></div>
-      <h3>Reinicia y comprueba una lectura real</h3>
-      <div class="command"><div class="command-top"><span class="command-label">Terminal · estado de las conexiones</span><button class="copy" type="button">Copiar</button></div><pre><code data-command="memory-status">npx --package=nexakit project-memory status '/ruta/a/mi-proyecto-memory'</code></pre></div>
-      <p class="muted">Cierra y abre una sesión nueva de tu agente. Dentro del chat, pídele:</p>
-      <div class="command"><div class="command-top"><span class="command-label">Chat de Claude o Codex · petición de prueba</span><button class="copy" type="button">Copiar</button></div><pre><code>Lee mediante el MCP de memoria la nota 00-INICIO/Inicio del proyecto.md.
-Resume su propósito e indica qué nota consultaste.</code></pre></div>
-      <p class="success">Comprueba que el agente realmente leyó la nota mediante MCP y que la respuesta coincide con su contenido.</p>
-      <div class="callout"><p><strong>Obsidian edita; el MCP consulta.</strong> Abrir Obsidian no conecta al agente. La conexión tampoco mantiene las notas actualizadas automáticamente: el código sigue siendo la fuente principal de verdad.</p></div>
-      <div class="completion"><label class="check"><input type="checkbox" data-complete="conectar">Mi agente ya leyó una nota de la memoria</label><a class="next" href="#trabajar">Empezar a trabajar ↓</a></div>
-    </section>
-
-    <section class="section" id="trabajar" aria-labelledby="h-trabajar">
-      <div class="section-head"><span class="step-number" aria-hidden="true">06</span><div><span class="step-meta">Uso diario · Chat del agente</span><h2 id="h-trabajar">Empieza con una tarea concreta</h2></div></div>
-      <p class="section-intro">Abre el agente en tu repositorio de código y describe el resultado que buscas. Puedes usarlo por separado o añadir revisión cruzada.</p>
-      <div class="two-col">
-        <div data-client="claude"><h3>En Claude Code</h3><div class="command"><div class="command-top"><span class="command-label">Terminal · abrir tu proyecto</span><button class="copy" type="button">Copiar</button></div><pre><code data-command="open-claude">cd '/ruta/a/mi-proyecto'
-claude</code></pre></div></div>
-        <div data-client="codex"><h3>En Codex</h3><div class="command"><div class="command-top"><span class="command-label">Terminal · abrir tu proyecto</span><button class="copy" type="button">Copiar</button></div><pre><code data-command="open-codex">cd '/ruta/a/mi-proyecto'
-codex</code></pre></div></div>
-      </div>
-      <div class="command"><div class="command-top"><span class="command-label">Chat del agente · ejemplo de tarea</span><button class="copy" type="button">Copiar</button></div><pre><code>Consulta la memoria del proyecto y revisa el formulario de inicio de sesión.
-Quiero mejorar su diseño sin cambiar su comportamiento.
-Explica qué archivos necesitas modificar antes de empezar.</code></pre></div>
-      <details><summary>Añadir revisión cruzada entre Claude y Codex</summary><div class="details-body">
-        <p>Necesitas ambos clientes. El MCP de coordinación <code>agent-toolkit-workflow</code> es distinto al MCP de memoria.</p>
-        <div class="command"><div class="command-top"><span class="command-label">Terminal · skills base, primero vista previa</span><button class="copy" type="button">Copiar</button></div><pre><code>npx nexakit setup --agent all</code></pre></div>
-        <div class="command"><div class="command-top"><span class="command-label">Terminal · aplicar los enlaces que falten</span><button class="copy" type="button">Copiar</button></div><pre><code>npx nexakit setup --agent all --apply</code></pre></div>
-        <p><strong>Ejecuta los comandos de registro MCP que imprime setup</strong>, uno para cada cliente que falte. Incluyen la ruta del paquete usado por npx. Esa ruta debe seguir existiendo; si se elimina la caché, revisa el registro y vuelve a configurar la conexión. Reinicia ambos clientes.</p>
-        <div class="command"><div class="command-top"><span class="command-label">Terminal · comprobar instalación y permisos</span><button class="copy" type="button">Copiar</button></div><pre><code>npx nexakit doctor --agent all</code></pre></div>
-        <p>Atiende los pendientes que indique <code>doctor</code>. Para Codex, revisa el acceso de su sandbox a <code>~/.agent-toolkit</code> y usa la receta que imprime para tu configuración.</p>
-        <ol class="instructions"><li>Abre ambos agentes en la <strong>misma carpeta del proyecto</strong>.</li><li>En el chat de Codex, escribe <code>$revisar</code> para registrar esa sesión como revisora.</li><li>En el chat de Claude, escribe <code>/programar mejora el diseño del formulario de inicio de sesión</code>.</li><li>Revisa el encargo que prepare el agente y sigue el flujo de aprobación y revisión. Consulta el estado con <code>/estado</code> en Claude o <code>$estado</code> en Codex.</li></ol>
-        <p>También puedes intercambiar los roles. <a href="https://github.com/Jcabr3ra1/nexakit/blob/main/docs/agentes/coordinacion/peer-review-workflow.md">Ver el flujo de revisión cruzada</a>.</p>
+└── 05-ENTREGAS/</pre>
       </div></details>
-      <details><summary>Modelos y esfuerzo: qué se cambia y qué se sugiere</summary><div class="details-body">
-        <p>La sesión principal recomienda el nivel; no cambia automáticamente el modelo del chat abierto. Los subagentes de nivel usan el modelo y esfuerzo configurados al delegar.</p>
-        <div class="command"><div class="command-top"><span class="command-label">Terminal · ver modelos y niveles vigentes</span><button class="copy" type="button">Copiar</button></div><pre><code>npx --package=nexakit agent-toolkit-inbox modelos</code></pre></div>
-        <p>Para preparar los agentes de Codex, revisa <code>npx --package=nexakit agent-toolkit-inbox agentes</code> y aplica con el comando siguiente:</p>
-        <div class="command"><div class="command-top"><span class="command-label">Terminal · crear agentes de nivel que falten</span><button class="copy" type="button">Copiar</button></div><pre><code>npx --package=nexakit agent-toolkit-inbox agentes --escribir</code></pre></div>
-        <div class="command"><div class="command-top"><span class="command-label">Dentro de Claude Code · plugin opcional de niveles</span><button class="copy" type="button">Copiar</button></div><pre><code>/plugin marketplace add Jcabr3ra1/nexakit
-/plugin install niveles@agent-toolkit</code></pre></div>
-        <p>El identificador del plugin conserva <code>agent-toolkit</code> por compatibilidad.</p>
-      </div></details>
-      <details><summary>Mantener la memoria al cerrar un cambio</summary><div class="details-body">
-        <p>Después de integrar un cambio estable, pide <code>/cerrar-memoria</code> en Claude o <code>$cerrar-memoria</code> en Codex. Indica la ruta de la memoria para que pueda localizar <code>project-memory.json</code>.</p>
-        <p>Revisa qué notas quedaron desactualizadas y las correcciones propuestas. El MCP de lectura no escribe notas y este flujo no implica sincronización automática con Obsidian Sync o Git.</p>
-        <p>Para revisar PR fusionados pendientes en una memoria con remoto fuente configurado, usa <code>npx --package=nexakit project-memory sync plan</code>. Requiere GitHub CLI y acceso al repositorio. <a href="https://github.com/Jcabr3ra1/nexakit/blob/main/docs/memoria/project-memory-sync.md">Ver la guía de sincronización</a>.</p>
-      </div></details>
-      <div class="completion"><label class="check"><input type="checkbox" data-complete="trabajar">Ya sé cómo iniciar mi próxima tarea</label><a class="next" href="#comandos">Ver comandos ↓</a></div>
-      <p class="footnote" style="margin:15px 0 0">Las marcas son una lista personal de esta página. No ejecutan comandos ni verifican la instalación; se reinician al recargar.</p>
+      <div class="completion"><label class="check"><input type="checkbox" data-complete="trabajar">Ya reinicié mi agente y conozco el flujo automático</label><a class="next" href="#comandos">Ver comandos ↓</a></div>
+      <p class="footnote" style="margin:15px 0 0">Las marcas son una lista personal de esta página; no ejecutan comandos ni modifican archivos.</p>
     </section>
 
     <section class="section" id="comandos" aria-labelledby="h-comandos">
       <h2 id="h-comandos">El comando que necesitas</h2>
-      <p class="section-intro">Busca por tarea o filtra por categoría. Las rutas siguen la configuración del paso 2. Cada ficha indica dónde ejecutar el comando.</p>
-      <div class="library-controls"><label class="field">Buscar comando<input id="search" type="search" placeholder="Por ejemplo: conectar, diagnóstico, modelos…" autocomplete="off"></label><label class="field">Categoría<select id="category"><option value="all">Todas</option><option value="skills">Skills</option><option value="memory">Memoria</option><option value="chat">Chat del agente</option><option value="workflow">Coordinación</option><option value="gemini">Gemini</option><option value="maintenance">Mantenimiento</option></select></label></div>
+      <p class="section-intro">Busca por tarea o filtra por categoría. Todos los subcomandos funcionan directamente desde <code>npx nexakit</code> (o <code>~/.nexakit/nexakit</code> tras el primer arranque).</p>
+      <div class="library-controls"><label class="field">Buscar comando<input id="search" type="search" placeholder="Por ejemplo: comprobar, memoria, revisión, modelo, quitar…" autocomplete="off"></label><label class="field">Categoría<select id="category"><option value="all">Todas</option><option value="skills">Inicio y skills</option><option value="memory">Memoria</option><option value="chat">Chat del agente</option><option value="workflow">Revisión y modelos</option><option value="gemini">Gemini</option><option value="maintenance">Mantenimiento</option></select></label></div>
       <p class="result-count" id="result-count" role="status"></p>
       <div id="command-library"></div><p class="empty" id="empty" hidden>No hay coincidencias. Prueba otra palabra o selecciona “Todas”.</p>
-      <p class="footnote">Para operaciones avanzadas, consulta la <a href="https://github.com/Jcabr3ra1/nexakit/blob/main/docs/guias/guia-de-comandos.md">referencia de comandos</a> o la ayuda de cada CLI.</p>
+      <p class="footnote">Consulta también la <a href="https://github.com/Jcabr3ra1/nexakit/blob/main/docs/guias/guia-de-comandos.md">referencia en Markdown</a> o ejecuta <code>npx nexakit --help</code>.</p>
       <noscript><p>Los comandos principales están en los pasos anteriores. El buscador y la copia automática requieren JavaScript.</p></noscript>
     </section>
 
     <section class="section" id="fallos" aria-labelledby="h-fallos">
       <h2 id="h-fallos">Si algo no encaja</h2>
-      <details><summary>npx no aparece o npm devuelve E404</summary><div class="details-body"><p>Si no se reconoce <code>npx</code>, revisa que Node.js 24 o superior y npm estén instalados y disponibles en tu PATH; abre otra terminal después de instalarlos.</p><p>Si <code>npx nexakit</code> devuelve E404, comprueba que el paquete ya esté publicado en el registro de npm que usas. La publicación en GitHub es independiente. No cambies el nombre del paquete para intentar continuar.</p><p>Para los ejecutables adicionales, conserva el formato <code>npx --package=nexakit project-memory --help</code> o <code>npx --package=nexakit agent-toolkit-inbox modelos</code>.</p></div></details>
-      <details><summary>El agente no ve las skills o la memoria</summary><div class="details-body"><p>Reinicia su sesión después de instalar o conectar. Comprueba <code>npx nexakit doctor</code> para la instalación base y <code>npx --package=nexakit project-memory status</code> con la ruta de la memoria para su conexión.</p><p>Usa el mismo cliente y perfil con el que configuraste MCP. Si abres Codex con un perfil, añade <code>--perfil-codex nombre-del-perfil</code> a <code>npx nexakit doctor</code>. Haz la prueba de lectura del paso 5.</p></div></details>
-      <details><summary>init o connect informa un conflicto</summary><div class="details-body"><p>Lee qué destino ya existe y comprueba a qué proyecto o instalación pertenece. Estos comandos conservan configuraciones diferentes y no las reemplazan. Una memoria ya creada se diagnostica con <code>npx --package=nexakit project-memory doctor</code>; no necesitas crearla otra vez.</p><p><a href="https://github.com/Jcabr3ra1/nexakit/blob/main/docs/memoria/project-memory-connect.md">Consultar el contrato de conexión</a>.</p></div></details>
-      <details><summary>No se actualizan las notas solas</summary><div class="details-body"><p>Es el comportamiento previsto. NexaKit crea una estructura inicial; Obsidian permite editarla y MCP deja consultarla. Actualiza las notas al cerrar un cambio verificado. Git y Obsidian Sync se configuran por separado.</p></div></details>
-      <details><summary>Quiero añadir más skills al catálogo</summary><div class="details-body"><p>Para mantener o ampliar el catálogo desde el código fuente, añade los archivos revisados bajo <code>catalogs/skills/</code>, registra su origen, licencia, hashes y reglas en <code>catalogs/skills.json</code>, y valida el catálogo. Las pruebas funcionales son necesarias para que una skill pueda aparecer como recomendada.</p><p><a href="https://github.com/Jcabr3ra1/nexakit/blob/main/docs/skills/ampliar-catalogo.md">Seguir la guía para ampliar el catálogo</a>.</p></div></details>
+      <details><summary>Quiero comprobar si todo está bien conectado o si quedó algo antiguo</summary><div class="details-body"><p>Ejecuta <code>npx nexakit comprobar</code>. Verás un resumen con marcas <code>✓</code> y <code>!</code> sobre tus clientes, skills base, enlaces de copias antiguas (reparables con <code>npx nexakit reparar --desde &lt;ruta&gt;</code>) y elementos retirados que ya no se usan.</p></div></details>
+      <details><summary>Sale «Faltan las dependencias de esta copia. Ejecuta npm ci…»</summary><div class="details-body"><p>Estás ejecutando un checkout local de desarrollo donde aún no se instalaron los paquetes de <code>node_modules</code>. Ejecuta <code>npm ci</code> en la carpeta que indica el mensaje.</p></div></details>
+      <details><summary>El agente no ve las skills nuevas o las reglas globales</summary><div class="details-body"><p>Cada IA lee sus skills, MCP e instrucciones globales al abrir la sesión. Cierra la sesión actual, abre una nueva y verifica el estado con <code>npx nexakit comprobar</code> y <code>npx nexakit memoria status</code>.</p></div></details>
+      <details><summary>Quiero retirar lo que NexaKit instaló</summary><div class="details-body"><p>Ejecuta <code>npx nexakit quitar</code> para ver qué enlaces, reglas globales y MCP creados por NexaKit se retirarían, y repite con <code>npx nexakit quitar --si</code> para aplicarlo sin tocar tus archivos propios.</p></div></details>
+      <details><summary>Quiero revisar una skill antes de usarla</summary><div class="details-body"><p>Ejecuta <code>npx nexakit scan '/ruta/a/la-skill'</code>. Revisa su contenido sin ejecutarla y avisa de caracteres ocultos, credenciales, descargas que se ejecutan o envío de datos. «Sin bloqueos» no garantiza que sea útil: una skill sin prueba funcional aparece como <strong>no probada</strong>.</p></div></details>
     </section>
-    <footer><span>NexaKit · Skills, agentes y memoria por proyecto</span><a href="#inicio">Volver al inicio ↑</a></footer>
+    <footer><span>NexaKit · Skills, memoria y revisión entre IA</span><a href="#inicio">Volver al inicio ↑</a></footer>
   </main>
 </div>
 <div class="toast" id="toast" role="status" hidden></div>
@@ -360,78 +284,74 @@ Explica qué archivos necesitas modificar antes de empezar.</code></pre></div>
   const projectName = () => state.id === 'mi-proyecto' ? 'Mi proyecto' : state.id.replaceAll('-', ' ');
   const command = key => {
     const p = quote(state.project), m = quote(state.memory);
-    const init = `npx --package=nexakit project-memory init ${m} --source ${p} --project-id ${state.id} --project-name ${quote(projectName())}`;
+    const init = `npx nexakit memoria init ${m} --source ${p} --project-id ${state.id} --project-name ${quote(projectName())}`;
     const map = {
       start:`cd ${p}\nnpx nexakit`,
-      tui:`npx nexakit --project ${p} --agent ${state.agent}`,
+      tui:`npx nexakit --project ${p}`,
+      'tui-si':`npx nexakit --project ${p} --si`,
       recommend:`npx nexakit recommend --project ${p}`,
-      doctor:`npx nexakit doctor --agent ${state.agent}`,
-      setup:`npx nexakit setup --agent ${state.agent}`,
-      'setup-apply':`npx nexakit setup --agent ${state.agent} --apply`,
-      detach:`npx nexakit detach --project ${p}`,
-      'detach-apply':`npx nexakit detach --project ${p} --apply`,
+      comprobar:'npx nexakit comprobar',
+      quitar:`npx nexakit quitar --project ${p}`,
+      'quitar-si':`npx nexakit quitar --project ${p} --si`,
+      reparar:'npx nexakit reparar --desde /ruta/anterior',
+      'memoria-help':'npx nexakit memoria --help',
       init, 'init-apply':init + ' --apply',
-      'memory-doctor':`npx --package=nexakit project-memory doctor ${m} --strict`,
-      'memory-status':`npx --package=nexakit project-memory status ${m}`,
-      'sync-plan':`npx --package=nexakit project-memory sync plan ${m}`,
-      'sync-inspect':`npx --package=nexakit project-memory sync inspect ${m} --pr 42`,
-      'open-claude':`cd ${p}\nclaude`, 'open-codex':`cd ${p}\ncodex`,
-      usage:`npx --package=nexakit agent-toolkit-inbox consumo --project-root ${p}`,
-      models:'npx --package=nexakit agent-toolkit-inbox modelos', agents:'npx --package=nexakit agent-toolkit-inbox agentes',
-      'agents-apply':'npx --package=nexakit agent-toolkit-inbox agentes --escribir',
+      'memory-doctor':`npx nexakit memoria doctor ${m} --strict`,
+      'memory-status':`npx nexakit memoria status ${m}`,
+      'sync-plan':`npx nexakit memoria sync plan ${m}`,
+      'sync-inspect':`npx nexakit memoria sync inspect ${m} --pr 42`,
+      'open-claude':`cd ${p}\nclaude`,
+      'open-codex':`cd ${p}\ncodex`,
+      'open-antigravity':`cd ${p}\nagy`,
+      'revision-avail':'~/.nexakit/nexakit revision --disponibles --principal claude',
+      'revision-run':`~/.nexakit/nexakit revision --con codex --project ${p} --encargo /ruta/encargo.md`,
+      modelo:'~/.nexakit/nexakit modelo',
+      'claude-revisar':'/revisar',
+      'codex-revisar':'$revisar',
+      'claude-cerrar':'/cerrar-memoria',
+      'codex-cerrar':'$cerrar-memoria',
       'gemini-status':'npx --package=nexakit agent-toolkit-gemini estado',
       'gemini-ask':`npx --package=nexakit agent-toolkit-gemini consultar --prompt ${quote('Explica la diferencia entre una skill y un MCP')}`,
       'gemini-research':`npx --package=nexakit agent-toolkit-gemini investigar --prompt ${quote('Investiga patrones de documentación para proyectos de software')}`,
       'gemini-history':'npx --package=nexakit agent-toolkit-gemini historial',
-      'claude-programar':'/programar mejora el diseño del formulario sin cambiar su comportamiento',
-      'codex-programar':'$programar mejora el diseño del formulario sin cambiar su comportamiento',
-      'claude-revisar':'/revisar', 'codex-revisar':'$revisar',
-      'claude-estado':'/estado', 'codex-estado':'$estado',
-      'claude-cerrar':'/cerrar-memoria', 'codex-cerrar':'$cerrar-memoria',
-      help:'npx nexakit --help', 'memory-help':'npx --package=nexakit project-memory --help'
+      help:'npx nexakit --help'
     };
-    for (const agent of ['claude','codex']) {
-      map[`connect-${agent}`] = `npx --package=nexakit project-memory connect ${m} --agent ${agent}`;
+    for (const agent of ['claude','codex','antigravity']) {
+      map[`connect-${agent}`] = `npx nexakit memoria connect ${m} --agent ${agent}`;
       map[`connect-${agent}-apply`] = map[`connect-${agent}`] + ' --apply';
     }
     return map[key];
   };
   const entries = [
-    ['tui','skills','Abrir el asistente','Detecta tu stack y permite elegir skills con vista previa.','Terminal · cualquier carpeta'],
-    ['recommend','skills','Consultar skills compatibles','Solo lectura. Añade --profile frontend, backend, mcp o security para expresar tu intención.','Terminal · cualquier carpeta'],
-    ['doctor','maintenance','Diagnosticar NexaKit','Comprueba CLIs, skills base, MCP de coordinación y permisos.','Terminal · cualquier carpeta'],
-    ['setup','workflow','Previsualizar las skills base','Muestra enlaces globales y recetas de registro del MCP de coordinación.','Terminal · cualquier carpeta'],
-    ['setup-apply','workflow','Instalar las skills base','Aplica enlaces globales sin reemplazar destinos diferentes. El registro MCP se ejecuta aparte.','Terminal · escribe enlaces personales'],
-    ['init','memory','Previsualizar una memoria','Prepara la estructura y su manifiesto sin escribir archivos.','Terminal · cualquier carpeta'],
-    ['init-apply','memory','Crear la memoria','Crea notas, manifiesto y skill del proyecto en el destino.','Terminal · escribe en la carpeta de memoria'],
-    ['memory-doctor','memory','Diagnosticar la memoria','Valida la estructura. --strict devuelve error también ante advertencias.','Terminal · solo lectura'],
-    ['connect-claude','memory','Previsualizar conexión con Claude','Muestra los cambios previstos en la skill y el MCP de memoria.','Terminal · solo lectura'],
-    ['connect-claude-apply','memory','Conectar memoria con Claude','Aplica la conexión. Reinicia Claude y comprueba una lectura real.','Terminal · cambia configuración personal'],
-    ['connect-codex','memory','Previsualizar conexión con Codex','Muestra los cambios previstos en la skill y el MCP de memoria.','Terminal · solo lectura'],
-    ['connect-codex-apply','memory','Conectar memoria con Codex','Aplica la conexión. Reinicia Codex y comprueba una lectura real.','Terminal · cambia configuración personal'],
-    ['memory-status','memory','Ver conexiones de la memoria','Inspecciona su estado configurado; la prueba de lectura se hace en el agente.','Terminal · solo lectura'],
-    ['sync-plan','memory','Revisar PR pendientes en memoria','Necesita gh, acceso a GitHub y remoto fuente configurado. No actualiza notas.','Terminal · consulta GitHub'],
-    ['sync-inspect','memory','Inspeccionar un PR fusionado','Cambia 42 por tu número de PR. Consulta la evidencia antes de decidir qué notas actualizar.','Terminal · consulta GitHub'],
-    ['models','workflow','Consultar modelos y niveles','Muestra el catálogo observado y la configuración vigente.','Terminal · cualquier carpeta'],
-    ['agents','workflow','Previsualizar agentes de Codex','Revisa los agentes de nivel antes de crearlos.','Terminal · vista previa'],
-    ['agents-apply','workflow','Crear agentes de nivel de Codex','Crea los agentes que falten y conserva los existentes diferentes.','Terminal · escribe configuración personal'],
-    ['usage','workflow','Consultar consumo registrado','Informa tokens y tiempos de mediciones guardadas; no captura todas las llamadas del chat.','Terminal · solo lectura'],
-    ['claude-programar','chat','Programar con Claude','Necesita las skills base y el MCP de coordinación del paso 6. Sustituye la tarea por la tuya.','Chat de Claude Code · skill /programar'],
-    ['codex-programar','chat','Programar con Codex','Necesita las skills base y el MCP de coordinación del paso 6. Sustituye la tarea por la tuya.','Chat de Codex · skill $programar'],
-    ['claude-revisar','chat','Revisar con Claude','Prepara esta sesión como revisora. Requiere el flujo de coordinación configurado.','Chat de Claude Code · skill /revisar'],
-    ['codex-revisar','chat','Revisar con Codex','Registra esta sesión como revisora del proyecto. Requiere el flujo de coordinación configurado.','Chat de Codex · skill $revisar'],
-    ['claude-estado','chat','Ver revisiones en Claude','Consulta colaboraciones, encargos pendientes y últimos veredictos.','Chat de Claude Code · skill /estado'],
-    ['codex-estado','chat','Ver revisiones en Codex','Consulta colaboraciones, encargos pendientes y últimos veredictos.','Chat de Codex · skill $estado'],
-    ['claude-cerrar','chat','Revisar la memoria al cerrar en Claude','Necesita cerrar-memoria instalada. Indica la ruta de la memoria y revisa los cambios propuestos.','Chat de Claude Code · skill /cerrar-memoria'],
-    ['codex-cerrar','chat','Revisar la memoria al cerrar en Codex','Necesita cerrar-memoria instalada. Indica la ruta de la memoria y revisa los cambios propuestos.','Chat de Codex · skill $cerrar-memoria'],
-    ['gemini-status','gemini','Comprobar Gemini por Antigravity','Requiere agy y su suscripción. Es una integración opcional independiente.','Terminal · consulta Antigravity'],
-    ['gemini-ask','gemini','Consultar a Gemini','Envía una consulta mediante agy y utiliza su cuota.','Terminal · llama a un modelo'],
-    ['gemini-research','gemini','Investigar con Gemini','Busca en la web mediante agy y devuelve fuentes. Utiliza su cuota.','Terminal · llama a un modelo'],
-    ['gemini-history','gemini','Ver historial de Gemini','Lista consultas anteriores sin volver a llamar al modelo.','Terminal · solo lectura'],
-    ['detach','maintenance','Previsualizar el desacoplado','Revisa qué skills y archivos gestionados se retirarían del proyecto.','Terminal · vista previa'],
-    ['detach-apply','maintenance','Retirar la integración del proyecto','Aplica el desacoplado conservando archivos propios o modificados.','Terminal · modifica la integración del proyecto'],
-    ['help','maintenance','Ver ayuda de NexaKit','Consulta las opciones disponibles en tu versión.','Terminal · cualquier carpeta'],
-    ['memory-help','memory','Ver ayuda de memoria','Incluye init, connect, doctor, status y las operaciones sync.','Terminal · cualquier carpeta']
+    ['tui','skills','Abrir el asistente en un proyecto','Inspecciona el proyecto, sugiere skills, prepara la memoria y conecta tus IA.','Terminal · cualquier carpeta'],
+    ['tui-si','skills','Aplicar directamente las sugerencias (--si)','Aplica sin preguntas las skills sugeridas, la memoria y las IA detectadas.','Terminal · cualquier carpeta'],
+    ['recommend','skills','Consultar skills compatibles en solo lectura','Añade --profile frontend, backend, mcp o security para afinar la consulta.','Terminal · solo lectura'],
+    ['comprobar','maintenance','Comprobar la instalación (comprobar)','Muestra un resumen legible con ✓ y ! sobre tus IA, skills base, enlaces antiguos y elementos obsoletos.','Terminal · solo lectura'],
+    ['quitar','maintenance','Previsualizar la retirada (quitar)','Muestra qué enlaces, reglas globales y MCP propios de NexaKit se retirarían.','Terminal · vista previa'],
+    ['quitar-si','maintenance','Retirar lo instalado por NexaKit (quitar --si)','Aplica el desacoplado respetando archivos propios o modificados.','Terminal · modifica integración'],
+    ['reparar','maintenance','Reparar enlaces antiguos (reparar --desde)','Reapunta enlaces rotos que quedaron apuntando a una carpeta antigua del toolkit.','Terminal · repara enlaces'],
+    ['memory-status','memory','Ver estado de la memoria y sus conexiones','Comprueba la bóveda y las conexiones de Claude, Codex y Antigravity.','Terminal · solo lectura'],
+    ['memory-doctor','memory','Diagnosticar la estructura de la memoria','Valida manifiesto, notas y enlaces de la bóveda (--strict exige cero advertencias).','Terminal · solo lectura'],
+    ['init','memory','Previsualizar creación manual de memoria','Prepara notas, manifiesto y skill del proyecto sin escribir archivos.','Terminal · vista previa'],
+    ['init-apply','memory','Crear manualmente la memoria (--apply)','Crea la bóveda cuando prefieres hacerlo fuera del asistente principal.','Terminal · escribe en la bóveda'],
+    ['connect-claude','memory','Conectar memoria con Claude Code','Usa --apply para aplicar el enlace de la skill y el MCP de lectura.','Terminal · conexión de memoria'],
+    ['connect-codex','memory','Conectar memoria con Codex','Usa --apply para aplicar el enlace de la skill y el MCP de lectura.','Terminal · conexión de memoria'],
+    ['connect-antigravity','memory','Conectar memoria con Antigravity','Usa --apply para aplicar el enlace de la skill y el MCP de lectura.','Terminal · conexión de memoria'],
+    ['sync-plan','memory','Ver PR fusionados pendientes de documentar','Consulta en GitHub qué Pull Requests integrados aún no se registraron en la memoria.','Terminal · consulta GitHub'],
+    ['sync-inspect','memory','Inspeccionar un PR fusionado','Muestra los detalles comprobables de un PR antes de actualizar notas.','Terminal · consulta GitHub'],
+    ['revision-avail','workflow','Consultar IA revisoras disponibles','Lista qué otras IA instaladas están certificadas en solo lectura para revisar.','Terminal · sin llamadas a modelos'],
+    ['revision-run','workflow','Ejecutar una revisión en solo lectura','Lanza la IA revisora con el encargo estructurado y devuelve hallazgos y procedencia.','Terminal · llama a la IA revisora'],
+    ['modelo','workflow','Ver catálogo de modelos y configuración guardada','Muestra los modelos reales y esfuerzos de Claude Code, Codex y Antigravity.','Terminal · solo lectura'],
+    ['claude-revisar','chat','Pedir una revisión adicional (/revisar)','Pide una revisión extra en cualquier momento (en Codex: $revisar).','Chat de Claude / Antigravity · /revisar'],
+    ['codex-revisar','chat','Pedir una revisión adicional en Codex ($revisar)','Lanza una revisión extra con otra IA desde Codex.','Chat de Codex · $revisar'],
+    ['claude-cerrar','chat','Cerrar y actualizar la memoria (/cerrar-memoria)','Actualiza las notas permanentes de la bóveda y pasa la nota de seguimiento a completado.','Chat de Claude / Antigravity · /cerrar-memoria'],
+    ['codex-cerrar','chat','Cerrar y actualizar la memoria en Codex ($cerrar-memoria)','Actualiza las notas permanentes de la bóveda y cierra la nota de seguimiento.','Chat de Codex · $cerrar-memoria'],
+    ['gemini-status','gemini','Comprobar Gemini por Antigravity','Verifica que agy esté disponible para consultas puntuales.','Terminal · consulta Antigravity'],
+    ['gemini-ask','gemini','Consultar a Gemini','Envía una consulta mediante agy.','Terminal · llama a un modelo'],
+    ['gemini-research','gemini','Investigar en la web con Gemini','Busca en la web mediante agy y devuelve fuentes.','Terminal · llama a un modelo'],
+    ['gemini-history','gemini','Ver historial de consultas a Gemini','Lista consultas anteriores guardadas localmente sin llamar al modelo.','Terminal · solo lectura'],
+    ['memoria-help','memory','Ver ayuda de memoria','Muestra todos los subcomandos de npx nexakit memoria.','Terminal · cualquier carpeta'],
+    ['help','maintenance','Ver ayuda general de NexaKit','Lista todos los subcomandos en español y opciones disponibles.','Terminal · cualquier carpeta']
   ];
   let toastTimer;
   function toast(message) {

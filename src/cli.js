@@ -87,9 +87,16 @@ Evita editar o sincronizar la memoria durante --apply: su bloqueo no controla
 editores externos. Ni record ni apply crean commits o hacen push. apply puede
 quedar parcial entre notas: no revierte ni registra automáticamente el PR.`;
 
+// Invoked as `npx nexakit memoria`, the help names that command and keeps project-memory as the compatible executable.
+const DEFAULT_COMMAND = "project-memory";
+function helpFor(commandName = DEFAULT_COMMAND) {
+  if (commandName === DEFAULT_COMMAND) return HELP;
+  return `${HELP.replaceAll(DEFAULT_COMMAND, commandName)}\n\nEl ejecutable ${DEFAULT_COMMAND} es compatible y acepta los mismos subcomandos.`;
+}
+
 export async function runCli(argv, io = defaultIo(), context = {}) {
   if (argv.length === 0 || argv.includes("--help") || argv.includes("-h")) {
-    io.out(HELP);
+    io.out(helpFor(context.commandName));
     return 0;
   }
 
@@ -103,11 +110,11 @@ export async function runCli(argv, io = defaultIo(), context = {}) {
   }
 
   if (command === "connect") {
-    return runConnectCommand(rest, io);
+    return runConnectCommand(rest, io, context);
   }
 
   if (command === "status") {
-    return runStatusCommand(rest, io);
+    return runStatusCommand(rest, io, context);
   }
 
   if (command === "sync") {
@@ -115,7 +122,7 @@ export async function runCli(argv, io = defaultIo(), context = {}) {
   }
 
   io.err(`Comando desconocido: ${command}`);
-  io.err(HELP);
+  io.err(helpFor(context.commandName));
   return 2;
 }
 
@@ -319,7 +326,7 @@ async function runSyncApplyCommand(args, io, context) {
   }
 }
 
-async function runStatusCommand(rest, io) {
+async function runStatusCommand(rest, io, context = {}) {
   const options = {
     targetPath: process.cwd()
   };
@@ -366,7 +373,7 @@ async function runStatusCommand(rest, io) {
 
   let report;
   try {
-    report = await inspectMemoryStatus(options);
+    report = await inspectMemoryStatus(options, context);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     io.err(`No se pudo inspeccionar el estado: ${message}`);
@@ -388,7 +395,7 @@ async function runStatusCommand(rest, io) {
   return 0;
 }
 
-async function runConnectCommand(rest, io) {
+async function runConnectCommand(rest, io, context = {}) {
   const options = {
     apply: false,
     targetPath: process.cwd()
@@ -435,7 +442,7 @@ async function runConnectCommand(rest, io) {
 
   let report;
   try {
-    report = await connectMemory(options);
+    report = await connectMemory(options, context);
   } catch (error) {
     if (error instanceof ConnectionError) {
       for (const detail of error.details) {

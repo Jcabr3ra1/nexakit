@@ -24,15 +24,19 @@ El esfuerzo es una preferencia estable, no se ajusta tarea por tarea. Parte del 
 
 Que una tarea sea larga no la hace `high`. `max` y `ultra` casi nunca: tardan horas y pueden pensar de más. Ciclo recomendado: construir en el por defecto y verificar al final en `high`; en Claude, cambiar de esfuerzo a mitad de sesión no rompe la caché.
 
-## 3. Modelo: por lo que hace falta saber
+## 3. Modelo: papeles y cómo reconocerlos
 
-| Trabajo | Modelo |
-| --- | --- |
-| Ediciones precisas, cambios mecánicos, preguntas sobre código ya en contexto | el ligero (Claude `haiku`) |
-| Implementar con un diseño claro, el trabajo de cada día | el de uso diario (Claude `sonnet`) |
-| Bugs sutiles, dominios nuevos, diseño o arquitectura, mucha ambigüedad | el más capaz (Claude `opus`, o `opusplan` si se planifica y luego se ejecuta) |
+La elección se hace por **papel**, no por nombres fijos que caducan:
 
-En Codex y Antigravity elige el equivalente según la descripción que da el script.
+| Papel | Cuándo usarlo | Cómo reconocerlo en `modelos.mjs` | Ejemplo con fecha (a 2026-11: usar solo lo que devuelva el script) |
+| --- | --- | --- | --- |
+| **ligero** | Solo comandos y cambios mecánicos, ediciones precisas o preguntas sobre código ya en contexto | `papel: ligero`, descripción *fast and affordable / lightweight / easier tasks* o familias `haiku`, `luna`, `flash` | a 2026-11: Claude `haiku`, Codex `gpt-6-luna`, Antigravity `gemini-3.8-flash-*` |
+| **uso diario** | Implementar con un diseño claro, el trabajo habitual de programación | `papel: uso diario`, descripción *workhorse / everyday / balanced* o familias `sonnet`, `sol`, `terra` | a 2026-11: Claude `sonnet`, Codex `gpt-6.1-sol` o `gpt-6.1-terra` |
+| **el más capaz** | Diseño, bugs sutiles y ambigüedad, dominios nuevos o arquitectura | `papel: el más capaz`, descripción *frontier / most demanding* o familias `opus`, `astra`, `argon` | a 2026-11: Claude `opus` (o `opusplan`), Codex `gpt-6-astra`, Antigravity `gemini-4-argon-*` |
+
+- **Modelos nuevos y clasificación por familia:** entran modelos nuevos con frecuencia (por ejemplo, `gpt-6.1-terra`, que llega sin descripción útil). Si un modelo no tiene una descripción que indique su papel, `modelos.mjs` lo clasifica por su familia (`luna`, `terra`, `sol`, `astra`, `flash`, `argon`, `haiku`, `sonnet`, `opus`…) usando la descripción de la generación anterior de esa misma familia. Si no hay generación anterior ni familia conocida, queda marcado como `sin clasificar`: en ese caso, **pregunta al usuario en vez de adivinar**.
+- **Generaciones pasadas:** los modelos marcados con `papel: anterior` (*older* / *previous generation*) no se recomiendan salvo que el usuario los pida expresamente.
+- **Límites y cuota:** un aviso de límite o de cuota nunca baja el modelo sin decírselo al usuario. Si una cuenta se acerca al límite o agota cuota, informa al usuario y espera su decisión antes de pasar a otro modelo o a otra IA.
 
 ## 4. Si un resultado salió mal, diagnostica antes de subir
 

@@ -26,7 +26,11 @@ sin describirlo como estado vigente ni marcar el PR revisado en el registro.
    completo de la fase que el usuario pidió cerrar. La descripción del PR es
    evidencia atribuida: contrasta el comportamiento en el código integrado.
 3. Enumera solo notas afectadas; sin cambio estable, usa `no-documentation-change`.
-   Edita las notas con el permiso vigente y vuelve a revisar el diff.
+   Si la tarea tenía una nota `03-IMPLEMENTACION/Planes/<AAAA-MM-DD>-<slug>-seguimiento.md`
+   con `estado: en curso`, incorpora sus decisiones confirmadas y el resultado
+   final en las notas estables correspondientes y actualiza su frontmatter a
+   `estado: completado`. Edita las notas con el permiso vigente y vuelve a
+   revisar el diff.
 4. Registra con la herramienta, primero en vista previa:
 
    ```sh

@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
 const SCRIPT = fileURLToPath(new URL('../skills/elegir-modelo/modelos.mjs', import.meta.url));
+const SKILL = fileURLToPath(new URL('../skills/elegir-modelo/SKILL.md', import.meta.url));
 
 async function fixture(t, { claude, codexConfig, codexCache, agy, agyFails } = {}) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'elegir-modelo-')));
@@ -41,7 +42,7 @@ test('lists the real Codex models with their own default effort, and leaves out 
   });
   const { status, out } = run();
   assert.equal(status, 0);
-  assert.match(out, /^- gpt-6\.1-sol · por defecto low · low, medium, high, xhigh, max, ultra · Descripción de gpt-6\.1-sol\.$/mu);
+  assert.match(out, /^- gpt-6\.1-sol · por defecto low · low, medium, high, xhigh, max, ultra · Descripción de gpt-6\.1-sol\. · papel: uso diario$/mu);
   assert.doesNotMatch(out, /codex-auto-review/u);
   assert.match(out, /^Guardado: model=gpt-6\.1-sol · model_reasoning_effort=medium$/mu, 'only the top-level keys, not the profile ones');
 });
@@ -58,14 +59,49 @@ test('reports what Claude has stored and warns when an environment variable over
 test('lists the Antigravity ids when agy is installed, and says so when it is not', async t => {
   const withAgy = await fixture(t, { agy: 'Fetching available models...\ngemini-4-argon-high\tGemini 4 Argon (High)\ngemini-3.8-flash-low\tGemini 3.8 Flash (Low)\n' });
   const { out } = withAgy();
-  assert.match(out, /^- gemini-4-argon-high · Gemini 4 Argon \(High\)$/mu);
-  assert.match(out, /^- gemini-3\.8-flash-low · Gemini 3\.8 Flash \(Low\)$/mu);
+  assert.match(out, /^- gemini-4-argon-high · Gemini 4 Argon \(High\) · papel: el más capaz$/mu);
+  assert.match(out, /^- gemini-3\.8-flash-low · Gemini 3\.8 Flash \(Low\) · papel: ligero$/mu);
   assert.doesNotMatch(out, /Fetching/u);
   assert.match(out, /No guarda en archivos el modelo elegido/u);
   assert.match((await fixture(t))().out, /^agy no está instalado\.$/mu);
   const failing = (await fixture(t, { agyFails: 'Not signed in.\nRun agy login.\n' }))().out;
   assert.match(failing, /^agy models falló: Not signed in\.$/mu, 'installed but failing is not reported as missing');
   assert.doesNotMatch(failing, /no está instalado/u);
+});
+
+test('new models without useful description inherit the role of their family or are marked sin clasificar', async t => {
+  const run = await fixture(t, {
+    codexCache: [
+      model('gpt-9-terra', 'low', ['low', 'medium', 'high'], { description: 'GPT-9 Terra Codex model.' }),
+      model('gpt-5.6-terra', 'medium', ['low', 'medium', 'high'], { description: 'Older balanced model for straightforward work.' }),
+      model('gpt-9-luna', 'low', ['low', 'medium'], { description: 'GPT-9 Luna model.' }),
+      model('gpt-9-cometa', 'low', ['low', 'high'], { description: 'GPT-9 Cometa model.' }),
+      model('gpt-8-cometa', 'low', ['low', 'high'], { description: 'Previous generation frontier intelligence for the most demanding work.' }),
+      model('gpt-9-quasar', 'low', ['low', 'medium'], { description: 'GPT-9 Quasar model.' })
+    ],
+    agy: 'gemini-5-argon-high\tGemini 5 Argon (High)\ngpt-oss-120b-medium\tGPT-OSS 120B (Medium)\n'
+  });
+  const { status, out } = run();
+  assert.equal(status, 0);
+  assert.match(out, /^- gpt-9-terra · .* · papel: uso diario$/mu);
+  assert.match(out, /^- gpt-5\.6-terra · .* · papel: anterior$/mu);
+  assert.match(out, /^- gpt-9-luna · .* · papel: ligero$/mu);
+  assert.match(out, /^- gpt-9-cometa · .* · papel: el más capaz$/mu);
+  assert.match(out, /^- gpt-9-quasar · .* · papel: sin clasificar$/mu);
+  assert.match(out, /^- gemini-5-argon-high · Gemini 5 Argon \(High\) · papel: el más capaz$/mu);
+  assert.match(out, /^- gpt-oss-120b-medium · GPT-OSS 120B \(Medium\) · papel: sin clasificar$/mu);
+});
+
+test('SKILL.md defines the three roles, family fallback, sin clasificar rule, and limit warning rule without depending on concrete model names', async () => {
+  const text = await fs.readFile(SKILL, 'utf8');
+  assert.match(text, /\bligero\b[^\n]*solo comandos y cambios mecánicos/iu);
+  assert.match(text, /\buso diario\b[^\n]*implementar/iu);
+  assert.match(text, /\bel más capaz\b[^\n]*diseño, bugs sutiles y ambigüedad/iu);
+  assert.match(text, /familia/iu);
+  assert.match(text, /sin clasificar[^\n]*pregunta al usuario/iu);
+  assert.match(text, /aviso de límite o de cuota nunca baja el modelo sin decírselo al usuario/iu);
+  assert.match(text, /a 2026-11:/u);
+  assert.doesNotMatch(text, /\bJuan\b/u);
 });
 
 test('missing files are reported, never a crash', async t => {

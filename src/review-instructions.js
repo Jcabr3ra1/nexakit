@@ -15,7 +15,7 @@ Al terminar una tarea con cambios de código, pide automáticamente UNA revisió
 a otra IA, corrige los hallazgos verificables y resume el resultado. Máximo dos
 rondas por tarea; si queda algo grave, avisa. Solo documentos no dispara revisión.
 Si el usuario dice «sin revisión», omítela. /revisar pide una revisión adicional.
-No uses hooks ni subagentes para automatizar este proceso.
+No uses hooks ni subagentes para automatizarlo.
 
 Lee la skill revision-cruzada para el encargo y la ejecución de solo lectura.
 Usa elegir-modelo para nombres reales y esfuerzos. Nunca cambies solo el modelo.
@@ -23,19 +23,21 @@ Usa la orden estable ~/.nexakit/nexakit (Windows: nexakit.cmd en esa carpeta).
 Un fallo del comando o informe vacío no significa «sin hallazgos».
 
 La IA revisora se elige en la terminal durante la sesión, nunca en el arranque
-ni en answers. Excluye siempre a la IA que programa. Antes de cada revisión y antes de preguntar ejecuta
-\`nexakit revision --disponibles --principal <IA que programa>\` (IA: claude,
+ni en answers. Excluye siempre a la IA que programa. Antes de cada revisión ejecuta
+\`nexakit revision --disponibles --principal <IA que programa>\` (claude,
 codex o antigravity), sin llamadas a modelos. Ofrece las otras IA instaladas
-con certificación «sí» o «pendiente»; para pendientes avisa de que la primera
-vez se certifican. No ofrezcas las que tienen certificación «no». Recomendadas: Claude→${RECOMMENDED_REVIEWERS.claude},
+con certificación «sí» o «pendiente» (avisa si la primera vez se certifican);
+nunca las «no». Recomendadas: Claude→${RECOMMENDED_REVIEWERS.claude},
 Codex→${RECOMMENDED_REVIEWERS.codex} y Antigravity→${RECOMMENDED_REVIEWERS.antigravity}.
-Primera revisión con varias opciones: «¿A dónde mando la revisión?» y marca
-la recomendada. Claude usa el selector de preguntas; Codex y Antigravity una
-pregunta normal. Una opción: úsala sin preguntar; ninguna: avisa que no hay
-revisión. Si falta certificar un perfil instalado, informa esa necesidad.
-En siguientes revisiones conserva la elección en la conversación y anuncia
-«Revisando con <IA>…». «que lo revise <IA>» cambia la elección. Si desaparece,
-usa la única alternativa o pregunta entre las restantes. No persistas la elección.
+Primera revisión con varias opciones: «¿A dónde mando la revisión?» marcando
+la recomendada (Claude: selector; Codex/Antigravity: pregunta normal). Una
+opción: úsala sin preguntar; ninguna: avisa que no hay revisión; si falta
+certificar un perfil, infórmalo. Después conserva la elección en la sesión y
+anuncia «Revisando con <IA>…». «que lo revise <IA>» cambia la elección. Si
+desaparece, usa la única alternativa o pregunta entre las restantes. No persistas
+la elección.
+
+Si una tarea larga queda a medias —pausa, cambio de IA, bloqueo o cierre— escribe o actualiza la nota de seguimiento con project-handoff; recomienda sesión nueva en los casos de project-handoff, y cierra el seguimiento al integrar con cerrar-memoria.
 ${END}`;
 
 const hash = (text) => createHash('sha256').update(text).digest('hex');
