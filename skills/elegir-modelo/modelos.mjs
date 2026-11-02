@@ -13,6 +13,38 @@ const out = (...text) => lines.push(...text);
 const readText = file => { try { return fs.readFileSync(file, 'utf8'); } catch { return null; } };
 const readJson = file => { try { return JSON.parse(readText(file)); } catch { return null; } };
 const short = file => (file.startsWith(home + path.sep) ? `~${file.slice(home.length)}` : file);
+const FAMILY_ROLES = Object.freeze({
+  luna: 'ligero',
+  flash: 'ligero',
+  haiku: 'ligero',
+  terra: 'uso diario',
+  sol: 'uso diario',
+  sonnet: 'uso diario',
+  astra: 'el más capaz',
+  argon: 'el más capaz',
+  opus: 'el más capaz'
+});
+const roleFromDescription = (description = '') => {
+  if (/\b(fast and (affordable|efficient)|easier tasks|lightweight)\b/iu.test(description)) return 'ligero';
+  if (/\b(frontier|most demanding)\b/iu.test(description)) return 'el más capaz';
+  if (/\b(workhorse|everyday|balanced|straightforward work)\b/iu.test(description)) return 'uso diario';
+  return null;
+};
+const familyOf = (slug = '') => {
+  const base = String(slug).replace(/-(?:low|medium|high|xhigh|max|ultra)$/iu, '');
+  const known = base.match(/\b(luna|terra|sol|astra|flash|argon|haiku|sonnet|opus)\b/iu);
+  if (known) return known[1].toLowerCase();
+  const family = base.match(/^(?:gpt|gemini|claude)-\d+(?:\.\d+)*-([a-z][a-z0-9]*)$/iu);
+  return family ? family[1].toLowerCase() : null;
+};
+const classifyRole = (slug = '', description = '', familyRoles = new Map(Object.entries(FAMILY_ROLES))) => {
+  if (/\b(older|previous)\b/iu.test(description)) return 'anterior';
+  const direct = roleFromDescription(description);
+  if (direct) return direct;
+  const family = familyOf(slug);
+  if (family && familyRoles.has(family)) return familyRoles.get(family);
+  return 'sin clasificar';
+};
 
 // Claude Code: aliases are stable and the CLI publishes no catalog, so they are listed here.
 const claudeDir = env.CLAUDE_CONFIG_DIR ?? path.join(home, '.claude');
@@ -33,10 +65,17 @@ const cache = readJson(cacheFile);
 out('## Codex');
 const models = Array.isArray(cache?.models) ? cache.models : null;
 if (!models) out(`No encontré ${short(cacheFile)}: abre Codex una vez.`);
-for (const model of models ?? []) {
-  if (model.visibility === 'hide' || typeof model.slug !== 'string') continue;
+const visibleCodex = (models ?? []).filter(model => model.visibility !== 'hide' && typeof model.slug === 'string');
+const codexFamilyRoles = new Map(Object.entries(FAMILY_ROLES));
+for (const model of visibleCodex) {
+  const family = familyOf(model.slug);
+  const role = roleFromDescription(model.description ?? '');
+  if (family && role) codexFamilyRoles.set(family, role);
+}
+for (const model of visibleCodex) {
   const levels = (model.supported_reasoning_levels ?? []).map(level => level.effort).join(', ');
-  out(`- ${model.slug} · por defecto ${model.default_reasoning_level ?? '?'} · ${levels} · ${model.description ?? ''}`.trimEnd());
+  const role = classifyRole(model.slug, model.description ?? '', codexFamilyRoles);
+  out(`- ${model.slug} · por defecto ${model.default_reasoning_level ?? '?'} · ${levels} · ${model.description ?? ''} · papel: ${role}`.trimEnd());
 }
 // Only the top-level keys: profile tables come later in the file and apply only with --profile.
 const config = readText(path.join(codexHome, 'config.toml')) ?? '';
@@ -58,7 +97,10 @@ if (missing) {
 } else {
   for (const row of (agy.stdout ?? '').split('\n')) {
     const [id, label] = row.split('\t');
-    if (id && label) out(`- ${id.trim()} · ${label.trim()}`);
+    if (id && label) {
+      const role = classifyRole(id.trim(), label.trim());
+      out(`- ${id.trim()} · ${label.trim()} · papel: ${role}`);
+    }
   }
   out('El esfuerzo va en el id: -low, -medium, -high. No guarda en archivos el modelo elegido: compruébalo con /model dentro de agy.');
 }

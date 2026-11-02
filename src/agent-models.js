@@ -6,31 +6,71 @@ import { getStaticTOMLValue, parseTOML } from "toml-eslint-parser";
 // Claude Code accepts stable aliases; Codex publishes its catalog in models_cache.json.
 const CLAUDE = [
   { model: "haiku", category: "ligero", efforts: ["low", "medium", "high", "xhigh", "max"] },
-  { model: "sonnet", category: "trabajo diario", efforts: ["low", "medium", "high", "xhigh", "max"] },
-  { model: "opus", category: "más capaz", efforts: ["low", "medium", "high", "xhigh", "max"] }
+  { model: "sonnet", category: "uso diario", efforts: ["low", "medium", "high", "xhigh", "max"] },
+  { model: "opus", category: "el más capaz", efforts: ["low", "medium", "high", "xhigh", "max"] }
 ];
 const LEVELS = [
   { level: "Ligero", total: "0–2", category: "ligero", effort: "low" },
-  { level: "Normal", total: "3–4", category: "trabajo diario", effort: "medium" },
-  { level: "Exigente", total: "5–6", category: "trabajo diario", effort: "high" },
-  { level: "Alto", total: "7–10", category: "más capaz", effort: "high" }
+  { level: "Normal", total: "3–4", category: "uso diario", effort: "medium" },
+  { level: "Exigente", total: "5–6", category: "uso diario", effort: "high" },
+  { level: "Alto", total: "7–10", category: "el más capaz", effort: "high" }
 ];
+const FAMILY_ROLES = Object.freeze({
+  luna: "ligero",
+  flash: "ligero",
+  haiku: "ligero",
+  terra: "uso diario",
+  sol: "uso diario",
+  sonnet: "uso diario",
+  astra: "el más capaz",
+  argon: "el más capaz",
+  opus: "el más capaz"
+});
 
-function category(description = "") {
-  if (/\b(older|previous)\b/iu.test(description)) return "anterior";
+export function roleFromDescription(description = "") {
   if (/\b(fast and (affordable|efficient)|easier tasks|lightweight)\b/iu.test(description)) return "ligero";
-  if (/\b(frontier|most demanding)\b/iu.test(description)) return "más capaz";
-  if (/\b(workhorse|everyday|balanced)\b/iu.test(description)) return "trabajo diario";
-  return "otro";
+  if (/\b(frontier|most demanding)\b/iu.test(description)) return "el más capaz";
+  if (/\b(workhorse|everyday|balanced|straightforward work)\b/iu.test(description)) return "uso diario";
+  return null;
+}
+
+export function familyOfModel(slug = "") {
+  const base = String(slug).replace(/-(?:low|medium|high|xhigh|max|ultra)$/iu, "");
+  const known = base.match(/\b(luna|terra|sol|astra|flash|argon|haiku|sonnet|opus)\b/iu);
+  if (known) return known[1].toLowerCase();
+  const family = base.match(/^(?:gpt|gemini|claude)-\d+(?:\.\d+)*-([a-z][a-z0-9]*)$/iu);
+  return family ? family[1].toLowerCase() : null;
+}
+
+export function classifyModelRole(slug = "", description = "", familyRoles = new Map(Object.entries(FAMILY_ROLES))) {
+  if (/\b(older|previous)\b/iu.test(description)) return "anterior";
+  const direct = roleFromDescription(description);
+  if (direct) return direct;
+  const family = familyOfModel(slug);
+  if (family && familyRoles.has(family)) return familyRoles.get(family);
+  return "sin clasificar";
+}
+
+export function buildFamilyRoleMap(items = []) {
+  const map = new Map(Object.entries(FAMILY_ROLES));
+  for (const item of items) {
+    const family = familyOfModel(item.slug ?? item.model ?? "");
+    const role = roleFromDescription(item.description ?? "");
+    if (family && role) map.set(family, role);
+  }
+  return map;
 }
 
 async function codexCatalog(codexHome) {
   let cache;
   try { cache = JSON.parse(await fs.readFile(path.join(codexHome, "models_cache.json"), "utf8")); }
   catch { return { available: false, models: [] }; }
-  const models = (Array.isArray(cache?.models) ? cache.models : [])
-    .filter(item => item && typeof item.slug === "string" && (item.visibility ?? "list") === "list")
-    .map(item => ({ model: item.slug, description: String(item.description ?? "").slice(0, 120), category: category(item.description),
+  const visible = (Array.isArray(cache?.models) ? cache.models : [])
+    .filter(item => item && typeof item.slug === "string" && (item.visibility ?? "list") === "list");
+  const familyRoles = buildFamilyRoleMap(visible);
+  const models = visible
+    .map(item => ({ model: item.slug, description: String(item.description ?? "").slice(0, 120),
+      category: classifyModelRole(item.slug, item.description, familyRoles),
       priority: Number.isFinite(item.priority) ? item.priority : 999,
       efforts: (item.supported_reasoning_levels ?? []).map(level => level?.effort).filter(effort => typeof effort === "string") }));
   return { available: true, fetchedAt: cache.fetched_at ?? null, models };

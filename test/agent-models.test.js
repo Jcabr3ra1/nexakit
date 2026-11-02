@@ -108,3 +108,26 @@ test("the inbox CLI prints the catalog as a table or JSON", async () => {
   assert.equal(await runPeerInboxCli(["modelos", "--otro"], { codexHome: dir, out: () => {}, err: t => errors.push(t) }), 2);
   assert.match(errors.join(""), /agent-toolkit-inbox modelos/u);
 });
+
+test("new models without useful description inherit the role of their family or are marked sin clasificar", async () => {
+  const dir = await codexHome([
+    { slug: "gpt-9-terra", description: "GPT-9 Terra Codex model.", priority: 0, supported_reasoning_levels: levels(["low", "medium", "high"]) },
+    { slug: "gpt-5.6-terra", description: "Older balanced model for straightforward work.", priority: 5, supported_reasoning_levels: levels(["low", "medium", "high"]) },
+    { slug: "gpt-9-luna", description: "GPT-9 Luna model.", priority: 1, supported_reasoning_levels: levels(["low", "medium"]) },
+    { slug: "gpt-9-cometa", description: "GPT-9 Cometa model.", priority: 2, supported_reasoning_levels: levels(["low", "high"]) },
+    { slug: "gpt-8-cometa", description: "Previous generation frontier intelligence.", priority: 6, supported_reasoning_levels: levels(["low", "high"]) },
+    { slug: "gpt-9-quasar", description: "GPT-9 Quasar model.", priority: 3, supported_reasoning_levels: levels(["low", "medium"]) }
+  ]);
+  const result = await agentModels({ codexHome: dir });
+  const bySlug = Object.fromEntries(result.codex.models.map(item => [item.model, item.category]));
+  assert.equal(bySlug["gpt-9-terra"], "uso diario");
+  assert.equal(bySlug["gpt-5.6-terra"], "anterior");
+  assert.equal(bySlug["gpt-9-luna"], "ligero");
+  assert.equal(bySlug["gpt-9-cometa"], "el más capaz");
+  assert.equal(bySlug["gpt-8-cometa"], "anterior");
+  assert.equal(bySlug["gpt-9-quasar"], "sin clasificar");
+  assert.deepEqual(
+    result.levels.map(level => level.codex && `${level.codex.model}:${level.codex.effort}`),
+    ["gpt-9-luna:low", "gpt-9-terra:medium", "gpt-9-terra:high", "gpt-9-cometa:high"]
+  );
+});
