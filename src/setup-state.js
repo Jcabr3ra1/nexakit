@@ -7,7 +7,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { connectMemory } from './connect.js';
 import { ACTIONABLE_LINK_STATES } from './link-states.js';
-import { findKnownMemories, memoryForRepository, suggestMemoryLocation } from './memory-locator.js';
+import { findKnownMemories, memoryForRepository, registeredServers, suggestMemoryLocation } from './memory-locator.js';
 import { AGENTS, shortReason } from './setup-plan.js';
 import { loadSkillCatalog } from './skill-catalog.js';
 import { inspectSkillProject, planProjectSkillInstall, readSetupAnswers, recommendSkills } from './skill-recommendations.js';
@@ -17,33 +17,50 @@ import { TOOLKIT_ROOT, executable, packageVersion, resolveNodeExecutable, setupT
 
 const CONFLICT_LINK_STATES = new Set(['conflicto', 'roto-ajeno']);
 
-// What is at a memory path: an existing memory, a place for a new one, or something else that is not touched.
-export async function inspectMemoryPath(target) {
+// What is at a memory path: this repository's memory, a place for a new one, another project's memory ('foreign'),
+// or something else ('invalid'). Only 'memory' and 'new' are ever written; the other two are left alone.
+export async function inspectMemoryPath(target, { repositoryRoot } = {}) {
   const info = await fs.lstat(target).catch(error => (error.code === 'ENOENT' ? null : Promise.reject(error)));
   if (!info) return 'new';
   if (!info.isDirectory() || info.isSymbolicLink()) return 'invalid';
-  const manifest = await fs.lstat(path.join(target, 'project-memory.json')).catch(() => null);
-  if (manifest?.isFile() && !manifest.isSymbolicLink()) return 'memory';
+  const manifestPath = path.join(target, 'project-memory.json');
+  const manifest = await fs.lstat(manifestPath).catch(() => null);
+  if (manifest?.isFile() && !manifest.isSymbolicLink()) {
+    if (!repositoryRoot) return 'memory';
+    try {
+      const source = JSON.parse(await fs.readFile(manifestPath, 'utf8'))?.source?.repositoryPath;
+      const real = typeof source === 'string' ? await fs.realpath(source).catch(() => path.resolve(source)) : null;
+      return real && real === await fs.realpath(repositoryRoot).catch(() => repositoryRoot) ? 'memory' : 'foreign';
+    } catch {
+      return 'invalid';
+    }
+  }
   return (await fs.readdir(target)).length === 0 ? 'new' : 'invalid';
 }
 
-async function declaredAgents(vaultPath) {
-  try {
-    const manifest = JSON.parse(await fs.readFile(path.join(vaultPath, 'project-memory.json'), 'utf8'));
-    return (manifest.agents ?? []).filter(agent => agent.enabled).map(agent => agent.id);
-  } catch {
-    return [];
-  }
+async function readMemoryManifest(vaultPath) {
+  try { return JSON.parse(await fs.readFile(path.join(vaultPath, 'project-memory.json'), 'utf8')); } catch { return null; }
+}
+
+// For an agent the memory does not reach yet: its MCP name must be free in that agent, or already serve this vault.
+async function newConnection(agent, { mcpName, vaultPath, servers, agentsFound }) {
+  if (!agentsFound[agent]) return 'unavailable';
+  if (!Object.hasOwn(servers[agent] ?? {}, mcpName)) return 'create';
+  const real = await fs.realpath(vaultPath).catch(() => path.resolve(vaultPath));
+  return servers[agent][mcpName] === real ? 'create' : 'conflict';
 }
 
 // How an existing memory is connected to each agent: unchanged, create, conflict or unavailable (no CLI). An agent
 // the memory does not declare yet (an older memory without Antigravity) is "create": connecting it declares it.
-export async function memoryConnections(vaultPath, { homeDirectory, runCommand, nodePath, toolkitRoot, agentsFound }) {
-  const declared = await declaredAgents(vaultPath);
+export async function memoryConnections(vaultPath, { homeDirectory, codexHome, runCommand, nodePath, toolkitRoot, agentsFound, kind = 'memory', mcpName }) {
+  const servers = await registeredServers({ homeDirectory, ...(codexHome && { codexHome }) });
+  const manifest = kind === 'memory' ? await readMemoryManifest(vaultPath) : null;
+  const name = manifest?.memory?.mcpServerName ?? mcpName;
+  const declared = (manifest?.agents ?? []).filter(agent => agent.enabled).map(agent => agent.id);
   const result = {};
   for (const agent of AGENTS) {
     if (!declared.includes(agent)) {
-      result[agent] = agentsFound[agent] ? 'create' : 'unavailable';
+      result[agent] = await newConnection(agent, { mcpName: name, vaultPath, servers, agentsFound });
       continue;
     }
     try {
@@ -62,7 +79,7 @@ export async function memoryConnections(vaultPath, { homeDirectory, runCommand, 
 
 export async function gatherSetupState({
   start = process.cwd(), homeDirectory = os.homedir(), environment = process.env, toolkitRoot = TOOLKIT_ROOT,
-  codexHome = environment.CODEX_HOME ?? path.join(homeDirectory, '.codex'), runCommand
+  codexHome = environment.CODEX_HOME ?? path.join(homeDirectory, '.codex'), runCommand, memoryPaths = []
 } = {}) {
   const catalog = await loadSkillCatalog(toolkitRoot === TOOLKIT_ROOT ? {} : { catalogUrl: pathToFileURL(path.join(toolkitRoot, 'catalogs/skills.json')) });
   const inspection = await inspectSkillProject(start, { toolkitRoot, catalog, homeDirectory });
@@ -113,11 +130,13 @@ export async function gatherSetupState({
   const existingEntry = memoryForRepository(known, project.root);
   const suggestedPath = suggestMemoryLocation(known, { id: project.id, homeDirectory });
   const memory = { existing: existingEntry && { vaultPath: existingEntry.vaultPath }, suggestedPath, kinds: {}, connections: {} };
-  const candidates = [existingEntry?.vaultPath, suggestedPath, savedAnswers?.memory?.path].filter(Boolean);
-  const context = { homeDirectory, runCommand, nodePath, toolkitRoot: setup.linkRoot, agentsFound };
+  // The chosen path is always inspected, also one typed in "otra carpeta…" (memoryPaths).
+  const candidates = [existingEntry?.vaultPath, suggestedPath, savedAnswers?.memory?.path, ...memoryPaths].filter(Boolean);
+  const context = { homeDirectory, codexHome, runCommand, nodePath, toolkitRoot: setup.linkRoot, agentsFound, mcpName: `${project.id}-memory` };
   for (const candidate of [...new Set(candidates)]) {
-    memory.kinds[candidate] = await inspectMemoryPath(candidate);
-    if (memory.kinds[candidate] === 'memory') memory.connections[candidate] = await memoryConnections(candidate, context);
+    const kind = await inspectMemoryPath(candidate, { repositoryRoot: project.root });
+    memory.kinds[candidate] = kind;
+    if (kind === 'memory' || kind === 'new') memory.connections[candidate] = await memoryConnections(candidate, { ...context, kind });
   }
 
   return {

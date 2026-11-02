@@ -42,7 +42,7 @@ test('the content changes when the active root changes, and Windows gets a .cmd'
   assert.equal((await planStableCommand(options(h, { toolkitRoot: '/otra/raiz' }))).state, 'distinto');
   const windows = await planStableCommand(options(h, { windows: true, nodePath: 'C:\\node\\node.exe', toolkitRoot: 'C:\\nx' }));
   assert.equal(windows.path, path.join(h, '.nexakit', 'nexakit.cmd'));
-  assert.equal(windows.content, '@"C:\\node\\node.exe" "C:\\nx\\bin\\nexakit.js" %*\r\n');
+  assert.equal(windows.content, '@rem nexakit: orden estable (se reescribe sola)\r\n@"C:\\node\\node.exe" "C:\\nx\\bin\\nexakit.js" %*\r\n');
 });
 
 test('never replaces a link or a folder', async t => {
@@ -79,4 +79,18 @@ test('stops if the lock is lost', async t => {
   const lost = { assertHeld: async () => { throw Object.assign(new Error('perdido'), { code: 'perdido' }); } };
   await assert.rejects(writeStableCommand(plan, lost), /perdido/u);
   await assert.rejects(fs.access(plan.path));
+});
+
+test('a file of the person at ~/.nexakit/nexakit is a conflict, and % is literal in the .cmd', async t => {
+  const h = await home(t);
+  const plan = await planStableCommand(options(h));
+  await fs.mkdir(path.dirname(plan.path), { recursive: true });
+  await fs.writeFile(plan.path, '#!/bin/sh\necho mío\n');
+  const mine = await planStableCommand(options(h));
+  assert.equal(mine.state, 'conflicto');
+  const lock = await acquireLock(path.join(h, '.nexakit'));
+  try { await writeStableCommand({ ...mine, state: 'distinto' }, lock); } finally { await lock.release(); }
+  assert.equal(await fs.readFile(plan.path, 'utf8'), '#!/bin/sh\necho mío\n', 'not replaced even if asked to');
+  const windows = await planStableCommand(options(h, { windows: true, nodePath: 'C:\\node\\node.exe', toolkitRoot: 'C:\\src\\%TEMP%\\nexakit' }));
+  assert.match(windows.content, /"C:\\src\\%%TEMP%%\\nexakit\\bin\\nexakit\.js"/u);
 });

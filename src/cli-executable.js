@@ -36,7 +36,9 @@ async function packageInvocation(directory, name, io, expectedScript) {
 }
 
 export async function resolveCliInvocation({ name, override, environment = process.env, fileIo = fs } = {}) {
-  if (!Object.hasOwn(PACKAGES, name)) unavailable();
+  // agy (Antigravity) is a native executable, not an npm package: only found as such on the PATH.
+  const native = name === "agy";
+  if (!native && !Object.hasOwn(PACKAGES, name)) unavailable();
   if (override) {
     const absolute = path.resolve(override);
     let stat;
@@ -48,7 +50,7 @@ export async function resolveCliInvocation({ name, override, environment = proce
     }
     const extension = path.extname(absolute).toLowerCase();
     if ([".exe", ".com"].includes(extension)) return { executable: absolute, argsPrefix: [] };
-    if (extension === ".cmd" || NODE_EXTENSIONS.has(extension)) {
+    if (!native && (extension === ".cmd" || NODE_EXTENSIONS.has(extension))) {
       const directories = [path.dirname(absolute)];
       // Explicit npm bin scripts may live inside the CLI package itself.
       if (NODE_EXTENSIONS.has(extension)) {
@@ -77,7 +79,7 @@ export async function resolveCliInvocation({ name, override, environment = proce
         if (stat.isFile() && (IS_WINDOWS || ((stat.mode & 0o111) && !(stat.mode & 0o022)))) return { executable, argsPrefix: [] };
       } catch {}
     }
-    if (IS_WINDOWS) {
+    if (IS_WINDOWS && !native) {
       const result = await packageInvocation(directory, name, fileIo);
       if (result) return result;
     }

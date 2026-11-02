@@ -65,6 +65,19 @@ async function readManifest(manifestPath) {
   }
 }
 
+// Every MCP server name registered in each agent, with the vault it serves when it is a memory (else null).
+export async function registeredServers({ homeDirectory, codexHome = path.join(homeDirectory, '.codex') } = {}) {
+  const result = {};
+  for (const client of CLIENT_ORDER) {
+    result[client] = {};
+    for (const [name, server] of await serversOf(client, { homeDirectory, codexHome })) {
+      const candidate = manifestCandidate(server);
+      result[client][name] = candidate ? await fs.realpath(path.dirname(candidate)).catch(() => null) : null;
+    }
+  }
+  return result;
+}
+
 export async function findKnownMemories({ homeDirectory, codexHome = path.join(homeDirectory, '.codex') } = {}) {
   const byVault = new Map();
   for (const client of CLIENT_ORDER) {

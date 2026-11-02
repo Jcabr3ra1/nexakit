@@ -840,3 +840,14 @@ test('detach with skillNames also filters links found without a manifest', async
   const detach = await planToolkitDetach({ projectRoot: s.project, skillNames: ['frontend-design'], catalog: s.catalog, toolkitRoot: TOOLKIT_ROOT, homeDirectory: s.home });
   assert.deepEqual([...new Set(detach.items.map(i => i.name))], ['frontend-design']);
 });
+
+test('answers are never written through a manifest that is a link', async t => {
+  const { writeSetupAnswers } = await import('../src/skill-recommendations.js');
+  const s = await projectSetup(t);
+  const mine = path.join(s.base, 'mio.json');
+  await fs.writeFile(mine, 'mío');
+  await fs.mkdir(path.join(s.project, '.agent-toolkit'));
+  await fs.symlink(mine, path.join(s.project, '.agent-toolkit/manifest.json'));
+  await assert.rejects(withLock(s.home, lock => writeSetupAnswers(s.project, ANSWERS, lock)), /no se guardaron/u);
+  assert.equal(await fs.readFile(mine, 'utf8'), 'mío');
+});

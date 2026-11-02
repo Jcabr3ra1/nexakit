@@ -918,12 +918,20 @@ async function writeProjectManifestAndIgnore({
     entries,
     ...(answers && { answers })
   };
-  await lock?.assertHeld();
-  await fs.writeFile(
-    path.join(stateDir, PROJECT_MANIFEST_FILE),
-    JSON.stringify(manifestPayload, null, 2) + '\n',
-    { mode: 0o644 }
-  );
+  // A manifest that is a link or not a regular file is not nexakit's: it is never written through.
+  const manifestPath = path.join(stateDir, PROJECT_MANIFEST_FILE);
+  const manifestStat = await lstatOrNull(manifestPath);
+  if (manifestStat && (!manifestStat.isFile() || manifestStat.isSymbolicLink())) {
+    return { manifestWritten: false, gitIgnoreUpdated };
+  }
+  const temporary = `${manifestPath}.${process.pid}.tmp`;
+  try {
+    await fs.writeFile(temporary, JSON.stringify(manifestPayload, null, 2) + '\n', { mode: 0o644, flag: 'wx' });
+    await lock?.assertHeld();
+    await fs.rename(temporary, manifestPath);
+  } finally {
+    await fs.rm(temporary, { force: true });
+  }
   return { manifestWritten: true, gitIgnoreUpdated };
 }
 

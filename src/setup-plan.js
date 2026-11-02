@@ -57,6 +57,7 @@ export function buildConfirmation(state, answers) {
   const blocks = [];
   const add = (mark, text) => lines.push({ mark, text });
   const block = (id, label) => blocks.push({ id, label });
+  const answersChanged = !state.savedAnswers || !sameAnswers(state.savedAnswers, answers);
   const agents = AGENTS.filter(agent => answers.agents.includes(agent));
   const home = state.homeDirectory;
 
@@ -93,6 +94,8 @@ export function buildConfirmation(state, answers) {
   }
   if (!toInstall.length && readySkills.length) add('✓', 'Skills del proyecto ya estaban listas');
   if (toInstall.length || removeSkills.length) block('project-skills', 'Skills del proyecto');
+  // The answers are saved right after the project skills, before anything that can fail, so a retry keeps them.
+  const answersAt = blocks.length;
 
   // Base skills of each chosen agent: only what is missing or repairable; conflicts are reported.
   const globalBlocks = [];
@@ -114,6 +117,8 @@ export function buildConfirmation(state, answers) {
     const kind = state.memory.kinds?.[target] ?? 'new';
     if (kind === 'invalid') {
       add('!', `${shortPath(target, home)} no está vacía y no es una memoria; elige otra carpeta`);
+    } else if (kind === 'foreign') {
+      add('!', `${shortPath(target, home)} es la memoria de otro proyecto; elige otra carpeta`);
     } else {
       if (kind === 'new') {
         add('+', `Memoria nueva en ${shortPath(target, home)}`);
@@ -121,7 +126,7 @@ export function buildConfirmation(state, answers) {
       } else {
         add('✓', `Memoria del proyecto en ${shortPath(target, home)}`);
       }
-      const connections = kind === 'new' ? {} : state.memory.connections?.[target] ?? {};
+      const connections = state.memory.connections?.[target] ?? {};
       const statusOf = agent => connections[agent] ?? (state.agentsFound[agent] ? 'create' : 'unavailable');
       const need = agents.filter(agent => statusOf(agent) === 'create');
       const connected = agents.filter(agent => statusOf(agent) === 'unchanged');
@@ -135,10 +140,11 @@ export function buildConfirmation(state, answers) {
     }
   }
 
-  if (blocks.length || (state.savedAnswers && !sameAnswers(state.savedAnswers, answers))) {
-    block('answers', 'Respuestas guardadas');
-    block('final-check', 'Comprobación final');
+  if (answersChanged && (blocks.length || state.savedAnswers)) {
+    blocks.splice(answersAt, 0, { id: 'answers', label: 'Respuestas guardadas' });
+    if (!blocks.some(item => item.id === 'project-skills')) add('+', 'Guardar tus respuestas en .agent-toolkit (ignorado en Git)');
   }
+  if (blocks.length) block('final-check', 'Comprobación final');
   const allReady = !lines.some(line => ['+', '−', '↻'].includes(line.mark));
   return { lines, blocks, allReady, removeSkills };
 }

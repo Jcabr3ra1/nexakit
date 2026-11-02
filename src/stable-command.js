@@ -7,11 +7,15 @@ import { IS_WINDOWS } from './platform.js';
 import { nexakitDir } from './stable-install.js';
 
 const shellQuote = value => `'${value.replaceAll("'", "'\\''")}'`;
+// The second line marks the file as nexakit's: a file without it is the person's and is never replaced.
+const MARK = 'nexakit: orden estable (se reescribe sola)';
+// In a batch file % expands variables even inside quotes; %% is a literal %.
+const batchPath = value => value.replaceAll('%', '%%');
 
 export function stableCommandContent({ nodePath, toolkitRoot, windows = IS_WINDOWS }) {
   return windows
-    ? `@"${nodePath}" "${toolkitRoot}\\bin\\nexakit.js" %*\r\n`
-    : `#!/bin/sh\nexec ${shellQuote(nodePath)} ${shellQuote(path.join(toolkitRoot, 'bin', 'nexakit.js'))} "$@"\n`;
+    ? `@rem ${MARK}\r\n@"${batchPath(nodePath)}" "${batchPath(toolkitRoot)}\\bin\\nexakit.js" %*\r\n`
+    : `#!/bin/sh\n# ${MARK}\nexec ${shellQuote(nodePath)} ${shellQuote(path.join(toolkitRoot, 'bin', 'nexakit.js'))} "$@"\n`;
 }
 
 export async function planStableCommand({ homeDirectory, nodePath, toolkitRoot, windows = IS_WINDOWS }) {
@@ -20,7 +24,8 @@ export async function planStableCommand({ homeDirectory, nodePath, toolkitRoot, 
   let state;
   try {
     const info = await fs.lstat(target);
-    state = !info.isFile() ? 'conflicto' : (await fs.readFile(target, 'utf8')) === content ? 'igual' : 'distinto';
+    const current = info.isFile() ? await fs.readFile(target, 'utf8') : null;
+    state = current === null || !current.includes(MARK) ? 'conflicto' : current === content ? 'igual' : 'distinto';
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
     state = 'falta';
@@ -39,7 +44,7 @@ export async function writeStableCommand(plan, lock) {
     await lock.assertHeld();
     // Read again right before replacing: something that became a link or a folder meanwhile is left alone.
     const current = await fs.lstat(plan.path).catch(error => (error.code === 'ENOENT' ? null : Promise.reject(error)));
-    if (current && !current.isFile()) return false;
+    if (current && (!current.isFile() || !(await fs.readFile(plan.path, 'utf8')).includes(MARK))) return false;
     await fs.rename(temporary, plan.path);
     return true;
   } finally {

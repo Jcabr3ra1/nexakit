@@ -34,8 +34,8 @@ test('applies the blocks in the fixed order, reports progress, and a second run 
   const progress = [];
   const result = await applySetup(w.options, answers, { onProgress: (id, phase) => progress.push(`${id}:${phase}`) });
   assert.equal(result.ok, true, JSON.stringify(result.failed));
-  assert.deepEqual(result.done, ['stable-command', 'project-skills', 'global-skills:claude', 'global-skills:codex', 'global-skills:antigravity',
-    'memory-init', 'memory-connect:claude', 'memory-connect:codex', 'memory-connect:antigravity', 'answers', 'final-check']);
+  assert.deepEqual(result.done, ['stable-command', 'project-skills', 'answers', 'global-skills:claude', 'global-skills:codex', 'global-skills:antigravity',
+    'memory-init', 'memory-connect:claude', 'memory-connect:codex', 'memory-connect:antigravity', 'final-check']);
   assert.deepEqual(progress.slice(0, 2), ['stable-command:start', 'stable-command:done']);
   assert.equal(result.finalCheck.ok, true, result.finalCheck.message);
 
@@ -52,25 +52,37 @@ test('applies the blocks in the fixed order, reports progress, and a second run 
   assert.equal(buildConfirmation(again, suggestedAnswers(again)).allReady, true, 'a second run has nothing pending');
 });
 
-test('stops at the first failing block, keeps what was applied, and a second run only does what is missing', async t => {
-  const w = await world(t, { fail: { 'agy add': true } });
-  const answers = suggestedAnswers(await gatherSetupState(w.options));
-  const result = await applySetup(w.options, answers);
+test('stops at the first failing block, keeps what was applied and the answers, and a retry recomputes them like the CLI', async t => {
+  const w = await world(t);
+  const first = { ...suggestedAnswers(await gatherSetupState(w.options)), agents: ['claude', 'codex'] };
+  assert.equal((await applySetup(w.options, first)).ok, true);
+  assert.equal(await exists(path.join(w.repo, '.claude/skills/frontend-design')), true);
+
+  // Now the person unchecks frontend-design and adds Antigravity, whose registration fails.
+  const failing = createFakeClis(w.home, { fail: { 'agy add': true } });
+  const failingOptions = { ...w.options, runCommand: failing.runCommand };
+  const changed = { ...first, agents: ['claude', 'codex', 'antigravity'],
+    skills: { chosen: first.skills.chosen.filter(name => name !== 'frontend-design'), discarded: ['frontend-design'] } };
+  const result = await applySetup(failingOptions, changed);
   assert.equal(result.ok, false);
   assert.equal(result.failed.id, 'memory-connect:antigravity');
   assert.match(result.failed.message, /Antigravity/u);
   assert.match(result.failed.message, /Vuelve a ejecutar `npx nexakit`/u);
-  assert.ok(result.done.includes('memory-connect:codex'));
-  assert.ok(!result.done.includes('answers'), 'nothing runs after the failure');
+  assert.ok(result.done.includes('answers'), 'the answers were saved before the block that failed');
+  assert.ok(!result.done.includes('final-check'), 'nothing runs after the failure');
+  assert.equal(await exists(path.join(w.repo, '.claude/skills/frontend-design')), false);
 
+  // The retry, as `npx nexakit --si` does it: answers recomputed from the saved ones.
   const healed = createFakeClis(w.home);
   const options = { ...w.options, runCommand: healed.runCommand };
   const state = await gatherSetupState(options);
-  const confirmation = buildConfirmation(state, answers);
-  assert.deepEqual(confirmation.blocks.map(block => block.id), ['memory-connect:antigravity', 'answers', 'final-check']);
-  const second = await applySetup(options, answers);
-  assert.equal(second.ok, true, JSON.stringify(second.failed));
-  assert.equal(healed.calls.filter(call => call[2] === 'add').length, 1, 'only Antigravity is registered again');
+  const retry = suggestedAnswers(state);
+  assert.deepEqual(retry.skills.discarded, ['frontend-design']);
+  assert.deepEqual(buildConfirmation(state, retry).blocks.map(block => block.id), ['memory-connect:antigravity', 'final-check']);
+  const second = await applySetup(options, retry);
+  assert.equal(second.ok, true, JSON.stringify(second.failed ?? second.finalCheck));
+  assert.equal(await exists(path.join(w.repo, '.claude/skills/frontend-design')), false, 'the unchecked skill is not reinstalled');
+  assert.equal(healed.calls.filter(call => call[2] === 'add').length, 1, 'only Antigravity is registered');
 });
 
 test('never registers agent-toolkit-workflow nor writes level agents or the Codex sandbox', async t => {
@@ -141,4 +153,64 @@ test('from an npx cache: the stable copy comes first and everything points at it
   }
   await fs.rm(path.join(w.base, '.npm'), { recursive: true });
   assert.equal(await exists(path.join(w.repo, '.claude/skills/frontend-design/SKILL.md')), true);
+});
+
+// ── Findings of the first review ─────────────────────────────────────────────────────────────────────────────────
+
+test('another repository with the same name: its memory at the suggested place is never reused nor modified', async t => {
+  const w = await world(t);
+  const other = path.join(w.base, 'otro', 'Punto_Motos');
+  await fs.mkdir(other, { recursive: true });
+  execFileSync('git', ['init', '-q', other]);
+  const { initializeMemory } = await import('../src/init.js');
+  const vault = path.join(w.home, 'nexakit-memorias', 'punto-motos');
+  initializeMemory({ destination: vault, projectId: 'punto-motos', projectName: 'Otro', sourcePath: other, syncMode: 'none', agents: ['claude'], apply: true });
+  const before = await fs.readFile(path.join(vault, 'project-memory.json'), 'utf8');
+  const state = await gatherSetupState(w.options);
+  assert.equal(state.memory.kinds[vault], 'foreign');
+  const confirmation = buildConfirmation(state, suggestedAnswers(state));
+  assert.ok(confirmation.lines.some(line => line.mark === '!' && /memoria de otro proyecto/u.test(line.text)));
+  assert.ok(!confirmation.blocks.some(block => block.id.startsWith('memory-')));
+  await applySetup(w.options, suggestedAnswers(state));
+  assert.equal(await fs.readFile(path.join(vault, 'project-memory.json'), 'utf8'), before);
+});
+
+test('a memory chosen in "otra carpeta…" is inspected again before applying, and reused', async t => {
+  const w = await world(t);
+  const { initializeMemory } = await import('../src/init.js');
+  const vault = path.join(w.base, 'mi-memoria');
+  initializeMemory({ destination: vault, projectId: 'punto-motos', projectName: 'Punto Motos', sourcePath: w.repo, syncMode: 'none', agents: ['claude'], apply: true });
+  await fs.appendFile(path.join(vault, '00-INICIO', 'README.md'), '\nNota mía.\n');
+  const answers = { ...suggestedAnswers(await gatherSetupState(w.options)), agents: ['claude'], memory: { decision: 'path', path: vault } };
+  const result = await applySetup(w.options, answers);
+  assert.equal(result.ok, true, JSON.stringify(result.failed ?? result.finalCheck));
+  assert.ok(!result.done.includes('memory-init'), 'an existing memory is not created again');
+  assert.match(await fs.readFile(path.join(vault, '00-INICIO', 'README.md'), 'utf8'), /Nota mía/u);
+});
+
+test('a new memory whose MCP name is taken in one agent: a ! line before confirming, and the others still connect', async t => {
+  const w = await world(t);
+  await fs.writeFile(w.clis.files.claudeFile, JSON.stringify({ mcpServers: { 'punto-motos-memory': { command: 'npx', args: ['-y', 'otra-cosa'] } } }));
+  const state = await gatherSetupState(w.options);
+  const answers = { ...suggestedAnswers(state), agents: ['claude', 'codex'] };
+  const confirmation = buildConfirmation(state, answers);
+  assert.ok(confirmation.lines.some(line => line.text === 'Claude Code ya tiene otra memoria con el mismo nombre; no la toco'));
+  assert.ok(confirmation.lines.some(line => line.text === 'Conectar la memoria a Codex'));
+  assert.ok(!confirmation.blocks.some(block => block.id === 'memory-connect:claude'));
+  const result = await applySetup(w.options, answers);
+  assert.equal(result.ok, true, JSON.stringify(result.failed ?? result.finalCheck));
+  assert.match(result.finalCheck.message, /con avisos: Claude Code ya tiene otra memoria/u, 'the warning stays in the final check');
+  assert.deepEqual(JSON.parse(await fs.readFile(w.clis.files.claudeFile, 'utf8')).mcpServers['punto-motos-memory'].args, ['-y', 'otra-cosa']);
+});
+
+test('a final check that still finds something pending makes the run fail', async t => {
+  const w = await world(t);
+  const answers = { ...suggestedAnswers(await gatherSetupState(w.options)), agents: ['claude'], memory: { decision: 'later' } };
+  let calls = 0, first;
+  // The last look (the final check) sees the state as it was before applying: still pending.
+  const gather = async options => { calls++; const state = await gatherSetupState(options); first ??= state; return calls > 1 ? first : state; };
+  const result = await applySetup(w.options, answers, { gather });
+  assert.equal(result.ok, false);
+  assert.equal(result.failed, undefined);
+  assert.match(result.finalCheck.message, /quedó pendiente/u);
 });

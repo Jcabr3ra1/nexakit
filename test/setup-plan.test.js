@@ -53,8 +53,8 @@ test('first run in Punto Motos: short lines in a fixed order, and the blocks to 
     '+ Memoria nueva en ~/programacion/Obsidian-Vaults/PUNTO-MOTOS-MEMORY',
     '+ Conectar la memoria a Claude Code y Codex'
   ]);
-  assert.deepEqual(blockIds(confirmation), ['stable-command', 'project-skills', 'global-skills:claude', 'global-skills:codex',
-    'memory-init', 'memory-connect:claude', 'memory-connect:codex', 'answers', 'final-check']);
+  assert.deepEqual(blockIds(confirmation), ['stable-command', 'project-skills', 'answers', 'global-skills:claude', 'global-skills:codex',
+    'memory-init', 'memory-connect:claude', 'memory-connect:codex', 'final-check'], 'answers are saved before anything that can fail');
   assert.equal(confirmation.allReady, false);
 });
 
@@ -91,7 +91,7 @@ test('one agent disconnected by hand: only that connection is pending', () => {
   });
   const confirmation = buildConfirmation(state, suggestedAnswers(state));
   assert.deepEqual(marks(confirmation).filter(line => !line.startsWith('✓')), ['+ Conectar la memoria a Codex']);
-  assert.deepEqual(blockIds(confirmation), ['memory-connect:codex', 'answers', 'final-check']);
+  assert.deepEqual(blockIds(confirmation), ['memory-connect:codex', 'final-check'], 'unchanged answers are not written again');
 });
 
 test('a discarded suggestion is not pending, but a new suggestion is offered', () => {
@@ -157,4 +157,12 @@ test('short reasons say which folder uses what', () => {
   assert.equal(shortReason('React', 'package.json (react)'), 'el proyecto usa React');
   assert.equal(shortReason('Tauri', 'README.md'), 'el README menciona Tauri');
   assert.equal(shortReason('Tauri', 'desktop/README.md'), 'desktop/README menciona Tauri');
+});
+
+test('saving the answers is announced when no project skill is written', () => {
+  const state = puntoMotos({ skills: [], stableCommand: { state: 'igual' } });
+  const answers = { ...suggestedAnswers(state), memory: { decision: 'later' } };
+  const confirmation = buildConfirmation(state, answers);
+  assert.ok(marks(confirmation).includes('+ Guardar tus respuestas en .agent-toolkit (ignorado en Git)'));
+  assert.ok(blockIds(confirmation).includes('answers'));
 });

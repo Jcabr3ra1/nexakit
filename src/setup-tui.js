@@ -192,6 +192,7 @@ export function handleSetupKey(model, key) {
 // The answer to "otra carpeta…" once its path was checked (an existing memory, a new one, or something not touched).
 export function applyMemoryPathCheck(model, target, kind, connections) {
   if (kind === 'invalid') return { ...model, memoryError: 'Esa carpeta no está vacía y no es una memoria; elige otra.' };
+  if (kind === 'foreign') return { ...model, memoryError: 'Esa es la memoria de otro proyecto; elige otra carpeta.' };
   const memory = { ...model.state.memory, kinds: { ...model.state.memory.kinds, [target]: kind },
     connections: { ...model.state.memory.connections, ...(connections && { [target]: connections }) } };
   return go({ ...model, state: { ...model.state, memory }, answers: { ...model.answers, memory: { decision: 'path', path: target } } }, nextAfter(model, 'memory'));
@@ -301,7 +302,10 @@ function finalLines(model) {
   const lines = model.progress.map(item => `${item.phase === 'failed' ? '✗' : item.phase === 'done' ? '◇' : '◆'}  ${item.label}${item.phase === 'start' ? '…' : ''}`);
   if (result?.finalCheck) lines.push(`${result.finalCheck.ok ? '◇' : '!'}  Comprobación final: ${result.finalCheck.message}`);
   if (model.step !== 'done') return { lines, end: [] };
-  if (!result.ok) return { lines, end: ['Se detuvo aquí.', ...wrapText(result.failed.message, 60)] };
+  if (!result.ok) {
+    const reason = result.failed?.message ?? `Comprobación final: ${result.finalCheck?.message ?? ''}`;
+    return { lines, end: [result.failed ? 'Se detuvo aquí.' : 'Terminó, pero algo no quedó listo.', ...wrapText(reason, 60)] };
+  }
   const names = joinNames(answers.agents.map(agent => AGENT_NAMES[agent]));
   const end = ['Listo. Ahora:', `  1. Cierra y abre ${names}`];
   if (answers.memory.decision === 'path') {
@@ -422,10 +426,11 @@ export async function runSetupTui({ input = process.stdin, output = process.stdo
     const runEffect = async (effect, extra) => {
       if (effect === 'exit') return cleanup(exitCode);
       if (effect === 'check-path') {
-        const kind = await inspectMemoryPath(extra.path);
-        const connections = kind === 'memory'
-          ? await memoryConnections(extra.path, { homeDirectory: home, runCommand: options.runCommand, nodePath: model.state.internal.nodePath,
-            toolkitRoot: model.state.internal.linkRoot, agentsFound: model.state.agentsFound })
+        const kind = await inspectMemoryPath(extra.path, { repositoryRoot: model.state.project.root });
+        const connections = ['memory', 'new'].includes(kind)
+          ? await memoryConnections(extra.path, { homeDirectory: home, codexHome: model.state.internal.codexHome, runCommand: options.runCommand,
+            nodePath: model.state.internal.nodePath, toolkitRoot: model.state.internal.linkRoot, agentsFound: model.state.agentsFound,
+            kind, mcpName: `${model.state.project.id}-memory` })
           : null;
         model = applyMemoryPathCheck(model, extra.path, kind, connections);
       } else if (effect === 'apply') {

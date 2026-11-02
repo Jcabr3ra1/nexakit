@@ -28,16 +28,25 @@ function projectAgent(agents) {
 }
 
 // An older memory may not declare an agent (Antigravity came later): declare it, enabled, with the same skill.
-async function ensureMemoryAgent(vaultPath, agent) {
+// Only this repository's memory is touched, and the read-modify-replace runs under the install lock.
+async function ensureMemoryAgent(vaultPath, agent, repositoryRoot, lock) {
   const file = path.join(vaultPath, 'project-memory.json');
+  await lock.assertHeld();
   const manifest = JSON.parse(await fs.readFile(file, 'utf8'));
+  const source = await fs.realpath(manifest.source?.repositoryPath ?? '').catch(() => null);
+  if (source !== await fs.realpath(repositoryRoot)) throw new Error('La memoria es de otro proyecto; no se modifica.');
   const current = manifest.agents.find(entry => entry.id === agent);
   if (current?.enabled) return;
   if (current) current.enabled = true;
   else manifest.agents.push({ id: agent, enabled: true, skillName: manifest.agents[0]?.skillName ?? manifest.project.id });
   const temporary = `${file}.${process.pid}.tmp`;
-  await fs.writeFile(temporary, `${JSON.stringify(manifest, null, 2)}\n`, { flag: 'wx' });
-  await fs.rename(temporary, file);
+  try {
+    await fs.writeFile(temporary, `${JSON.stringify(manifest, null, 2)}\n`, { flag: 'wx' });
+    await lock.assertHeld();
+    await fs.rename(temporary, file);
+  } finally {
+    await fs.rm(temporary, { force: true });
+  }
 }
 
 async function withLock(homeDirectory, acquire, fn) {
@@ -46,12 +55,14 @@ async function withLock(homeDirectory, acquire, fn) {
 }
 
 export async function applySetup(options, answers, { onProgress = () => {}, runNpm, packageSpec, acquire = acquireLock, gather = gatherSetupState } = {}) {
-  const state = await gather(options);
+  const memoryPath = answers.memory.decision === 'path' ? answers.memory.path : null;
+  // The chosen memory path is always inspected again, also one typed in "otra carpeta…".
+  const stateOptions = { ...options, memoryPaths: memoryPath ? [memoryPath] : [] };
+  const state = await gather(stateOptions);
   const confirmation = buildConfirmation(state, answers);
   const { homeDirectory } = state;
   const { catalog, toolkitRoot, environment, codexHome, nodePath, runCommand } = state.internal;
   let linkRoot = state.internal.linkRoot;
-  const memoryPath = answers.memory.decision === 'path' ? answers.memory.path : null;
   const done = [];
   let finalCheck = null;
 
@@ -85,12 +96,14 @@ export async function applySetup(options, answers, { onProgress = () => {}, runN
     },
     answers: () => withLock(homeDirectory, acquire, lock => writeSetupAnswers(state.project.root, answers, lock)),
     'final-check': async () => {
-      const after = await gather(options);
-      const pending = buildConfirmation(after, answers).lines.filter(line => ['+', '−', '↻'].includes(line.mark));
+      const after = buildConfirmation(await gather(stateOptions), answers).lines;
+      const pending = after.filter(line => ['+', '−', '↻'].includes(line.mark)).map(line => line.text);
+      const warnings = after.filter(line => line.mark === '!').map(line => line.text);
       const memoryErrors = memoryPath ? (await diagnoseMemory(memoryPath)).summary.errors : 0;
-      finalCheck = pending.length || memoryErrors
-        ? { ok: false, message: `Quedó pendiente: ${[...pending.map(line => line.text), ...(memoryErrors ? ['la memoria tiene errores'] : [])].join('; ')}.` }
-        : { ok: true, message: 'todo responde' };
+      if (memoryErrors) pending.push('la memoria tiene errores');
+      finalCheck = pending.length
+        ? { ok: false, message: `quedó pendiente: ${pending.join('; ')}.`, warnings }
+        : { ok: true, message: warnings.length ? `responde, con avisos: ${warnings.join('; ')}.` : 'todo responde', warnings };
     }
   };
   const runBlock = async id => {
@@ -101,7 +114,7 @@ export async function applySetup(options, answers, { onProgress = () => {}, runN
         ...(runNpm && { runNpm }), ...(packageSpec && { packageSpec }), acquire });
     }
     if (kind === 'memory-connect') {
-      await ensureMemoryAgent(memoryPath, agent);
+      await withLock(homeDirectory, acquire, lock => ensureMemoryAgent(memoryPath, agent, state.project.root, lock));
       const report = await connectMemory({ targetPath: memoryPath, agentId: agent, apply: true },
         { homeDirectory, nodePath, toolkitRoot: linkRoot, ...(runCommand && { runCommand }) });
       if (report.status === 'conflict') {
@@ -128,5 +141,6 @@ export async function applySetup(options, answers, { onProgress = () => {}, runN
     done.push(id);
     onProgress(id, 'done');
   }
-  return { ok: true, done, finalCheck };
+  // A final check that finds something still pending is a failure: the person must not read «Listo».
+  return { ok: finalCheck?.ok ?? true, done, finalCheck };
 }
