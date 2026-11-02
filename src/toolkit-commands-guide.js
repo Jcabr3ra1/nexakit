@@ -68,6 +68,10 @@ export function getToolkitCommandsGuide({ clients = {} } = {}) {
       description: 'Retira las skills del proyecto, .agent-toolkit/ y su bloque de .gitignore sin tocar lo tuyo.',
     },
     {
+      command: 'npx nexakit scan <carpeta de skill>',
+      description: 'Revisa el contenido de una skill sin ejecutarla y avisa de lo sospechoso.',
+    },
+    {
       command: 'npx nexakit reparar --desde <ruta>',
       description: 'Re-apunta enlaces antiguos rotos tras mostrar la lista y pedir confirmación.',
     },

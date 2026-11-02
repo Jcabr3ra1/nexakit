@@ -39,6 +39,14 @@ function visibleSkills(model) {
   return state.skills.filter(skill => skill.suggested || answers.skills.chosen.includes(skill.name) ||
     Object.values(skill.links ?? {}).includes('installed'));
 }
+// What the info view says about trust: untested skills say so, and review observations are shown as written.
+function skillTrust(skill) {
+  const lines = [];
+  if (skill.tested === false) lines.push('', ...wrapText('No probada: nadie ha comprobado aún que mejore el trabajo.', 60));
+  if (skill.reviewNotes) lines.push(...wrapText(`Observaciones: ${skill.reviewNotes}`, 60));
+  return lines;
+}
+
 function skillRows(model) {
   const visible = visibleSkills(model);
   const hidden = model.state.skills.length - visible.length;
@@ -231,10 +239,13 @@ function question(model) {
       const width = Math.min(28, Math.max(...rows.filter(r => r.skill).map(r => r.skill.name.length), 10));
       const body = rows.map((row, index) => ({
         cursor: index === model.cursor,
-        text: row.more ? `◻ ver ${row.more} más…` : `${answers.skills.chosen.includes(row.skill.name) ? '◼' : '◻'} ${row.skill.name.padEnd(width)}  ${row.skill.reason ?? ''}`.trimEnd()
+        text: row.more ? `◻ ver ${row.more} más…` : `${answers.skills.chosen.includes(row.skill.name) ? '◼' : '◻'} ${row.skill.name.padEnd(width)}  ${row.skill.reason ?? ''}${row.skill.tested === false ? ' · no probada' : ''}`.trimEnd()
       }));
       const current = rows[model.cursor]?.skill;
-      const info = model.info && current ? ['', ...wrapText(current.summary, 60)] : [];
+      const external = state.externalSkills?.length
+        ? ['', ...wrapText(`Se instalan aparte: ${state.externalSkills.map(ref => ref.name).join(', ')}`, 60)]
+        : [];
+      const info = [...(model.info && current ? ['', ...wrapText(current.summary, 60), ...skillTrust(current)] : []), ...external];
       return { title: '¿Qué skills quieres?', body, info, keys: 'espacio marcar · i qué hace · Enter seguir · q salir' };
     }
     case 'memory': {

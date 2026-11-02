@@ -159,6 +159,8 @@ export async function gatherSetupState({
       matchCount: entry.matchedSignals?.length ?? 0,
       suggested: (entry.matchedSignals?.length ?? 0) > 0,
       license: entry.license,
+      tested: entry.recommendationStatus === 'validated',
+      reviewNotes: entry.reviewStatus === 'reviewed-with-observations' ? entry.reviewNotes : null,
       links: { claude: linkState(entry.name, 'claude'), codex: linkState(entry.name, 'codex') },
     };
   });
@@ -244,6 +246,8 @@ export async function gatherSetupState({
     project,
     signals: inspection.signals,
     skills,
+    // Suggested but installed outside NexaKit (for example as a Claude plugin): listed, never selectable.
+    externalSkills: recommendation.externalCandidates.map(ref => ({ name: ref.name, reason: ref.reasons[0] ?? null })),
     agentsFound,
     globalSkills,
     stableCopy,

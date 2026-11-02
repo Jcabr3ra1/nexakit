@@ -1,8 +1,12 @@
-import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadSkillCatalog, resolveCatalogResource, SkillCatalogError } from './skill-catalog.js';
+import { hashSkillFiles, readSkillFiles } from './skill-files.js';
+import { scanSkillFiles } from './skill-scan.js';
+
+// Re-exported so existing callers keep their import path.
+export { hashSkillFiles, readSkillFiles };
 
 export const DEFAULT_CATALOG_ROOT = fileURLToPath(new URL('../', import.meta.url));
 
@@ -12,31 +16,7 @@ export async function inventoryCatalogSkill({ toolkitRoot = DEFAULT_CATALOG_ROOT
     throw new SkillCatalogError('La carpeta debe ser skills/<nombre> o catalogs/skills/<nombre>.');
   }
   const root = await resolveCatalogResource(toolkitRoot, installedPath);
-  if (!(await fs.lstat(root)).isDirectory()) throw new SkillCatalogError(`No es una carpeta de skill: ${installedPath}.`);
-  const files = [];
-  let totalBytes = 0;
-  async function visit(dir, prefix = '') {
-    const entries = await fs.readdir(dir, { withFileTypes: true });
-    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
-      if (rel.length > 200 || rel.split('/').length > 32) throw new SkillCatalogError(`Ruta demasiado larga en ${installedPath}.`);
-      const full = path.join(dir, entry.name);
-      const stat = await fs.lstat(full);
-      if (stat.isSymbolicLink()) throw new SkillCatalogError(`Enlace no admitido en ${installedPath}/${rel}.`);
-      if (stat.isDirectory()) await visit(full, rel);
-      else if (stat.isFile()) {
-        if (files.length >= 256 || stat.size > 512 * 1024 || totalBytes + stat.size > 64 * 1024 * 1024) {
-          throw new SkillCatalogError(`Límite de archivos o tamaño excedido en ${installedPath}.`);
-        }
-        const bytes = await fs.readFile(full);
-        totalBytes += bytes.length;
-        files.push({ path: rel, sha256: createHash('sha256').update(bytes).digest('hex') });
-      } else throw new SkillCatalogError(`Archivo no regular en ${installedPath}/${rel}.`);
-    }
-  }
-  await visit(root);
-  if (!files.some(file => file.path === 'SKILL.md')) throw new SkillCatalogError(`Falta SKILL.md en ${installedPath}.`);
-  return files.sort((a, b) => a.path.localeCompare(b.path));
+  return hashSkillFiles(await readSkillFiles(root, installedPath));
 }
 
 export async function auditSkillCatalog({ toolkitRoot = DEFAULT_CATALOG_ROOT } = {}) {
@@ -52,17 +32,36 @@ export async function auditSkillCatalog({ toolkitRoot = DEFAULT_CATALOG_ROOT } =
   report.skillsCount = catalog.skills.length;
   for (const skill of catalog.skills) {
     try {
-      const actual = await inventoryCatalogSkill({ toolkitRoot, installedPath: skill.installedPath });
+      if (!/^(?:skills|catalogs\/skills)\/[a-z0-9-]+$/u.test(skill.installedPath ?? '')) {
+        throw new SkillCatalogError('La carpeta debe ser skills/<nombre> o catalogs/skills/<nombre>.');
+      }
+      const bytes = await readSkillFiles(await resolveCatalogResource(toolkitRoot, skill.installedPath), skill.installedPath);
+      const actual = hashSkillFiles(bytes);
       const expected = [...skill.files].sort((a, b) => a.path.localeCompare(b.path));
       if (actual.length !== expected.length || actual.some((file, index) => file.path !== expected[index].path || file.sha256 !== expected[index].sha256)) {
         throw new SkillCatalogError(`${skill.name}: inventario o hashes SHA-256 distintos del manifiesto.`);
       }
       report.verifiedSkillsCount++;
+      const scan = scanSkillFiles(bytes);
+      for (const f of scan.findings) {
+        if (f.severity === 'bloqueo') report.errors.push(`${skill.name}: bloqueo del escáner (${f.rule} en ${f.file}:${f.line}).`);
+        else if (f.severity === 'aviso') report.warnings.push(`${skill.name}: aviso del escáner (${f.rule} en ${f.file}:${f.line}).`);
+      }
+      for (const [capability, detected] of Object.entries(scan.capabilities)) {
+        if (detected && skill.review.capabilities[capability] === 'none') report.warnings.push(`${skill.name}: capacidad no declarada: ${capability}.`);
+      }
       if (!skill.scenarios.some(scenario => scenario.status === 'passed')) report.warnings.push(`${skill.name}: sin escenario funcional pasado; no acredita utilidad.`);
       if (skill.review.status === 'pending' || skill.review.status === 'rejected') report.warnings.push(`${skill.name}: revisión ${skill.review.status}; no puede recomendarse.`);
     } catch (error) {
       report.errors.push(error.message);
     }
+  }
+  // Anything left in catalogs/skills without an entry (an interrupted registration, a stray copy) would ship in the package.
+  const listed = new Set(catalog.skills.map(skill => skill.installedPath));
+  const entries = await fs.readdir(path.join(toolkitRoot, 'catalogs/skills'), { withFileTypes: true }).catch(() => []);
+  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    const rel = `catalogs/skills/${entry.name}`;
+    if (!listed.has(rel)) report.warnings.push(`Carpeta sin entrada en el catálogo: ${rel}.`);
   }
   report.ok = report.errors.length === 0;
   return report;
