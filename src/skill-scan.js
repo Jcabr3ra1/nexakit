@@ -89,7 +89,8 @@ function scanText(filePath, text, push, capabilities) {
   const isMarkdown = /\.(?:md|markdown|mdx)$/i.test(filePath);
   const lines = text.split(/\r?\n/);
   // Exfiltration needs a sensitive read and a network send in the same unit: the file for scripts,
-  // a fenced code block (or a single prose line) for Markdown, so unrelated documentation does not block.
+  // a fenced code block for Markdown, and a single line for prose and data rows (CSV, JSON), so
+  // unrelated documentation does not block.
   const sensitiveUnits = new Set();
   const sendUnits = new Map();
   let fence = 0;
@@ -102,7 +103,7 @@ function scanText(filePath, text, push, capabilities) {
     const hit = rule => push(rule, filePath, n, line);
     const long = line.length > MAX_RULE_LINE;
     if (isMarkdown && FENCE.test(line)) { inFence = !inFence; if (inFence) fence++; }
-    const unit = !isMarkdown ? 'file' : inFence ? `fence-${fence}` : `line-${n}`;
+    const unit = isScript ? 'file' : isMarkdown && inFence ? `fence-${fence}` : `line-${n}`;
     if (hiddenUnicodeIn(line, index === 0)) hit('unicode-oculto');
     if (CREDENTIAL_PATTERNS.some(re => re.test(line)) || (!long && URL_WITH_PASSWORD.test(line))) hit('credencial');
     if (long && LONG_FETCHER.test(line) && LONG_EXEC.test(line)) hit('descarga-y-ejecuta');
