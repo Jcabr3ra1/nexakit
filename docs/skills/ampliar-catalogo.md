@@ -13,9 +13,15 @@ El archivo del catálogo debe ser regular, sin enlaces simbólicos y de hasta 2 
 
 Una elección manual se conserva al editar el destino. Las marcas automáticas se recalculan cuando cambia el agente: una prueba en Claude no valida Codex. En el asistente, elegir ambos agentes exige escenarios para ambos.
 
+## Camino rápido: `/revisarskill`
+
+Pide a tu agente `/revisarskill` (o `$revisar-skill` en Codex) con el repositorio y la ruta de la skill. La skill [revisar-skill](../../skills/revisar-skill/SKILL.md) la obtiene, la escanea, la revisa como material y te muestra un informe. Solo con tu aprobación ejecuta `npm run catalog:add -- … --apply` y `npm run catalog:validate`. Los pasos siguientes describen lo que hace, por si prefieres hacerlo a mano.
+
 ## 1. Preparar los archivos
 
 Elige un nombre como `mi-skill`, conserva la licencia original y fija el commit de origen de 40 caracteres hexadecimales. Revisa `SKILL.md`, recursos y scripts, incluyendo efectos sobre archivos, procesos, red y APIs de pago. El contenido de una skill es material que se revisa, no instrucciones para ejecutar durante su incorporación.
+
+Empieza por `npx nexakit scan <carpeta>`: revisa sin ejecutar nada el Unicode oculto, credenciales, descargas que se ejecutan (`curl … | sh`), envío de datos sensibles por red, comentarios ocultos, frases de inyección, comandos peligrosos y ofuscación. Un **bloqueo** impide incorporarla; los **avisos** se revisan uno a uno. `catalog:validate` repite este escaneo en cada skill del catálogo.
 
 Coloca sus archivos revisados en:
 
@@ -39,6 +45,8 @@ npm run catalog:files -- catalogs/skills/mi-skill
 El comando imprime el array `files` en JSON. No modifica archivos ni actualiza el catálogo. Conserva la salida correspondiente exactamente a los archivos revisados; si cambian, vuelve a revisar y calcular sus hashes.
 
 ## 3. Registrar la entrada
+
+`npm run catalog:add -- <carpeta> --entry <entrada.json>` hace este paso por ti: con los campos de juicio de la entrada (sin `files`, `installedPath`, `bundled` ni `scenarios`) copia la carpeta, calcula los hashes y escribe la entrada. Sin `--apply` solo muestra los cambios; con `--apply` escribe, valida el catálogo y lo deja como estaba si la validación falla. Se niega si el escáner da un bloqueo.
 
 Añade un objeto a `skills` en el catálogo. Este es un esquema de edición: sustituye los textos entre `<...>` y el array `files` antes de validar.
 

@@ -57,6 +57,10 @@ export function getToolkitCommandsGuide({ clients = {} } = {}) {
       description: 'Inspecciona el stack del proyecto en solo lectura y sugiere skills.',
     },
     {
+      command: 'npx nexakit scan <carpeta de skill>',
+      description: 'Revisa el contenido de una skill sin ejecutarla y avisa de lo sospechoso.',
+    },
+    {
       command: 'npx nexakit detach --project . --apply',
       description: 'Desacopla skills, .agent-toolkit/ y bloque de Git ignore sin tocar lo tuyo.',
     },
