@@ -407,7 +407,11 @@ export async function runSetupTui({ input = process.stdin, output = process.stdo
   output.write('Revisando el proyecto…\n');
   let model = createSetupModel(await gatherSetupState(options));
   let exitCode = 0;
-  const render = () => output.write(`\x1b[2J\x1b[H${renderSetupFrame(model, { columns: output.columns || 80, color: useColor })}\n`);
+  // The questions live on the alternate screen, where moving home and erasing redraws in place: clearing the
+  // normal screen pushes a copy of every frame into the scrollback in most terminals. On exit the last frame is
+  // printed once on the normal screen, so the result stays readable.
+  const frame = () => renderSetupFrame(model, { columns: output.columns || 80, color: useColor });
+  const render = () => output.write(`\x1b[H\x1b[J${frame()}\n`);
 
   return new Promise(resolve => {
     let closed = false;
@@ -419,7 +423,7 @@ export async function runSetupTui({ input = process.stdin, output = process.stdo
       output.off?.('resize', render);
       try { if (typeof input.setRawMode === 'function') input.setRawMode(false); } catch {}
       try { input.pause?.(); } catch {}
-      output.write('\x1b[?25h\n');
+      output.write(`\x1b[?1049l${frame()}\n\x1b[?25h`);
       resolve(code);
     };
 
@@ -476,7 +480,7 @@ export async function runSetupTui({ input = process.stdin, output = process.stdo
     };
 
     try {
-      output.write('\x1b[?25l');
+      output.write('\x1b[?1049h\x1b[?25l');
       if (typeof input.setRawMode === 'function') input.setRawMode(true);
       input.resume?.();
       input.on('data', onData);
