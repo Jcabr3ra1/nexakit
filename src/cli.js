@@ -103,11 +103,11 @@ export async function runCli(argv, io = defaultIo(), context = {}) {
   }
 
   if (command === "connect") {
-    return runConnectCommand(rest, io);
+    return runConnectCommand(rest, io, context);
   }
 
   if (command === "status") {
-    return runStatusCommand(rest, io);
+    return runStatusCommand(rest, io, context);
   }
 
   if (command === "sync") {
@@ -319,7 +319,7 @@ async function runSyncApplyCommand(args, io, context) {
   }
 }
 
-async function runStatusCommand(rest, io) {
+async function runStatusCommand(rest, io, context = {}) {
   const options = {
     targetPath: process.cwd()
   };
@@ -366,7 +366,7 @@ async function runStatusCommand(rest, io) {
 
   let report;
   try {
-    report = await inspectMemoryStatus(options);
+    report = await inspectMemoryStatus(options, context);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     io.err(`No se pudo inspeccionar el estado: ${message}`);
@@ -388,7 +388,7 @@ async function runStatusCommand(rest, io) {
   return 0;
 }
 
-async function runConnectCommand(rest, io) {
+async function runConnectCommand(rest, io, context = {}) {
   const options = {
     apply: false,
     targetPath: process.cwd()
@@ -435,7 +435,7 @@ async function runConnectCommand(rest, io) {
 
   let report;
   try {
-    report = await connectMemory(options);
+    report = await connectMemory(options, context);
   } catch (error) {
     if (error instanceof ConnectionError) {
       for (const detail of error.details) {

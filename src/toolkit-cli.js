@@ -1,4 +1,5 @@
 import os from 'node:os';
+import { runCli } from './cli.js';
 import { runModelCommand } from './model-command.js';
 import { runRevisionCommand } from './revision.js';
 import path from 'node:path';
@@ -26,11 +27,14 @@ const PROFILE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const RECOMMEND_PROFILES = ['frontend', 'backend', 'mcp', 'security'];
 
 const HELP = `Uso: npx nexakit [--project <ruta>] [--si]
+     npx nexakit comprobar [--agent codex|claude|antigravity|all] [--perfil-codex <nombre>] [--json]
+     npx nexakit quitar [--project <ruta>] [--global] [--agent codex|claude|antigravity|all] [--si|--apply] [--json]
+     npx nexakit reparar --desde <ruta> [--agent codex|claude|antigravity|all]
+     npx nexakit memoria <subcomando> [opciones]
      nexakit revision --disponibles [--principal claude|codex|antigravity]
      nexakit revision --con <ia> --modelo <m> --esfuerzo <e> --encargo <archivo> [--base <rama>]
-     npx nexakit quitar [--project <ruta>] [--global] [--agent codex|claude|antigravity|all] [--apply] [--json]
+     nexakit modelo [--nivel <nivel>] [--ia claude|codex|antigravity] [--perfil-codex <nombre>]
      npx nexakit recommend [--project <ruta>] [--profile frontend|backend|mcp|security] [--client codex|claude] [--dry-run] [--json]
-     npx nexakit reparar --desde <ruta> [--agent codex|claude|antigravity|all]
      npx nexakit doctor [--agent codex|claude|antigravity|all] [--perfil-codex <nombre>] [--json]
      npx nexakit setup [--agent codex|claude|antigravity|all] [--perfil-codex <nombre>] [--apply] [--json]
 
@@ -38,12 +42,14 @@ npx nexakit hace tres preguntas con la respuesta ya sugerida (skills, memoria e 
 y, con una sola confirmación, deja listo el proyecto: skills, memoria conectada a
 tus IA y la orden ~/.nexakit/nexakit. Si todo está listo, no pregunta nada.
 Sin terminal interactiva muestra lo que haría; --si lo aplica sin preguntas.
+comprobar (o doctor) revisa en solo lectura Node, tus IA, skills base y restos antiguos.
 quitar (o detach) retira las skills del proyecto, .agent-toolkit/ y su bloque de
-.gitignore sin tocar archivos tuyos (--apply para ejecutar; --global incluye las globales).
-recommend inspecciona el proyecto en solo lectura.
+.gitignore sin tocar archivos tuyos (--si o --apply para ejecutar; --global incluye las globales).
 reparar re-apunta enlaces rotos de una instalación anterior (--desde es la carpeta
 que ya no existe); lista lo que encontró y siempre pregunta.
-doctor y setup comprueban y preparan las skills base globales.
+memoria ejecuta los subcomandos de project-memory (init, connect, doctor, status, sync).
+revision y modelo piden una revisión a otra IA o consultan los modelos disponibles.
+recommend inspecciona el proyecto en solo lectura; setup prepara las skills base globales.
 (Alias local compatible: agent-toolkit)
 `;
 
@@ -80,6 +86,16 @@ export async function runToolkitCli(
   const [command, ...rest] = argv;
   if (command === 'modelo') return runModelCommand(rest, { out, err }, options);
   if (command === 'revision') return runRevisionCommand(rest, { out, err }, { options });
+  if (command === 'memoria') {
+    return runCli(
+      rest,
+      {
+        out: (message) => out(`${message}\n`),
+        err: (message) => err(`${message}\n`),
+      },
+      options,
+    );
+  }
 
   if (command === 'recommend') {
     const parsed = { projectRoot: process.cwd(), json: false };
@@ -141,7 +157,7 @@ export async function runToolkitCli(
       else if (flag === '--agent' && ['codex', 'claude', 'antigravity', 'all'].includes(rest[i + 1]))
         parsed.agent = rest[++i];
       else if (flag === '--global') parsed.global = true;
-      else if (flag === '--apply') parsed.apply = true;
+      else if (flag === '--apply' || flag === '--si') parsed.apply = true;
       else if (flag === '--json') parsed.json = true;
       else {
         await err(HELP);
@@ -201,7 +217,7 @@ export async function runToolkitCli(
     }
   }
 
-  if (!['doctor', 'setup'].includes(command)) {
+  if (!['doctor', 'comprobar', 'setup'].includes(command)) {
     await err(HELP);
     return 2;
   }
@@ -227,19 +243,29 @@ export async function runToolkitCli(
   }
   try {
     const result = await (command === 'setup' ? setupToolkit : doctorToolkit)({ ...options, ...parsed });
-    await out(JSON.stringify(result, null, parsed.json ? 0 : 2) + '\n');
-    return command === 'setup'
-      ? result.conflicts
-        ? 1
-        : 0
-      : result.node.supported &&
-          Object.values(result.dependencies).every(Boolean) &&
-          Object.values(result.clients).every((c) => c.available) &&
-          Object.values(result.mcp).every((m) => READY_LINK_STATES.includes(m.state)) &&
-          result.skills.every((s) => READY_LINK_STATES.includes(s.state)) &&
-          (!result.codexSandbox || ['allowed', 'not-needed', 'unknown'].includes(result.codexSandbox.state))
+    if (command === 'comprobar' && !parsed.json) {
+      await out(formatComprobarReport(result, { homeDirectory: options.homeDirectory ?? os.homedir() }));
+    } else {
+      await out(JSON.stringify(result, null, parsed.json ? 0 : 2) + '\n');
+    }
+    if (command === 'setup') return result.conflicts ? 1 : 0;
+    if (command === 'comprobar') {
+      return result.node.supported &&
+        Object.values(result.dependencies).every(Boolean) &&
+        Object.values(result.clients).some((c) => c.available) &&
+        result.skills.every((s) => READY_LINK_STATES.includes(s.state)) &&
+        !(result.retiredSkills ?? []).some((s) => !s.owned)
         ? 0
         : 1;
+    }
+    return result.node.supported &&
+      Object.values(result.dependencies).every(Boolean) &&
+      Object.values(result.clients).every((c) => c.available) &&
+      Object.values(result.mcp).every((m) => READY_LINK_STATES.includes(m.state)) &&
+      result.skills.every((s) => READY_LINK_STATES.includes(s.state)) &&
+      (!result.codexSandbox || ['allowed', 'not-needed', 'unknown'].includes(result.codexSandbox.state))
+      ? 0
+      : 1;
   } catch {
     await err(
       'No se pudo inspeccionar o instalar. Revisa rutas, permisos y conflictos; no se reemplazan destinos.\n',
@@ -249,6 +275,57 @@ export async function runToolkitCli(
 }
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+function formatComprobarReport(result, { homeDirectory }) {
+  const short = (value) =>
+    value === homeDirectory ||
+    value.startsWith(homeDirectory + '/') ||
+    value.startsWith(homeDirectory + '\\')
+      ? `~${value.slice(homeDirectory.length)}`
+      : value;
+  const lines = [
+    result.node.supported
+      ? `✓ Node.js ${result.node.version}`
+      : `! Node.js ${result.node.version} (se necesita Node.js 24 o superior)`,
+  ];
+  const missingDeps = Object.entries(result.dependencies)
+    .filter(([, ok]) => !ok)
+    .map(([name]) => name);
+  lines.push(
+    missingDeps.length === 0
+      ? '✓ Dependencias instaladas'
+      : `! Faltan dependencias: ${missingDeps.join(', ')}`,
+  );
+  const availableClients = Object.entries(result.clients)
+    .filter(([, state]) => state.available)
+    .map(([name]) => name);
+  lines.push(
+    availableClients.length > 0
+      ? `✓ IA disponibles: ${availableClients.join(', ')}`
+      : '! No encontré ninguna IA instalada (claude, codex o agy)',
+  );
+  const readySkills = result.skills.filter((s) => READY_LINK_STATES.includes(s.state));
+  const pendingSkills = result.skills.filter((s) => !READY_LINK_STATES.includes(s.state));
+  if (pendingSkills.length === 0) {
+    lines.push(`✓ Skills base listas (${readySkills.length})`);
+  } else {
+    lines.push(
+      `! ${plural(pendingSkills.length, 'enlace de skill base pendiente o con problema', 'enlaces de skills base pendientes o con problema')} (ejecuta npx nexakit para revisarlos)`,
+    );
+  }
+  for (const group of result.legacy ?? []) {
+    lines.push(
+      `! ${plural(group.count, 'enlace roto', 'enlaces rotos')} hacia ${short(group.root)} parecen de una instalación anterior. Si son de nexakit: npx nexakit reparar --desde ${short(group.root)}`,
+    );
+  }
+  for (const item of (result.retiredSkills ?? []).filter((s) => !s.owned)) {
+    lines.push(`! ${item.client} · ${item.name}: comando retirado con contenido ajeno; no lo toco`);
+  }
+  for (const item of result.obsolete ?? []) {
+    lines.push(`! ${item.message} ${item.command}`);
+  }
+  return lines.join('\n') + '\n';
+}
 
 // Reads one line, and treats anything but "s" (including no answer at all) as no. The answer comes from the
 // `line` event, which always precedes `close`, so an input that ends right after the answer is not lost.

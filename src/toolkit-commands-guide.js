@@ -1,12 +1,14 @@
 export function getToolkitCommandsGuide({ clients = {} } = {}) {
   const claudeActive = clients.claude?.available !== false;
   const codexActive = clients.codex?.available !== false;
+  const antigravityActive = clients.antigravity?.available !== false;
 
   const workflowCommands = [
     {
       id: 'spec-driven-development',
       claude: '/spec-driven-development',
       codex: '$spec-driven-development',
+      antigravity: '/spec-driven-development',
       stage: '1. Diseñar',
       description: 'Entrevista breve, comparación de alternativas, especificación y plan verificable.',
     },
@@ -14,6 +16,7 @@ export function getToolkitCommandsGuide({ clients = {} } = {}) {
       id: 'desarrollo-con-pruebas',
       claude: '/desarrollo-con-pruebas',
       codex: '$desarrollo-con-pruebas',
+      antigravity: '/desarrollo-con-pruebas',
       stage: '2b. TDD',
       description: 'Ciclo Rojo → Verde → Refactorizar comprobando primero el fallo esperado.',
     },
@@ -21,6 +24,7 @@ export function getToolkitCommandsGuide({ clients = {} } = {}) {
       id: 'depurar',
       claude: '/depurar',
       codex: '$depurar',
+      antigravity: '/depurar',
       stage: '2c. Diagnóstico',
       description: 'Aísla causa raíz reproducible antes de proponer un parche.',
     },
@@ -28,6 +32,7 @@ export function getToolkitCommandsGuide({ clients = {} } = {}) {
       id: 'quality-gate',
       claude: '/quality-gate',
       codex: '$quality-gate',
+      antigravity: '/quality-gate',
       stage: '3. Verificar',
       description: 'Puerta de cierre con evidencia fresca ejecutada frente a criterios.',
     },
@@ -35,6 +40,7 @@ export function getToolkitCommandsGuide({ clients = {} } = {}) {
       id: 'revisar',
       claude: '/revisar',
       codex: '$revisar',
+      antigravity: '/revisar',
       stage: '4. Revisión par',
       description: 'Pide una revisión adicional a otra IA desde esta terminal.',
     },
@@ -42,6 +48,7 @@ export function getToolkitCommandsGuide({ clients = {} } = {}) {
       id: 'cerrar-memoria',
       claude: '/cerrar-memoria',
       codex: '$cerrar-memoria',
+      antigravity: '/cerrar-memoria',
       stage: 'Cierre',
       description: 'Prepara resumen de sesión y cambios propuestos para memoria.',
     },
@@ -50,19 +57,27 @@ export function getToolkitCommandsGuide({ clients = {} } = {}) {
   const cliCommands = [
     {
       command: 'npx nexakit',
-      description: 'Abre este asistente interactivo (alias compatible: agent-toolkit).',
+      description: 'Abre el asistente de tres preguntas y deja listo el proyecto (--si aplica sin preguntar).',
     },
     {
-      command: 'npx nexakit recommend --project .',
-      description: 'Inspecciona el stack del proyecto en solo lectura y sugiere skills.',
+      command: 'npx nexakit comprobar',
+      description: 'Comprueba en solo lectura Node, las tres IA, las skills base y los restos antiguos.',
     },
     {
-      command: 'npx nexakit detach --project . --apply',
-      description: 'Desacopla skills, .agent-toolkit/ y bloque de Git ignore sin tocar lo tuyo.',
+      command: 'npx nexakit quitar --si',
+      description: 'Retira las skills del proyecto, .agent-toolkit/ y su bloque de .gitignore sin tocar lo tuyo.',
     },
     {
-      command: 'npx nexakit doctor --agent all',
-      description: 'Verifica Node, clientes, enlaces de skills, MCP y sandbox de Codex.',
+      command: 'npx nexakit reparar --desde <ruta>',
+      description: 'Re-apunta enlaces antiguos rotos tras mostrar la lista y pedir confirmación.',
+    },
+    {
+      command: 'npx nexakit memoria <subcomando>',
+      description: 'Ejecuta init, connect, doctor, status o sync sobre la bóveda de memoria.',
+    },
+    {
+      command: 'nexakit revision --disponibles',
+      description: 'Consulta las IA disponibles y certificadas o lanza una revisión en solo lectura.',
     },
     {
       command: 'nexakit modelo',
@@ -73,6 +88,7 @@ export function getToolkitCommandsGuide({ clients = {} } = {}) {
   return {
     claudeActive,
     codexActive,
+    antigravityActive,
     workflowCommands,
     cliCommands,
   };
