@@ -39,3 +39,14 @@ test('context resolves a linked worktree with a .git file',async t=>{
  await fs.writeFile(path.join(other,'tracked'),'worktree change');
  const r=await collectRevisionContext({start:other,homeDirectory:home});assert.equal(r.root,other);assert.match(r.diff,/worktree change/);
 });
+
+test('advancing main after branching does not invert upstream changes into the review',async t=>{
+ const {root,home}=await repo(t);
+ git(root,'checkout','-qb','feature');await fs.writeFile(path.join(root,'feature-only'),'branch change');
+ git(root,'add','.');git(root,'commit','-qm','feature');
+ git(root,'checkout','-q','main');await fs.writeFile(path.join(root,'main-only'),'upstream change');
+ git(root,'add','.');git(root,'commit','-qm','advance main');git(root,'checkout','-q','feature');
+ const r=await collectRevisionContext({start:root,base:'main',homeDirectory:home});
+ assert.deepEqual(r.changedFiles,['feature-only']);assert.equal(r.diff.includes('upstream change'),false);
+ assert.ok(r.diff.includes('branch change'));
+});

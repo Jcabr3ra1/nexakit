@@ -28,8 +28,12 @@ export async function collectRevisionContext({ start = process.cwd(), base, home
       base = found[0];
     }
   }
-  // Use the resolved object id for every diff, so a branch moving cannot mix bases.
-  const commit = resolveCommit(base);
+  // Pin the common ancestor, excluding changes that only landed upstream.
+  const baseCommit = resolveCommit(base);
+  const headCommit = resolveCommit("HEAD");
+  const ancestors = String(run(["merge-base", "--all", baseCommit, headCommit], root)).trim().split(/\s+/u).filter(Boolean);
+  if (ancestors.length !== 1) throw new Error("Base común ausente o ambigua para la revisión.");
+  const [commit] = ancestors;
   const tracked = splitNames(run(['diff', '--no-ext-diff', '--name-only', '-z', commit, '--'], root));
   const untracked = splitNames(run(['ls-files', '--others', '--exclude-standard', '-z'], root));
   const changedFiles = [...new Set([...tracked, ...untracked])].sort();
