@@ -2,7 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadSkillCatalog, resolveCatalogResource, SkillCatalogError, validateSkillCatalog } from './skill-catalog.js';
-import { auditSkillCatalog, hashSkillFiles, readSkillFiles } from './skill-catalog-audit.js';
+import { auditSkillCatalog } from './skill-catalog-audit.js';
+import { hashSkillFiles, readSkillFiles } from './skill-files.js';
 import { scanSkillFiles } from './skill-scan.js';
 
 // The judgment fields come from the reviewer; hashes, paths and scenarios are always computed here.
