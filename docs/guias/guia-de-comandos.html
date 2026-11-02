@@ -268,6 +268,7 @@ agy</code></pre></div></div>
       <details><summary>Sale «Faltan las dependencias de esta copia. Ejecuta npm ci…»</summary><div class="details-body"><p>Estás ejecutando un checkout local de desarrollo donde aún no se instalaron los paquetes de <code>node_modules</code>. Ejecuta <code>npm ci</code> en la carpeta que indica el mensaje.</p></div></details>
       <details><summary>El agente no ve las skills nuevas o las reglas globales</summary><div class="details-body"><p>Cada IA lee sus skills, MCP e instrucciones globales al abrir la sesión. Cierra la sesión actual, abre una nueva y verifica el estado con <code>npx nexakit comprobar</code> y <code>npx nexakit memoria status</code>.</p></div></details>
       <details><summary>Quiero retirar lo que NexaKit instaló</summary><div class="details-body"><p>Ejecuta <code>npx nexakit quitar</code> para ver qué enlaces, reglas globales y MCP creados por NexaKit se retirarían, y repite con <code>npx nexakit quitar --si</code> para aplicarlo sin tocar tus archivos propios.</p></div></details>
+      <details><summary>Quité una skill y vuelve a aparecer</summary><div class="details-body"><p>NexaKit respeta los enlaces que quitas a mano en cada IA y no los recrea. Si una skill antigua sigue volviendo porque se instaló antes de que existiera el registro, ejecuta <code>npx nexakit setup --omitir nombre-de-la-skill --apply</code>. Para recuperarla, usa <code>npx nexakit setup --reponer nombre-de-la-skill --apply</code>. <code>frontend-design</code>, <code>web-design-guidelines</code> y <code>mcp-builder</code> ya no se instalan en global: llegan por proyecto cuando se detecta su stack.</p></div></details>
       <details><summary>Quiero revisar una skill antes de usarla</summary><div class="details-body"><p>Ejecuta <code>npx nexakit scan '/ruta/a/la-skill'</code>. Revisa su contenido sin ejecutarla y avisa de caracteres ocultos, credenciales, descargas que se ejecutan o envío de datos. «Sin bloqueos» no garantiza que sea útil: una skill sin prueba funcional aparece como <strong>no probada</strong>.</p></div></details>
     </section>
     <footer><span>NexaKit · Skills, memoria y revisión entre IA</span><a href="#inicio">Volver al inicio ↑</a></footer>
@@ -294,6 +295,8 @@ agy</code></pre></div></div>
       quitar:`npx nexakit quitar --project ${p}`,
       'quitar-si':`npx nexakit quitar --project ${p} --si`,
       reparar:'npx nexakit reparar --desde /ruta/anterior',
+      omitir:'npx nexakit setup --omitir nombre-de-la-skill --apply',
+      reponer:'npx nexakit setup --reponer nombre-de-la-skill --apply',
       'memoria-help':'npx nexakit memoria --help',
       init, 'init-apply':init + ' --apply',
       'memory-doctor':`npx nexakit memoria doctor ${m} --strict`,
@@ -330,6 +333,8 @@ agy</code></pre></div></div>
     ['quitar','maintenance','Previsualizar la retirada (quitar)','Muestra qué enlaces, reglas globales y MCP propios de NexaKit se retirarían.','Terminal · vista previa'],
     ['quitar-si','maintenance','Retirar lo instalado por NexaKit (quitar --si)','Aplica el desacoplado respetando archivos propios o modificados.','Terminal · modifica integración'],
     ['reparar','maintenance','Reparar enlaces antiguos (reparar --desde)','Reapunta enlaces rotos que quedaron apuntando a una carpeta antigua del toolkit.','Terminal · repara enlaces'],
+    ['omitir','maintenance','Dejar de recibir una skill global (setup --omitir)','Declara quitada una skill global que ya no enlazas; NexaKit no la vuelve a crear en esa IA.','Terminal · modifica integración'],
+    ['reponer','maintenance','Devolver una skill que quitaste (setup --reponer)','Vuelve a enlazar una skill global que habías quitado antes.','Terminal · modifica integración'],
     ['memory-status','memory','Ver estado de la memoria y sus conexiones','Comprueba la bóveda y las conexiones de Claude, Codex y Antigravity.','Terminal · solo lectura'],
     ['memory-doctor','memory','Diagnosticar la estructura de la memoria','Valida manifiesto, notas y enlaces de la bóveda (--strict exige cero advertencias).','Terminal · solo lectura'],
     ['init','memory','Previsualizar creación manual de memoria','Prepara notas, manifiesto y skill del proyecto sin escribir archivos.','Terminal · vista previa'],

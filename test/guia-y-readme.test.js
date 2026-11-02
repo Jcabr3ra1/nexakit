@@ -51,6 +51,8 @@ test('HTML command guide presents a 3-step route, the new auto-review and handof
     'npx nexakit comprobar',
     'npx nexakit quitar',
     'npx nexakit reparar --desde',
+    'npx nexakit setup --omitir',
+    'npx nexakit setup --reponer',
     'npx nexakit memoria',
     'nexakit revision',
     'nexakit modelo',
@@ -61,6 +63,7 @@ test('HTML command guide presents a 3-step route, the new auto-review and handof
   }
 
   // Does not recommend retired workflow commands or manual MCP registration
+  assert.match(html, /Quité una skill y vuelve a aparecer/u);
   assert.doesNotMatch(html, /\/programar|\$programar/u);
   assert.doesNotMatch(html, /\/estado|\$estado/u);
   assert.doesNotMatch(html, /agent-toolkit-workflow/u);
