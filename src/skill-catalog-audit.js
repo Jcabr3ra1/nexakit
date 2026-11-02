@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadSkillCatalog, resolveCatalogResource, SkillCatalogError } from './skill-catalog.js';
+import { scanSkillFiles } from './skill-scan.js';
 
 export const DEFAULT_CATALOG_ROOT = fileURLToPath(new URL('../', import.meta.url));
 
@@ -63,12 +64,24 @@ export async function auditSkillCatalog({ toolkitRoot = DEFAULT_CATALOG_ROOT } =
   report.skillsCount = catalog.skills.length;
   for (const skill of catalog.skills) {
     try {
-      const actual = await inventoryCatalogSkill({ toolkitRoot, installedPath: skill.installedPath });
+      if (!/^(?:skills|catalogs\/skills)\/[a-z0-9-]+$/u.test(skill.installedPath ?? '')) {
+        throw new SkillCatalogError('La carpeta debe ser skills/<nombre> o catalogs/skills/<nombre>.');
+      }
+      const bytes = await readSkillFiles(await resolveCatalogResource(toolkitRoot, skill.installedPath), skill.installedPath);
+      const actual = hashSkillFiles(bytes);
       const expected = [...skill.files].sort((a, b) => a.path.localeCompare(b.path));
       if (actual.length !== expected.length || actual.some((file, index) => file.path !== expected[index].path || file.sha256 !== expected[index].sha256)) {
         throw new SkillCatalogError(`${skill.name}: inventario o hashes SHA-256 distintos del manifiesto.`);
       }
       report.verifiedSkillsCount++;
+      const scan = scanSkillFiles(bytes);
+      for (const f of scan.findings) {
+        if (f.severity === 'bloqueo') report.errors.push(`${skill.name}: bloqueo del escáner (${f.rule} en ${f.file}:${f.line}).`);
+        else if (f.severity === 'aviso') report.warnings.push(`${skill.name}: aviso del escáner (${f.rule} en ${f.file}:${f.line}).`);
+      }
+      for (const [capability, detected] of Object.entries(scan.capabilities)) {
+        if (detected && skill.review.capabilities[capability] === 'none') report.warnings.push(`${skill.name}: capacidad no declarada: ${capability}.`);
+      }
       if (!skill.scenarios.some(scenario => scenario.status === 'passed')) report.warnings.push(`${skill.name}: sin escenario funcional pasado; no acredita utilidad.`);
       if (skill.review.status === 'pending' || skill.review.status === 'rejected') report.warnings.push(`${skill.name}: revisión ${skill.review.status}; no puede recomendarse.`);
     } catch (error) {

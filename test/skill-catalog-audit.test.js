@@ -118,3 +118,46 @@ test('catalog loading rejects non-regular resources before attempting to read th
   assert.equal(report.ok, false);
   assert.equal(attemptedRead, false, 'a FIFO must be rejected by the same type guard before readFile can block');
 });
+
+async function rewriteSkill(f, index, files) {
+  const skill = f.catalog.skills[index];
+  const dir = path.join(f.root, skill.installedPath);
+  await fs.rm(dir, { recursive: true, force: true });
+  skill.files = [];
+  for (const [rel, text] of Object.entries(files)) {
+    await fs.mkdir(path.dirname(path.join(dir, rel)), { recursive: true });
+    await fs.writeFile(path.join(dir, rel), text);
+    skill.files.push({ path: rel, sha256: createHash('sha256').update(text).digest('hex') });
+  }
+  await f.save();
+  return skill;
+}
+
+test('audit fails when the scanner blocks a skill', async t => {
+  const { auditSkillCatalog } = await import('../src/skill-catalog-audit.js');
+  const f = await fixture(t);
+  const skill = await rewriteSkill(f, 1, { 'SKILL.md': '# A\nhola​mundo\n' });
+  const report = await auditSkillCatalog({ toolkitRoot: f.root });
+  assert.equal(report.ok, false);
+  assert.ok(report.errors.includes(`${skill.name}: bloqueo del escáner (unicode-oculto en SKILL.md:2).`));
+});
+
+test('audit keeps scanner warnings as pending items', async t => {
+  const { auditSkillCatalog } = await import('../src/skill-catalog-audit.js');
+  const f = await fixture(t);
+  const skill = await rewriteSkill(f, 1, { 'SKILL.md': '# A\n<!-- nota -->\n' });
+  const report = await auditSkillCatalog({ toolkitRoot: f.root });
+  assert.equal(report.ok, true);
+  assert.ok(report.warnings.includes(`${skill.name}: aviso del escáner (instruccion-oculta en SKILL.md:2).`));
+});
+
+test('audit warns about undeclared capabilities', async t => {
+  const { auditSkillCatalog } = await import('../src/skill-catalog-audit.js');
+  const f = await fixture(t);
+  f.catalog.skills[1].review.capabilities = { filesystem: 'none', processes: 'optional', network: 'none', paidApi: 'none' };
+  const skill = await rewriteSkill(f, 1, { 'SKILL.md': '# A\n', 'scripts/a.js': "await fetch('https://x.test');\n" });
+  const report = await auditSkillCatalog({ toolkitRoot: f.root });
+  assert.equal(report.ok, true);
+  assert.ok(report.warnings.includes(`${skill.name}: capacidad no declarada: network.`));
+  assert.ok(!report.warnings.includes(`${skill.name}: capacidad no declarada: processes.`));
+});
