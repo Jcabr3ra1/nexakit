@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { validateReviewChoice } from './model-command.js';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -24,6 +25,7 @@ export async function runRevision(options, dependencies = {}) {
   const homeDirectory = options.homeDirectory ?? os.homedir(),
     environment = options.environment ?? process.env;
   const {
+    validateChoice = validateReviewChoice,
     collectContext = collectRevisionContext,
     buildInvocation = buildRevisionInvocation,
     getVersion = versionOf,
@@ -39,6 +41,7 @@ export async function runRevision(options, dependencies = {}) {
     if (!info.isFile() || info.isSymbolicLink() || info.size > 1024 * 1024)
       throw new Error('Encargo inválido o mayor de 1 MiB.');
     const brief = await fs.readFile(options.briefFile, 'utf8');
+    await validateChoice({ ...options, homeDirectory, environment });
     const context = await collectContext({ ...options, homeDirectory });
     enforceReviewDiffLimit(context.diff);
     const invocation = await buildInvocation({ ...options, root: context.root, environment });

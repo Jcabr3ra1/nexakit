@@ -1,4 +1,5 @@
 import os from 'node:os';
+import { runModelCommand } from './model-command.js';
 import { runRevisionCommand } from './revision.js';
 import path from 'node:path';
 import readline from 'node:readline';
@@ -70,6 +71,7 @@ export async function runToolkitCli(
   }
 
   const [command, ...rest] = argv;
+  if (command === 'modelo') return runModelCommand(rest, { out, err }, options);
   if (command === 'revision') return runRevisionCommand(rest, { out, err }, { options });
 
   if (command === 'recommend') {

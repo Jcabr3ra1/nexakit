@@ -56,3 +56,9 @@ Debajo, una línea por IA con cómo cambiarlo y comprobarlo:
 - **Antigravity:** `/model` dentro de agy, o `agy --model <id>`; el esfuerzo va en el id. Solo se comprueba en su selector.
 
 Si lo guardado ya coincide, dilo en una línea y no pidas cambios. Lo que el script lee de archivos es lo guardado, no la sesión abierta: no lo presentes como comprobado.
+
+## Mostrar la recomendación en Claude
+
+Si está disponible la herramienta `nexakit_recomendacion` del mod opcional
+`nexakit-modelo`, úsala tras recomendar: modelo, esfuerzo y motivo. Solo
+muestra la recomendación; el usuario sigue aplicando cualquier cambio.
