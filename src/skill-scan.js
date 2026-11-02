@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { readSkillFiles } from './skill-catalog-audit.js';
+import { readSkillFiles } from './skill-files.js';
 import { SECRET_PATTERNS } from './sensitive-data.js';
 
 // Offline content review of a skill. Reads bytes only: nothing here executes, imports or fetches the skill.
@@ -46,6 +46,9 @@ const EVAL_DECODED = /\b(?:eval|exec|Function)\s*\(\s*(?:atob|Buffer\.from|base6
 const PROCESS = /\bchild_process\b|\bexecSync\s*\(|\bspawn\s*\(|\bsubprocess\b|\bos\.system\s*\(/;
 const FILE_WRITE = /\bwriteFile(?:Sync)?\s*\(|\bfs\.(?:rm|unlink|rename|mkdir)\w*\s*\(|\bopen\s*\([^)\n]{0,200}['"][wa]\+?['"]|\brm\s+-|>\s*[~/\w.]/;
 const FENCE = /^\s{0,3}(?:```|~~~)/;
+// Files a skill copies for the user (templates, examples) are material, not code the skill runs.
+const MATERIAL_DIR = /^(?:assets|templates|examples?)\//;
+const runsCode = filePath => SCRIPT_EXTENSIONS.has(path.extname(filePath).toLowerCase()) && !MATERIAL_DIR.test(filePath);
 
 const codepoint = ch => `<U+${ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}>`;
 const excerptOf = line => {
@@ -86,6 +89,7 @@ function logicalLines(lines) {
 
 function scanText(filePath, text, push, capabilities) {
   const isScript = SCRIPT_EXTENSIONS.has(path.extname(filePath).toLowerCase());
+  const runs = runsCode(filePath);
   const isMarkdown = /\.(?:md|markdown|mdx)$/i.test(filePath);
   const lines = text.split(/\r?\n/);
   // Exfiltration needs a sensitive read and a network send in the same unit: the file for scripts,
@@ -102,7 +106,8 @@ function scanText(filePath, text, push, capabilities) {
     const n = index + 1;
     const hit = rule => push(rule, filePath, n, line);
     const long = line.length > MAX_RULE_LINE;
-    if (isMarkdown && FENCE.test(line)) { inFence = !inFence; if (inFence) fence++; }
+    const fenceLine = isMarkdown && FENCE.test(line);
+    if (fenceLine) { inFence = !inFence; if (inFence) fence++; }
     const unit = isScript ? 'file' : isMarkdown && inFence ? `fence-${fence}` : `line-${n}`;
     if (hiddenUnicodeIn(line, index === 0)) hit('unicode-oculto');
     if (CREDENTIAL_PATTERNS.some(re => re.test(line)) || (!long && URL_WITH_PASSWORD.test(line))) hit('credencial');
@@ -112,14 +117,15 @@ function scanText(filePath, text, push, capabilities) {
     if (long || BASE64_BLOB.test(line) || EVAL_DECODED.test(line) || (isScript && line.length > 1000)) hit('ofuscacion');
     if (SENSITIVE_READ.test(line)) sensitiveUnits.add(unit);
     if (!long && NETWORK_SEND.test(line) && !sendUnits.has(unit)) sendUnits.set(unit, n);
+    // Capabilities come only from code the skill runs; examples in documentation are reported as `red` info.
     if (NETWORK.test(line)) {
-      capabilities.network = true;
-      if (isScript) capabilities.processes = true;
+      if (runs) capabilities.network = true;
       if (!networkSeen) { networkSeen = true; hit('red'); }
     }
-    if (isScript && PROCESS.test(line)) capabilities.processes = true;
-    if (isScript && !long && FILE_WRITE.test(line)) capabilities.filesystem = true;
-    if (isMarkdown) {
+    if (runs && PROCESS.test(line)) capabilities.processes = true;
+    if (runs && !long && FILE_WRITE.test(line)) capabilities.filesystem = true;
+    // An HTML comment inside a fenced code block is shown to the reader, so it is not hidden.
+    if (isMarkdown && (!inFence || commentStart) && !fenceLine) {
       let rest = line;
       while (rest.length) {
         if (!commentStart) {
@@ -143,7 +149,6 @@ function scanText(filePath, text, push, capabilities) {
     if (logical.length <= MAX_RULE_LINE && DOWNLOAD_EXEC.some(re => re.test(logical))) push('descarga-y-ejecuta', filePath, start, lines[start - 1]);
   }
   if (commentStart && commentText.trim()) push('instruccion-oculta', filePath, commentStart, lines[commentStart - 1]);
-  if (isScript && networkSeen) capabilities.processes = true;
   const exfil = [...sendUnits].find(([unit]) => sensitiveUnits.has(unit));
   if (exfil) push('exfiltracion', filePath, exfil[1], lines[exfil[1] - 1]);
 }
@@ -152,7 +157,8 @@ export function scanSkillFiles(files) {
   const findings = [];
   const capabilities = { filesystem: false, processes: false, network: false };
   const push = (rule, file, line, text) => findings.push({ rule, severity: SEVERITY[rule], file, line, excerpt: excerptOf(text) });
-  const decoder = new TextDecoder('utf-8', { fatal: true });
+  // ignoreBOM keeps a leading U+FEFF in the text, so a second one right after it is still caught.
+  const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
   for (const file of [...files].sort((a, b) => a.path.localeCompare(b.path))) {
     let text;
     try {
@@ -161,7 +167,7 @@ export function scanSkillFiles(files) {
       findings.push({ rule: 'ofuscacion', severity: 'aviso', file: file.path, line: 1, excerpt: 'archivo binario o no UTF-8' });
       continue;
     }
-    if (SCRIPT_EXTENSIONS.has(path.extname(file.path).toLowerCase())) capabilities.processes = true;
+    if (runsCode(file.path)) capabilities.processes = true;
     scanText(file.path, text, push, capabilities);
   }
   return { blocked: findings.some(f => f.severity === 'bloqueo'), findings, capabilities };
