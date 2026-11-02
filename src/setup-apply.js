@@ -1,3 +1,4 @@
+import { planReviewInstructions, applyReviewInstructions } from './review-instructions.js';
 // Applies the confirmation, block by block, in the fixed order of setup-plan.js. The state is gathered again right
 // before applying, so what changed meanwhile is respected. The first block that fails stops the run: what was
 // applied stays, nothing is undone, and running `npx nexakit` again resumes from the real state.
@@ -10,7 +11,11 @@ import { acquireLock } from './install-lock.js';
 import { AGENT_NAMES, buildConfirmation } from './setup-plan.js';
 import { gatherSetupState } from './setup-state.js';
 import {
-  applyProjectSkillInstall, applyToolkitDetach, planProjectSkillInstall, planToolkitDetach, writeSetupAnswers
+  applyProjectSkillInstall,
+  applyToolkitDetach,
+  planProjectSkillInstall,
+  planToolkitDetach,
+  writeSetupAnswers,
 } from './skill-recommendations.js';
 import { planStableCommand, writeStableCommand } from './stable-command.js';
 import { ensureStableInstall, nexakitDir } from './stable-install.js';
@@ -34,11 +39,17 @@ async function ensureMemoryAgent(vaultPath, agent, repositoryRoot, lock) {
   await lock.assertHeld();
   const manifest = JSON.parse(await fs.readFile(file, 'utf8'));
   const source = await fs.realpath(manifest.source?.repositoryPath ?? '').catch(() => null);
-  if (source !== await fs.realpath(repositoryRoot)) throw new Error('La memoria es de otro proyecto; no se modifica.');
-  const current = manifest.agents.find(entry => entry.id === agent);
+  if (source !== (await fs.realpath(repositoryRoot)))
+    throw new Error('La memoria es de otro proyecto; no se modifica.');
+  const current = manifest.agents.find((entry) => entry.id === agent);
   if (current?.enabled) return;
   if (current) current.enabled = true;
-  else manifest.agents.push({ id: agent, enabled: true, skillName: manifest.agents[0]?.skillName ?? manifest.project.id });
+  else
+    manifest.agents.push({
+      id: agent,
+      enabled: true,
+      skillName: manifest.agents[0]?.skillName ?? manifest.project.id,
+    });
   const temporary = `${file}.${process.pid}.tmp`;
   await fs.writeFile(temporary, `${JSON.stringify(manifest, null, 2)}\n`, { flag: 'wx' });
   try {
@@ -51,10 +62,18 @@ async function ensureMemoryAgent(vaultPath, agent, repositoryRoot, lock) {
 
 async function withLock(homeDirectory, acquire, fn) {
   const lock = await acquire(nexakitDir(homeDirectory));
-  try { return await fn(lock); } finally { await lock.release(); }
+  try {
+    return await fn(lock);
+  } finally {
+    await lock.release();
+  }
 }
 
-export async function applySetup(options, answers, { onProgress = () => {}, runNpm, packageSpec, acquire = acquireLock, gather = gatherSetupState } = {}) {
+export async function applySetup(
+  options,
+  answers,
+  { onProgress = () => {}, runNpm, packageSpec, acquire = acquireLock, gather = gatherSetupState } = {},
+) {
   const memoryPath = answers.memory.decision === 'path' ? answers.memory.path : null;
   // The chosen memory path is always inspected again, also one typed in "otra carpeta…".
   const stateOptions = { ...options, memoryPaths: memoryPath ? [memoryPath] : [] };
@@ -67,58 +86,120 @@ export async function applySetup(options, answers, { onProgress = () => {}, runN
   let finalCheck = null;
 
   const blocks = {
-    'stable-copy': () => withLock(homeDirectory, acquire, async lock => {
-      const result = await ensureStableInstall({ homeDirectory, version: await packageVersion(toolkitRoot), lock,
-        ...(runNpm && { runNpm }), ...(packageSpec && { packageSpec }) });
-      linkRoot = path.join(nexakitDir(homeDirectory), 'actual');
-      return result;
-    }),
-    'stable-command': () => withLock(homeDirectory, acquire, async lock =>
-      writeStableCommand(await planStableCommand({ homeDirectory, nodePath, toolkitRoot: linkRoot }), lock)),
+    'stable-copy': () =>
+      withLock(homeDirectory, acquire, async (lock) => {
+        const result = await ensureStableInstall({
+          homeDirectory,
+          version: await packageVersion(toolkitRoot),
+          lock,
+          ...(runNpm && { runNpm }),
+          ...(packageSpec && { packageSpec }),
+        });
+        linkRoot = path.join(nexakitDir(homeDirectory), 'actual');
+        return result;
+      }),
+    'stable-command': () =>
+      withLock(homeDirectory, acquire, async (lock) =>
+        writeStableCommand(await planStableCommand({ homeDirectory, nodePath, toolkitRoot: linkRoot }), lock),
+      ),
     'project-skills': async () => {
       const chosen = answers.skills.chosen;
       if (chosen.length) {
-        const plan = await planProjectSkillInstall({ projectRoot: state.project.root, skillNames: chosen, agent: projectAgent(answers.agents),
-          mode: 'symlink', catalog, toolkitRoot, homeDirectory });
-        await applyProjectSkillInstall(plan, { ...(runNpm && { runNpm }), ...(packageSpec && { packageSpec }), acquire });
+        const plan = await planProjectSkillInstall({
+          projectRoot: state.project.root,
+          skillNames: chosen,
+          agent: projectAgent(answers.agents),
+          mode: 'symlink',
+          catalog,
+          toolkitRoot,
+          homeDirectory,
+        });
+        await applyProjectSkillInstall(plan, {
+          ...(runNpm && { runNpm }),
+          ...(packageSpec && { packageSpec }),
+          acquire,
+        });
       }
       if (confirmation.removeSkills.length) {
-        const detach = await planToolkitDetach({ projectRoot: state.project.root, skillNames: confirmation.removeSkills, catalog, toolkitRoot, homeDirectory });
+        const detach = await planToolkitDetach({
+          projectRoot: state.project.root,
+          skillNames: confirmation.removeSkills,
+          catalog,
+          toolkitRoot,
+          homeDirectory,
+        });
         await applyToolkitDetach(detach);
       }
     },
+    'review-instructions': () =>
+      withLock(homeDirectory, acquire, async (lock) => {
+        const plan = await planReviewInstructions({
+          homeDirectory,
+          environment,
+          codexHome,
+          agents: answers.agents,
+        });
+        await applyReviewInstructions(plan, lock);
+      }),
     'memory-init': async () => {
-      const report = initializeMemory({ destination: memoryPath, projectId: state.project.id, projectName: state.project.displayName,
-        sourcePath: state.project.root, syncMode: 'none', agents: answers.agents, apply: true });
-      if (report.status === 'conflict') throw new Error('La carpeta de la memoria ya tiene archivos que no son de nexakit.');
+      const report = initializeMemory({
+        destination: memoryPath,
+        projectId: state.project.id,
+        projectName: state.project.displayName,
+        sourcePath: state.project.root,
+        syncMode: 'none',
+        agents: answers.agents,
+        apply: true,
+      });
+      if (report.status === 'conflict')
+        throw new Error('La carpeta de la memoria ya tiene archivos que no son de nexakit.');
       const diagnosis = await diagnoseMemory(memoryPath);
-      if (diagnosis.summary.errors > 0) throw new Error('La memoria se creó, pero su comprobación encontró errores.');
+      if (diagnosis.summary.errors > 0)
+        throw new Error('La memoria se creó, pero su comprobación encontró errores.');
     },
-    answers: () => withLock(homeDirectory, acquire, lock => writeSetupAnswers(state.project.root, answers, lock)),
+    answers: () =>
+      withLock(homeDirectory, acquire, (lock) => writeSetupAnswers(state.project.root, answers, lock)),
     'final-check': async () => {
       const after = buildConfirmation(await gather(stateOptions), answers).lines;
-      const pending = after.filter(line => ['+', '−', '↻'].includes(line.mark)).map(line => line.text);
-      const warnings = after.filter(line => line.mark === '!').map(line => line.text);
+      const pending = after.filter((line) => ['+', '−', '↻'].includes(line.mark)).map((line) => line.text);
+      const warnings = after.filter((line) => line.mark === '!').map((line) => line.text);
       const memoryErrors = memoryPath ? (await diagnoseMemory(memoryPath)).summary.errors : 0;
       if (memoryErrors) pending.push('la memoria tiene errores');
       finalCheck = pending.length
         ? { ok: false, message: `quedó pendiente: ${pending.join('; ')}.`, warnings }
-        : { ok: true, message: warnings.length ? `responde, con avisos: ${warnings.join('; ')}.` : 'todo responde', warnings };
-    }
+        : {
+            ok: true,
+            message: warnings.length ? `responde, con avisos: ${warnings.join('; ')}.` : 'todo responde',
+            warnings,
+          };
+    },
   };
-  const runBlock = async id => {
+  const runBlock = async (id) => {
     if (blocks[id]) return blocks[id]();
     const [kind, agent] = id.split(':');
     if (kind === 'global-skills') {
-      return setupToolkit({ agent, apply: true, homeDirectory, toolkitRoot, environment, codexHome,
-        ...(runNpm && { runNpm }), ...(packageSpec && { packageSpec }), acquire });
+      return setupToolkit({
+        agent,
+        apply: true,
+        homeDirectory,
+        toolkitRoot,
+        environment,
+        codexHome,
+        ...(runNpm && { runNpm }),
+        ...(packageSpec && { packageSpec }),
+        acquire,
+      });
     }
     if (kind === 'memory-connect') {
-      await withLock(homeDirectory, acquire, lock => ensureMemoryAgent(memoryPath, agent, state.project.root, lock));
-      const report = await connectMemory({ targetPath: memoryPath, agentId: agent, apply: true },
-        { homeDirectory, nodePath, toolkitRoot: linkRoot, ...(runCommand && { runCommand }) });
+      await withLock(homeDirectory, acquire, (lock) =>
+        ensureMemoryAgent(memoryPath, agent, state.project.root, lock),
+      );
+      const report = await connectMemory(
+        { targetPath: memoryPath, agentId: agent, apply: true },
+        { homeDirectory, nodePath, toolkitRoot: linkRoot, ...(runCommand && { runCommand }) },
+      );
       if (report.status === 'conflict') {
-        const reason = report.components.find(component => component.action === 'conflict')?.message ?? '';
+        const reason = report.components.find((component) => component.action === 'conflict')?.message ?? '';
         throw new Error(`No se pudo conectar la memoria a ${AGENT_NAMES[agent]}: ${reason}`);
       }
       return report;
@@ -131,10 +212,10 @@ export async function applySetup(options, answers, { onProgress = () => {}, runN
     try {
       await runBlock(id);
     } catch (error) {
-      const detail = error instanceof Error ? (error.details?.join(' ') || error.message) : String(error);
+      const detail = error instanceof Error ? error.details?.join(' ') || error.message : String(error);
       const message = id.startsWith('memory-connect:')
         ? `${detail.startsWith('No se pudo') ? detail : `No se pudo conectar la memoria a ${AGENT_NAMES[id.split(':')[1]]}: ${detail}`} ${RETRY}`
-        : `Falló «${confirmation.blocks.find(block => block.id === id).label}»: ${detail} ${RETRY}`;
+        : `Falló «${confirmation.blocks.find((block) => block.id === id).label}»: ${detail} ${RETRY}`;
       onProgress(id, 'failed', message);
       return { ok: false, done, failed: { id, message }, finalCheck };
     }

@@ -1,3 +1,4 @@
+import { ownedReviewInstructions, removeReviewInstructions } from './review-instructions.js';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -1178,6 +1179,7 @@ export async function planToolkitDetach({
   toolkitRoot = TOOLKIT_ROOT,
   homeDirectory = os.homedir(),
   codexHome,
+  environment = {},
   skillNames
 } = {}) {
   if (!['codex', 'claude', 'antigravity', 'all'].includes(agent)) {
@@ -1321,7 +1323,7 @@ export async function planToolkitDetach({
   const manualCommands = [];
   if (includeGlobal) {
     const home = await fs.realpath(homeDirectory);
-    const resolvedCodexHome = codexHome ?? path.join(home, '.codex');
+    const resolvedCodexHome = codexHome ?? environment.CODEX_HOME ?? path.join(home, '.codex');
     const bundledSkillsDir = path.join(resolvedToolkit, 'skills');
     const bundledNames = (await fs.readdir(bundledSkillsDir, { withFileTypes: true }).catch(() => []))
       .filter(e => e.isDirectory() && SKILL_NAME_RE.test(e.name))
@@ -1378,6 +1380,16 @@ export async function planToolkitDetach({
   }
 
   return {
+    reviewInstructions: includeGlobal && !skillNames
+      ? await ownedReviewInstructions({
+          homeDirectory: homeReal,
+          codexHome: codexHome ?? environment.CODEX_HOME ?? path.join(homeReal, '.codex'),
+          agents: clients
+        })
+      : [],
+    homeDirectory: homeReal,
+    reviewCodexHome: codexHome ?? environment.CODEX_HOME ?? path.join(homeReal, ".codex"),
+    reviewAgents: clients,
     applied: false,
     projectRoot: root,
     toolkitRoot: resolvedToolkit,
@@ -1436,6 +1448,18 @@ export async function applyToolkitDetach(plan) {
     throw new Error('Se requiere una vista previa válida de desacoplado.');
   }
 
+  if (plan.reviewInstructions?.length) {
+    const lock = await acquireLock(nexakitDir(plan.homeDirectory));
+    try {
+      await removeReviewInstructions({
+        homeDirectory: plan.homeDirectory,
+        codexHome: plan.reviewCodexHome,
+        agents: plan.reviewAgents
+      }, lock);
+    } finally {
+      await lock.release();
+    }
+  }
   let removedCount = 0;
   let conflicts = 0;
   const updatedItems = [];
@@ -1629,5 +1653,6 @@ export function formatDetachReport(report) {
     for (const cmd of report.manualCommands) lines.push(`  $ ${cmd}`);
   }
 
+  if (report.reviewInstructions?.length) lines.push(`  - Quitar solo el bloque de revisión de ${report.reviewInstructions.join(', ')}`);
   return lines.join('\n') + '\n';
 }

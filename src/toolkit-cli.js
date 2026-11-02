@@ -1,4 +1,6 @@
 import os from 'node:os';
+import { runModelCommand } from './model-command.js';
+import { runRevisionCommand } from './revision.js';
 import path from 'node:path';
 import readline from 'node:readline';
 import { pathToFileURL } from 'node:url';
@@ -9,7 +11,7 @@ import {
   formatDetachReport,
   inspectSkillProject,
   planToolkitDetach,
-  recommendSkills
+  recommendSkills,
 } from './skill-recommendations.js';
 import { formatRecommendationReport } from './recommend-report.js';
 import { applySetup } from './setup-apply.js';
@@ -24,6 +26,8 @@ const PROFILE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const RECOMMEND_PROFILES = ['frontend', 'backend', 'mcp', 'security'];
 
 const HELP = `Uso: npx nexakit [--project <ruta>] [--si]
+     nexakit revision --disponibles [--principal claude|codex|antigravity]
+     nexakit revision --con <ia> --modelo <m> --esfuerzo <e> --encargo <archivo> [--base <rama>]
      npx nexakit quitar [--project <ruta>] [--global] [--agent codex|claude|antigravity|all] [--apply] [--json]
      npx nexakit recommend [--project <ruta>] [--profile frontend|backend|mcp|security] [--client codex|claude] [--dry-run] [--json]
      npx nexakit reparar --desde <ruta> [--agent codex|claude|antigravity|all]
@@ -45,7 +49,7 @@ doctor y setup comprueban y preparan las skills base globales.
 
 export async function runToolkitCli(
   argv,
-  { out, err, input = process.stdin, output = process.stdout, isTTY, options = {} } = {}
+  { out, err, input = process.stdin, output = process.stdout, isTTY, options = {} } = {},
 ) {
   if (argv.length === 1 && ['--help', '-h'].includes(argv[0])) {
     await out(HELP);
@@ -58,30 +62,44 @@ export async function runToolkitCli(
     const seen = new Set();
     for (let i = 0; i < rest.length; i++) {
       const flag = rest[i];
-      if (seen.has(flag)) { await err(HELP); return 2; }
+      if (seen.has(flag)) {
+        await err(HELP);
+        return 2;
+      }
       seen.add(flag);
       if (flag === '--project' && rest[i + 1]) parsed.projectRoot = rest[++i];
       else if (flag === '--si') parsed.yes = true;
-      else { await err(HELP); return 2; }
+      else {
+        await err(HELP);
+        return 2;
+      }
     }
     return runSetup(parsed, { out, err, input, output, isTTY, options });
   }
 
   const [command, ...rest] = argv;
+  if (command === 'modelo') return runModelCommand(rest, { out, err }, options);
+  if (command === 'revision') return runRevisionCommand(rest, { out, err }, { options });
 
   if (command === 'recommend') {
     const parsed = { projectRoot: process.cwd(), json: false };
     const seen = new Set();
     for (let i = 0; i < rest.length; i++) {
       const flag = rest[i];
-      if (seen.has(flag)) { await err(HELP); return 2; }
+      if (seen.has(flag)) {
+        await err(HELP);
+        return 2;
+      }
       seen.add(flag);
       if (flag === '--project' && rest[i + 1]) parsed.projectRoot = rest[++i];
       else if (flag === '--profile' && RECOMMEND_PROFILES.includes(rest[i + 1])) parsed.profile = rest[++i];
       else if (flag === '--client' && ['codex', 'claude'].includes(rest[i + 1])) parsed.client = rest[++i];
       else if (flag === '--dry-run') parsed.dryRun = true;
       else if (flag === '--json') parsed.json = true;
-      else { await err(HELP); return 2; }
+      else {
+        await err(HELP);
+        return 2;
+      }
     }
     try {
       const catalogUrl = options.toolkitRoot
@@ -91,13 +109,13 @@ export async function runToolkitCli(
       const inspection = await inspectSkillProject(parsed.projectRoot, {
         ...(parsed.client && { client: parsed.client }),
         ...(options.toolkitRoot && { toolkitRoot: options.toolkitRoot }),
-        catalog
+        catalog,
       });
       const report = recommendSkills({
         catalog,
         inspection,
         ...(parsed.profile && { profile: parsed.profile }),
-        ...(parsed.client && { client: parsed.client })
+        ...(parsed.client && { client: parsed.client }),
       });
       await out(parsed.json ? JSON.stringify(report) + '\n' : formatRecommendationReport(report));
       return 0;
@@ -114,14 +132,21 @@ export async function runToolkitCli(
     const seen = new Set();
     for (let i = 0; i < rest.length; i++) {
       const flag = rest[i];
-      if (seen.has(flag)) { await err(HELP); return 2; }
+      if (seen.has(flag)) {
+        await err(HELP);
+        return 2;
+      }
       seen.add(flag);
       if (flag === '--project' && rest[i + 1]) parsed.projectRoot = rest[++i];
-      else if (flag === '--agent' && ['codex', 'claude', 'antigravity', 'all'].includes(rest[i + 1])) parsed.agent = rest[++i];
+      else if (flag === '--agent' && ['codex', 'claude', 'antigravity', 'all'].includes(rest[i + 1]))
+        parsed.agent = rest[++i];
       else if (flag === '--global') parsed.global = true;
       else if (flag === '--apply') parsed.apply = true;
       else if (flag === '--json') parsed.json = true;
-      else { await err(HELP); return 2; }
+      else {
+        await err(HELP);
+        return 2;
+      }
     }
     try {
       const catalogUrl = options.toolkitRoot
@@ -129,20 +154,25 @@ export async function runToolkitCli(
         : undefined;
       const catalog = await loadSkillCatalog(catalogUrl ? { catalogUrl } : {});
       // Skills are installed at the repository root, so they are removed from there too.
-      const { root } = await resolveProjectRoot(parsed.projectRoot, options.homeDirectory ? { homeDirectory: options.homeDirectory } : {});
+      const { root } = await resolveProjectRoot(
+        parsed.projectRoot,
+        options.homeDirectory ? { homeDirectory: options.homeDirectory } : {},
+      );
       const plan = await planToolkitDetach({
         projectRoot: root,
         includeGlobal: parsed.global,
+        environment: options.environment ?? (options.homeDirectory ? {} : process.env),
         agent: parsed.agent,
         catalog,
         ...(options.toolkitRoot && { toolkitRoot: options.toolkitRoot }),
         ...(options.homeDirectory && { homeDirectory: options.homeDirectory }),
-        ...(options.codexHome && { codexHome: options.codexHome })
+        ...(options.codexHome && { codexHome: options.codexHome }),
       });
       const report = parsed.apply ? await applyToolkitDetach(plan) : plan;
       if (parsed.json) {
         const cleanJson = {
           applied: report.applied,
+          reviewInstructions: report.reviewInstructions ?? [],
           projectRoot: report.projectRoot,
           includeGlobal: report.includeGlobal,
           items: report.items.map(({ catalogEntry, ...itemRest }) => itemRest),
@@ -150,15 +180,15 @@ export async function runToolkitCli(
             ? {
                 removedCount: report.removedCount,
                 gitIgnoreCleanedCount: report.gitIgnoreCleanedCount,
-                stateDirRemoved: report.stateDirRemoved
+                stateDirRemoved: report.stateDirRemoved,
               }
             : {
                 removeStateDir: report.removeStateDir,
                 removeLegacyLockfile: report.removeLegacyLockfile,
-                gitIgnoreUpdates: report.gitIgnoreUpdates
+                gitIgnoreUpdates: report.gitIgnoreUpdates,
               }),
           conflicts: report.conflicts,
-          manualCommands: report.manualCommands
+          manualCommands: report.manualCommands,
         };
         await out(JSON.stringify(cleanJson) + '\n');
       } else {
@@ -180,29 +210,40 @@ export async function runToolkitCli(
   const seen = new Set();
   for (let i = 0; i < rest.length; i++) {
     const flag = rest[i];
-    if (seen.has(flag)) { await err(HELP); return 2; }
+    if (seen.has(flag)) {
+      await err(HELP);
+      return 2;
+    }
     seen.add(flag);
-    if (flag === '--agent' && ['codex', 'claude', 'antigravity', 'all'].includes(rest[i + 1])) parsed.agent = rest[++i];
+    if (flag === '--agent' && ['codex', 'claude', 'antigravity', 'all'].includes(rest[i + 1]))
+      parsed.agent = rest[++i];
     else if (flag === '--json') parsed.json = true;
     else if (flag === '--perfil-codex' && PROFILE_RE.test(rest[i + 1] ?? '')) parsed.codexProfile = rest[++i];
     else if (flag === '--apply' && command === 'setup') parsed.apply = true;
-    else { await err(HELP); return 2; }
+    else {
+      await err(HELP);
+      return 2;
+    }
   }
   try {
     const result = await (command === 'setup' ? setupToolkit : doctorToolkit)({ ...options, ...parsed });
     await out(JSON.stringify(result, null, parsed.json ? 0 : 2) + '\n');
     return command === 'setup'
-      ? result.conflicts ? 1 : 0
+      ? result.conflicts
+        ? 1
+        : 0
       : result.node.supported &&
-        Object.values(result.dependencies).every(Boolean) &&
-        Object.values(result.clients).every(c => c.available) &&
-        Object.values(result.mcp).every(m => READY_LINK_STATES.includes(m.state)) &&
-        result.skills.every(s => READY_LINK_STATES.includes(s.state)) &&
-        (!result.codexSandbox || ['allowed', 'not-needed', 'unknown'].includes(result.codexSandbox.state))
+          Object.values(result.dependencies).every(Boolean) &&
+          Object.values(result.clients).every((c) => c.available) &&
+          Object.values(result.mcp).every((m) => READY_LINK_STATES.includes(m.state)) &&
+          result.skills.every((s) => READY_LINK_STATES.includes(s.state)) &&
+          (!result.codexSandbox || ['allowed', 'not-needed', 'unknown'].includes(result.codexSandbox.state))
         ? 0
         : 1;
   } catch {
-    await err('No se pudo inspeccionar o instalar. Revisa rutas, permisos y conflictos; no se reemplazan destinos.\n');
+    await err(
+      'No se pudo inspeccionar o instalar. Revisa rutas, permisos y conflictos; no se reemplazan destinos.\n',
+    );
     return 1;
   }
 }
@@ -214,13 +255,20 @@ const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 async function askYesNo(input, output) {
   const rl = readline.createInterface({ input, ...(output?.isTTY && { output }) });
   try {
-    const answer = await new Promise(resolve => {
+    const answer = await new Promise((resolve) => {
       let answered = false;
-      rl.once('line', line => { answered = true; resolve(line); });
-      rl.once('close', () => { if (!answered) resolve(''); });
+      rl.once('line', (line) => {
+        answered = true;
+        resolve(line);
+      });
+      rl.once('close', () => {
+        if (!answered) resolve('');
+      });
     });
     return /^s(í|i)?$/iu.test(answer.trim());
-  } finally { rl.close(); }
+  } finally {
+    rl.close();
+  }
 }
 
 async function runRepair(rest, { out, err, input, output, isTTY, options }) {
@@ -228,17 +276,31 @@ async function runRepair(rest, { out, err, input, output, isTTY, options }) {
   const seen = new Set();
   for (let i = 0; i < rest.length; i++) {
     const flag = rest[i];
-    if (flag === '--si') { await err('reparar siempre pregunta; no admite --si.\n'); return 2; }
-    if (seen.has(flag)) { await err(HELP); return 2; }
+    if (flag === '--si') {
+      await err('reparar siempre pregunta; no admite --si.\n');
+      return 2;
+    }
+    if (seen.has(flag)) {
+      await err(HELP);
+      return 2;
+    }
     seen.add(flag);
     if (flag === '--desde' && rest[i + 1]) parsed.from = rest[++i];
-    else if (flag === '--agent' && ['codex', 'claude', 'antigravity', 'all'].includes(rest[i + 1])) parsed.agent = rest[++i];
-    else { await err(HELP); return 2; }
+    else if (flag === '--agent' && ['codex', 'claude', 'antigravity', 'all'].includes(rest[i + 1]))
+      parsed.agent = rest[++i];
+    else {
+      await err(HELP);
+      return 2;
+    }
   }
-  if (!parsed.from) { await err(HELP); return 2; }
+  if (!parsed.from) {
+    await err(HELP);
+    return 2;
+  }
 
   const home = options.homeDirectory ?? os.homedir();
-  const short = value => (value === home || value.startsWith(home + path.sep) ? `~${value.slice(home.length)}` : value);
+  const short = (value) =>
+    value === home || value.startsWith(home + path.sep) ? `~${value.slice(home.length)}` : value;
   try {
     const plan = await planLegacyRepair({ ...options, ...parsed });
     const from = short(plan.from);
@@ -246,12 +308,14 @@ async function runRepair(rest, { out, err, input, output, isTTY, options }) {
       await out(`No encontré enlaces rotos hacia ${from}.\n`);
       return 0;
     }
-    await out([
-      `Encontré ${plural(plan.links.length, 'enlace roto', 'enlaces rotos')} hacia ${from}.`,
-      'No puedo comprobar que sean de nexakit: revisa la lista.',
-      ...plan.links.map(link => `  ${link.client} · ${link.name}`),
-      ''
-    ].join('\n'));
+    await out(
+      [
+        `Encontré ${plural(plan.links.length, 'enlace roto', 'enlaces rotos')} hacia ${from}.`,
+        'No puedo comprobar que sean de nexakit: revisa la lista.',
+        ...plan.links.map((link) => `  ${link.client} · ${link.name}`),
+        '',
+      ].join('\n'),
+    );
     const interactive = Boolean(isTTY ?? (input?.isTTY && output?.isTTY));
     if (!interactive) {
       await err('Este comando necesita una terminal interactiva.\n');
@@ -264,10 +328,17 @@ async function runRepair(rest, { out, err, input, output, isTTY, options }) {
     }
     const result = await applyLegacyRepair(plan, options);
     const lines = [`Listo: ${plural(result.repaired, 'enlace re-apuntado', 'enlaces re-apuntados')}.`];
-    if (result.changed) lines.push(`${plural(result.changed, 'enlace cambió', 'enlaces cambiaron')} mientras confirmabas y no se tocó; vuelve a ejecutar el comando.`);
-    if (result.skipped.length) lines.push(`No se repararon ${result.skipped.join(', ')}: la copia en uso no las incluye.`);
+    if (result.changed)
+      lines.push(
+        `${plural(result.changed, 'enlace cambió', 'enlaces cambiaron')} mientras confirmabas y no se tocó; vuelve a ejecutar el comando.`,
+      );
+    if (result.skipped.length)
+      lines.push(`No se repararon ${result.skipped.join(', ')}: la copia en uso no las incluye.`);
     if (result.mcpCommands.length) {
-      lines.push('El MCP de revisión cruzada también apunta ahí. Para moverlo ejecuta:', ...result.mcpCommands.map(command => `  ${command}`));
+      lines.push(
+        'El MCP de revisión cruzada también apunta ahí. Para moverlo ejecuta:',
+        ...result.mcpCommands.map((command) => `  ${command}`),
+      );
     }
     if (result.repaired) lines.push('Reinicia tus agentes para que carguen las skills.');
     await out(lines.join('\n') + '\n');
@@ -281,38 +352,51 @@ async function runRepair(rest, { out, err, input, output, isTTY, options }) {
 // Options tests and callers pass (homeDirectory, toolkitRoot, codexHome, environment, runCommand, runNpm, ...).
 function setupStateOptions(projectRoot, options) {
   const { runNpm, packageSpec, acquire, ...rest } = options;
-  return { stateOptions: { ...rest, start: projectRoot }, applyOptions: { ...(runNpm && { runNpm }), ...(packageSpec && { packageSpec }), ...(acquire && { acquire }) } };
+  return {
+    stateOptions: { ...rest, start: projectRoot },
+    applyOptions: {
+      ...(runNpm && { runNpm }),
+      ...(packageSpec && { packageSpec }),
+      ...(acquire && { acquire }),
+    },
+  };
 }
 
 async function runSetup(parsed, { out, err, input, output, isTTY, options }) {
   const { stateOptions, applyOptions } = setupStateOptions(parsed.projectRoot, options);
   const interactive = Boolean(isTTY ?? (input?.isTTY && output?.isTTY));
   try {
-    if (interactive && !parsed.yes) return await runSetupTui({ input, output, options: stateOptions, applyOptions });
+    if (interactive && !parsed.yes)
+      return await runSetupTui({ input, output, options: stateOptions, applyOptions });
     const state = await gatherSetupState(stateOptions);
     const answers = suggestedAnswers(state);
     const confirmation = buildConfirmation(state, answers);
     const title = `nexakit · ${state.project.displayName}${state.project.fromSubfolder ? ' (repositorio completo)' : ''}`;
     if (confirmation.allReady) {
-      await out(`${title}\nTodo está listo.\n${confirmation.lines.map(line => `  ${line.mark} ${line.text}`).join('\n')}\n`);
+      await out(
+        `${title}\nTodo está listo.\n${confirmation.lines.map((line) => `  ${line.mark} ${line.text}`).join('\n')}\n`,
+      );
       return 0;
     }
     if (!parsed.yes) {
-      await out(`${title}\nCon las respuestas sugeridas prepararía:\n${confirmation.lines.map(line => `  ${line.mark} ${line.text}`).join('\n')}\n\n` +
-        'No hay una terminal interactiva para preguntarte.\nPara aplicarlo sin preguntas: npx nexakit --si\n');
+      await out(
+        `${title}\nCon las respuestas sugeridas prepararía:\n${confirmation.lines.map((line) => `  ${line.mark} ${line.text}`).join('\n')}\n\n` +
+          'No hay una terminal interactiva para preguntarte.\nPara aplicarlo sin preguntas: npx nexakit --si\n',
+      );
       return 2;
     }
     await out(`${title}\n`);
-    const labels = Object.fromEntries(confirmation.blocks.map(block => [block.id, block.label]));
+    const labels = Object.fromEntries(confirmation.blocks.map((block) => [block.id, block.label]));
     const result = await applySetup(stateOptions, answers, {
       ...applyOptions,
       onProgress: async (id, phase, message) => {
         // The final check prints its own line with the result, below.
         if (phase === 'done' && id !== 'final-check') await out(`  ◇ ${labels[id] ?? id}\n`);
         if (phase === 'failed') await err(`  ✗ ${labels[id] ?? id}: ${message}\n`);
-      }
+      },
     });
-    if (result.finalCheck) await out(`  ${result.finalCheck.ok ? '◇' : '!'} Comprobación final: ${result.finalCheck.message}\n`);
+    if (result.finalCheck)
+      await out(`  ${result.finalCheck.ok ? '◇' : '!'} Comprobación final: ${result.finalCheck.message}\n`);
     if (result.ok) await out('Listo. Cierra y abre tu IA para que cargue las skills y la memoria.\n');
     return result.ok ? 0 : 1;
   } catch (error) {

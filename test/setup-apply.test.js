@@ -35,7 +35,7 @@ test('applies the blocks in the fixed order, reports progress, and a second run 
   const result = await applySetup(w.options, answers, { onProgress: (id, phase) => progress.push(`${id}:${phase}`) });
   assert.equal(result.ok, true, JSON.stringify(result.failed));
   assert.deepEqual(result.done, ['answers', 'stable-command', 'project-skills', 'global-skills:claude', 'global-skills:codex', 'global-skills:antigravity',
-    'memory-init', 'memory-connect:claude', 'memory-connect:codex', 'memory-connect:antigravity', 'final-check']);
+    'memory-init', 'memory-connect:claude', 'memory-connect:codex', 'memory-connect:antigravity', 'review-instructions', 'final-check']);
   assert.deepEqual(progress.slice(0, 2), ['answers:start', 'answers:done']);
   assert.equal(result.finalCheck.ok, true, result.finalCheck.message);
 
@@ -78,7 +78,7 @@ test('stops at the first failing block, keeps what was applied and the answers, 
   const state = await gatherSetupState(options);
   const retry = suggestedAnswers(state);
   assert.deepEqual(retry.skills.discarded, ['frontend-design']);
-  assert.deepEqual(buildConfirmation(state, retry).blocks.map(block => block.id), ['memory-connect:antigravity', 'final-check']);
+  assert.deepEqual(buildConfirmation(state, retry).blocks.map(block => block.id), ['memory-connect:antigravity', 'review-instructions', 'final-check']);
   const second = await applySetup(options, retry);
   assert.equal(second.ok, true, JSON.stringify(second.failed ?? second.finalCheck));
   assert.equal(await exists(path.join(w.repo, '.claude/skills/frontend-design')), false, 'the unchecked skill is not reinstalled');

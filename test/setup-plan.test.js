@@ -173,3 +173,14 @@ test('home paths are shortened with either separator', async () => {
   assert.equal(shortPath('C:\\Users\\juan\\x', 'C:\\Users\\juan'), '~\\x');
   assert.equal(shortPath('/home/juanito/x', '/home/juan'), '/home/juanito/x');
 });
+
+test('confirmation explicitly announces global work rules for the selected IAs', () => {
+  const state = puntoMotos({ reviewInstructions: { items: [
+    {client:'claude',name:'CLAUDE.md',state:'pending'},
+    {client:'codex',name:'AGENTS.md',state:'pending'},
+    {client:'antigravity',name:'GEMINI.md',state:'pending'}
+  ] } });
+  const confirmation = buildConfirmation(state, suggestedAnswers(state));
+  assert.ok(marks(confirmation).includes('+ Reglas de trabajo en tus instrucciones de Claude Code y Codex'));
+  assert.ok(blockIds(confirmation).includes('review-instructions'));
+});
