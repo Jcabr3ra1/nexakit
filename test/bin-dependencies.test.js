@@ -18,21 +18,43 @@ async function bareCopy(t) {
 }
 const run = (root, bin, ...args) => spawnSync(process.execPath, [path.join(root, 'bin', bin), ...args], { encoding: 'utf8', cwd: root, env: { ...process.env, NODE_PATH: '' } });
 
-test('both user commands explain how to install the dependencies of a checkout that lacks them', async t => {
+test('all checkout executables that import external packages explain how to install missing dependencies', async t => {
   const root = await bareCopy(t);
-  for (const bin of ['nexakit.js', 'agent-toolkit.js']) {
-    const result = run(root, bin, '--help');
-    assert.equal(result.status, 1, bin);
-    assert.equal(result.stderr, `Faltan las dependencias de esta copia. Ejecuta \`npm ci\` en ${root}.\n`, bin);
-    assert.equal(result.stdout, '', bin);
+  const invocations = [
+    ['nexakit.js', '--help'],
+    ['nexakit.js', 'setup'],
+    ['nexakit.js', 'comprobar'],
+    ['agent-toolkit.js', '--help'],
+    ['project-memory.js', '--help'],
+    ['project-memory-mcp.js', '--manifest', path.join(root, 'project-memory.json')],
+    ['agent-toolkit-mcp.js'],
+    ['agent-task.js', '--help']
+  ];
+  for (const [bin, ...args] of invocations) {
+    const label = `${bin} ${args.join(' ')}`;
+    const result = run(root, bin, ...args);
+    assert.equal(result.status, 1, label);
+    assert.equal(result.stderr, `Faltan las dependencias de esta copia. Ejecuta \`npm ci\` en ${root}.\n`, label);
+    assert.equal(result.stdout, '', label);
   }
 });
 
-test('with its dependencies installed the commands still work', () => {
+test('with its dependencies installed the commands still work and every bin entry uses loadWithDependencyCheck', async () => {
   for (const bin of ['nexakit.js', 'agent-toolkit.js']) {
     const result = run(ROOT, bin, '--help');
     assert.equal(result.status, 0, bin);
     assert.match(result.stdout, /^Uso: npx nexakit/u, bin);
+  }
+  assert.equal(run(ROOT, 'project-memory.js', '--help').status, 0);
+  assert.equal(run(ROOT, 'project-memory-mcp.js', '--help').status, 0);
+  assert.equal(run(ROOT, 'agent-task.js', '--help').status, 0);
+  assert.equal(run(ROOT, 'agent-toolkit-inbox.js', '--help').status, 2);
+  assert.equal(run(ROOT, 'agent-toolkit-gemini.js', '--help').status, 0);
+
+  for (const file of await fs.readdir(path.join(ROOT, 'bin'))) {
+    if (!file.endsWith('.js')) continue;
+    const content = await fs.readFile(path.join(ROOT, 'bin', file), 'utf8');
+    assert.match(content, /loadWithDependencyCheck/u, file);
   }
 });
 
