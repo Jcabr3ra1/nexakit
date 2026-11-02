@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const SOURCE_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
 const TEMPLATE_ROOT = path.resolve(SOURCE_DIRECTORY, "../templates/project-memory");
 const PROJECT_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+const KNOWN_AGENTS = ["codex", "claude", "antigravity"];
 const BRANCH_PATTERN = /^(?!.*(?:\.\.|\/\/|@\{|\\))[A-Za-z0-9][A-Za-z0-9._/-]*[A-Za-z0-9]$|^[A-Za-z0-9]$/;
 const SYNC_MODES = new Set(["none", "git-manual", "git-automated"]);
 
@@ -73,6 +74,7 @@ function normalizeOptions(options, context) {
     memoryBranch: "main",
     mcpName: options.mcpName?.trim() || `${options.projectId?.trim()}-memory`,
     syncMode,
+    agents: options.agents ?? ["codex", "claude"],
     date: formatDate(now),
     templateRoot: path.resolve(context.templateRoot ?? TEMPLATE_ROOT)
   };
@@ -87,6 +89,12 @@ function validateConfig(config) {
     config.projectId?.length > 64
   ) {
     errors.push("--project-id debe usar minúsculas, números y guiones.");
+  }
+
+  if (!Array.isArray(config.agents) || config.agents.length === 0 ||
+    config.agents.some((agent) => !KNOWN_AGENTS.includes(agent)) ||
+    new Set(config.agents).size !== config.agents.length) {
+    errors.push("Los agentes deben ser codex, claude o antigravity, sin repetir.");
   }
 
   if (!config.projectName || config.projectName.length > 100) {
@@ -261,7 +269,7 @@ function createManifest(config) {
     },
     source,
     memory,
-    agents: ["codex", "claude"].map((id) => ({
+    agents: config.agents.map((id) => ({
       id,
       enabled: true,
       skillName: config.projectId

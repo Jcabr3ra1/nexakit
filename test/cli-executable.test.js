@@ -77,3 +77,18 @@ else console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: 
     await runner.cleanup(preview);
   }
 });
+
+test("agy (Antigravity) is resolved as a native executable on the PATH, never as an npm shim", async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agy path-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const windows = process.platform === "win32";
+  const native = path.join(directory, windows ? "agy.exe" : "agy");
+  await fs.writeFile(native, "", { mode: 0o755 });
+  assert.deepEqual(await resolveCliInvocation({ name: "agy", environment: { PATH: directory } }), { executable: await fs.realpath(native), argsPrefix: [] });
+  if (windows) {
+    await fs.rm(native);
+    await fs.writeFile(path.join(directory, "agy.cmd"), "@echo NUNCA\r\n");
+    await assert.rejects(resolveCliInvocation({ name: "agy", environment: { PATH: directory } }));
+  }
+  await assert.rejects(resolveCliInvocation({ name: "otra", environment: { PATH: directory } }));
+});

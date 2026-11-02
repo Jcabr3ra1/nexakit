@@ -42,14 +42,20 @@ const ADAPTERS = Object.freeze({
   },
   claude: {
     skillDirectory: ".claude/skills"
+  },
+  antigravity: {
+    skillDirectory: ".gemini/antigravity-cli/skills"
   }
 });
+// The command each agent is driven with.
+const AGENT_COMMANDS = Object.freeze({ codex: "codex", claude: "claude", antigravity: "agy" });
+const MEMORY_SCRIPT = path.join("bin", "project-memory-mcp.js");
 
 export async function connectMemory(options, context = {}) {
   const config = loadConfig(options, context);
-  const runner = context.runCommand ?? (IS_WINDOWS ? await windowsCommandRunner(config.agentId) : runCommand);
+  const runner = context.runCommand ?? (IS_WINDOWS ? await windowsCommandRunner(AGENT_COMMANDS[config.agentId]) : runCommand);
   const skill = inspectSkill(config);
-  const connection = inspectConnection(config, runner);
+  const connection = inspectConnection(config, runner, context);
   const components = [skill, ...connection.components];
   const report = createReport(config, components, options.apply === true);
 
@@ -94,7 +100,7 @@ function loadConfig(options, context) {
     errors.push("No se encontró project-memory.json.");
   }
   if (!ADAPTERS[agentId]) {
-    errors.push("--agent debe ser codex o claude.");
+    errors.push("--agent debe ser codex, claude o antigravity.");
   }
   if (errors.length > 0) {
     throw new ConnectionError(errors);
@@ -221,9 +227,12 @@ function inspectSkill(config) {
   };
 }
 
-function inspectConnection(config, runner) {
+function inspectConnection(config, runner, context) {
   if (config.agentId === "codex") {
     return inspectCodex(config, runner);
+  }
+  if (config.agentId === "antigravity") {
+    return inspectAntigravity(config, runner, context);
   }
   return inspectClaude(config, runner);
 }
@@ -359,6 +368,49 @@ function inspectClaude(config, runner) {
           runner("claude", ["mcp", "remove", config.mcpName, "--scope", "user"]);
         }
         throw error;
+      }
+    }
+  };
+}
+
+// Antigravity cannot restrict the tools of an MCP server, so it gets nexakit's own memory server, which only has
+// read tools, run from the active nexakit root. Its configuration is read from mcp_config.json, which keeps the
+// exact arguments (the text of `agy mcp list` does not separate paths with spaces).
+function inspectAntigravity(config, runner, context) {
+  const probe = runner("agy", ["mcp", "list"]);
+  if (probe.errorCode === "ENOENT") {
+    const unavailable = unavailableCommand("agy");
+    unavailable.components = unavailable.components.filter((item) => item.id === "mcp");
+    return unavailable;
+  }
+  const nodePath = context.nodePath ?? process.execPath;
+  const script = path.join(path.resolve(context.toolkitRoot ?? path.resolve(SOURCE_DIRECTORY, "..")), MEMORY_SCRIPT);
+  const manifestPath = fs.realpathSync(config.manifestPath);
+  const configPath = path.join(config.homeDirectory, ".gemini", "config", "mcp_config.json");
+  let current;
+  if (pathEntryExists(configPath)) {
+    if (fs.lstatSync(configPath).isSymbolicLink()) {
+      return { components: [component("mcp", "conflict", "La configuración de Antigravity es un enlace simbólico y no se reemplazará.")], apply() {} };
+    }
+    current = readJson(configPath, "configuración de Antigravity").mcpServers?.[config.mcpName];
+  }
+  const same = current && Array.isArray(current.args) && current.args.length === 3 &&
+    samePath(current.args[0], script) && current.args[1] === "--manifest" && samePath(current.args[2], manifestPath) &&
+    typeof current.command === "string" && /^node(\.exe)?$/iu.test(path.basename(current.command));
+  const mcp = !current
+    ? component("mcp", "create", "Registrar la memoria de solo lectura en Antigravity.")
+    : same
+      ? component("mcp", "unchanged", "Antigravity ya usa esta memoria.")
+      : component("mcp", "conflict", "Antigravity tiene un MCP homónimo diferente.");
+  mcp.path = configPath;
+  return {
+    components: [mcp],
+    apply() {
+      if (mcp.action === "create") {
+        requireSuccess(
+          runner("agy", ["mcp", "add", config.mcpName, "--", nodePath, script, "--manifest", manifestPath]),
+          "No se pudo registrar el MCP en Antigravity."
+        );
       }
     }
   };

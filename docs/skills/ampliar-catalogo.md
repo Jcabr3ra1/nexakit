@@ -122,7 +122,7 @@ El validador exige que la evidencia de un escenario `passed` sea un archivo regu
 ```bash
 npm run catalog:validate
 npm run catalog:validate -- --json
-node --test test/skill-catalog.test.js test/skill-catalog-audit.test.js test/skill-recommendations.test.js test/toolkit-tui.test.js
+node --test test/skill-catalog.test.js test/skill-catalog-audit.test.js test/skill-recommendations.test.js test/setup-tui.test.js
 node bin/nexakit.js recommend --project /ruta/al/proyecto --client claude
 ```
 

@@ -766,3 +766,98 @@ test('detach run from a subfolder plans the removal at the repository root', asy
   assert.equal(code, 0);
   assert.equal(JSON.parse(json).projectRoot, repo);
 });
+
+const ANSWERS = { version: 1, skills: { chosen: ['frontend-design'], discarded: ['webapp-testing'] }, agents: ['claude', 'codex'], memory: { decision: 'later' } };
+async function withLock(home, fn) {
+  const { acquireLock } = await import('../src/install-lock.js');
+  const lock = await acquireLock(path.join(home, '.nexakit'));
+  try { return await fn(lock); } finally { await lock.release(); }
+}
+
+test('setup answers round-trip and survive a later skill install', async t => {
+  const { readSetupAnswers, writeSetupAnswers, applyProjectSkillInstall } = await import('../src/skill-recommendations.js');
+  const s = await projectSetup(t);
+  assert.equal(await readSetupAnswers(s.project), null);
+  await withLock(s.home, lock => writeSetupAnswers(s.project, ANSWERS, lock));
+  assert.deepEqual(await readSetupAnswers(s.project), ANSWERS);
+  assert.match(await fs.readFile(path.join(s.project, '.gitignore'), 'utf8'), /^\.agent-toolkit\/$/mu, 'the state folder is ignored in Git');
+
+  await applyProjectSkillInstall(await plan(s, { linkRoot: TOOLKIT_ROOT }));
+  assert.deepEqual(await readSetupAnswers(s.project), ANSWERS, 'installing skills keeps the answers');
+  const manifest = JSON.parse(await fs.readFile(path.join(s.project, '.agent-toolkit/manifest.json'), 'utf8'));
+  assert.equal(manifest.entries.length, 4);
+
+  await withLock(s.home, lock => writeSetupAnswers(s.project, { ...ANSWERS, agents: ['claude'] }, lock));
+  const after = JSON.parse(await fs.readFile(path.join(s.project, '.agent-toolkit/manifest.json'), 'utf8'));
+  assert.equal(after.entries.length, 4, 'writing answers keeps the entries');
+  assert.deepEqual(after.answers.agents, ['claude']);
+});
+
+test('an old manifest without answers, or with a malformed one, reads as null', async t => {
+  const { readSetupAnswers } = await import('../src/skill-recommendations.js');
+  const s = await projectSetup(t);
+  await fs.mkdir(path.join(s.project, '.agent-toolkit'));
+  const file = path.join(s.project, '.agent-toolkit/manifest.json');
+  await fs.writeFile(file, JSON.stringify({ manifestVersion: 1, managedBy: 'nexakit', mode: 'symlink', entries: [] }));
+  assert.equal(await readSetupAnswers(s.project), null);
+  await fs.writeFile(file, JSON.stringify({ manifestVersion: 1, managedBy: 'nexakit', mode: 'symlink', entries: [], answers: { version: 1, skills: 'all' } }));
+  assert.equal(await readSetupAnswers(s.project), null);
+});
+
+test('writing answers stops if the lock is lost', async t => {
+  const { writeSetupAnswers } = await import('../src/skill-recommendations.js');
+  const s = await projectSetup(t);
+  const lost = { assertHeld: async () => { throw Object.assign(new Error('perdido'), { code: 'perdido' }); } };
+  await assert.rejects(writeSetupAnswers(s.project, ANSWERS, lost), /perdido/u);
+  assert.deepEqual(await fs.readdir(s.project), []);
+});
+
+test('detach with skillNames removes only those nexakit links and keeps a user folder with the same name', async t => {
+  const { applyProjectSkillInstall, planToolkitDetach, applyToolkitDetach, readSetupAnswers, writeSetupAnswers } = await import('../src/skill-recommendations.js');
+  const s = await projectSetup(t);
+  await applyProjectSkillInstall(await plan(s, { linkRoot: TOOLKIT_ROOT }));
+  await withLock(s.home, lock => writeSetupAnswers(s.project, ANSWERS, lock));
+  // A user folder under the name of a skill nexakit never installed here.
+  await fs.mkdir(path.join(s.project, '.claude/skills/webapp-testing'), { recursive: true });
+  await fs.writeFile(path.join(s.project, '.claude/skills/webapp-testing/SKILL.md'), 'mía');
+
+  const detach = await planToolkitDetach({ projectRoot: s.project, skillNames: ['frontend-design', 'webapp-testing'], catalog: s.catalog, toolkitRoot: TOOLKIT_ROOT, homeDirectory: s.home });
+  assert.deepEqual(detach.items.map(i => `${i.client}:${i.name}:${i.action}`).sort(), ['claude:frontend-design:remove-link', 'codex:frontend-design:remove-link']);
+  await applyToolkitDetach(detach);
+  assert.equal(await exists(path.join(s.project, '.claude/skills/frontend-design')), false);
+  assert.equal(await exists(path.join(s.project, '.claude/skills/vercel-react-best-practices')), true);
+  assert.equal(await fs.readFile(path.join(s.project, '.claude/skills/webapp-testing/SKILL.md'), 'utf8'), 'mía');
+  assert.deepEqual(await readSetupAnswers(s.project), ANSWERS, 'the answers stay while skills remain');
+  assert.match(await fs.readFile(path.join(s.project, '.gitignore'), 'utf8'), /vercel-react-best-practices/u);
+  assert.doesNotMatch(await fs.readFile(path.join(s.project, '.gitignore'), 'utf8'), /frontend-design/u);
+});
+
+test('detach with skillNames also filters links found without a manifest', async t => {
+  const { applyProjectSkillInstall, planToolkitDetach } = await import('../src/skill-recommendations.js');
+  const s = await projectSetup(t);
+  await applyProjectSkillInstall(await plan(s, { linkRoot: TOOLKIT_ROOT }));
+  await fs.rm(path.join(s.project, '.agent-toolkit'), { recursive: true });
+  const detach = await planToolkitDetach({ projectRoot: s.project, skillNames: ['frontend-design'], catalog: s.catalog, toolkitRoot: TOOLKIT_ROOT, homeDirectory: s.home });
+  assert.deepEqual([...new Set(detach.items.map(i => i.name))], ['frontend-design']);
+});
+
+test('answers are never written through a manifest that is a link', async t => {
+  const { writeSetupAnswers } = await import('../src/skill-recommendations.js');
+  const s = await projectSetup(t);
+  const mine = path.join(s.base, 'mio.json');
+  await fs.writeFile(mine, 'mío');
+  await fs.mkdir(path.join(s.project, '.agent-toolkit'));
+  await fs.symlink(mine, path.join(s.project, '.agent-toolkit/manifest.json'));
+  await assert.rejects(withLock(s.home, lock => writeSetupAnswers(s.project, ANSWERS, lock)), /no se guardaron/u);
+  assert.equal(await fs.readFile(mine, 'utf8'), 'mío');
+});
+
+test('a temporary file that is not ours is never removed', async t => {
+  const { writeSetupAnswers } = await import('../src/skill-recommendations.js');
+  const s = await projectSetup(t);
+  await fs.mkdir(path.join(s.project, '.agent-toolkit'));
+  const stray = path.join(s.project, '.agent-toolkit', `manifest.json.${process.pid}.tmp`);
+  await fs.writeFile(stray, 'ajeno');
+  await assert.rejects(withLock(s.home, lock => writeSetupAnswers(s.project, ANSWERS, lock)), { code: 'EEXIST' });
+  assert.equal(await fs.readFile(stray, 'utf8'), 'ajeno');
+});

@@ -198,7 +198,7 @@ test("connect rechaza agentes distintos de Codex y Claude", async (context) => {
       { targetPath: fixture.memory, agentId: "gemini" },
       { homeDirectory: fixture.home }
     ),
-    (error) => error.details.includes("--agent debe ser codex o claude.")
+    (error) => error.details.includes("--agent debe ser codex, claude o antigravity.")
   );
 });
 

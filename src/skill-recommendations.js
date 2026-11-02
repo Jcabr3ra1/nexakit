@@ -847,7 +847,8 @@ async function writeProjectManifestAndIgnore({
   gitIgnore,
   prevManifest,
   coupledEntriesMap,
-  lock
+  lock,
+  answers = prevManifest?.answers
 }) {
   const stateDir = path.join(projectRoot, PROJECT_TOOLKIT_DIR);
   const stateStat = await lstatOrNull(stateDir);
@@ -914,14 +915,23 @@ async function writeProjectManifestAndIgnore({
     mode,
     gitIgnoreStrategy: gitIgnore,
     createdIgnoreFile,
-    entries
+    entries,
+    ...(answers && { answers })
   };
-  await lock?.assertHeld();
-  await fs.writeFile(
-    path.join(stateDir, PROJECT_MANIFEST_FILE),
-    JSON.stringify(manifestPayload, null, 2) + '\n',
-    { mode: 0o644 }
-  );
+  // A manifest that is a link or not a regular file is not nexakit's: it is never written through.
+  const manifestPath = path.join(stateDir, PROJECT_MANIFEST_FILE);
+  const manifestStat = await lstatOrNull(manifestPath);
+  if (manifestStat && (!manifestStat.isFile() || manifestStat.isSymbolicLink())) {
+    return { manifestWritten: false, gitIgnoreUpdated };
+  }
+  const temporary = `${manifestPath}.${process.pid}.tmp`;
+  await fs.writeFile(temporary, JSON.stringify(manifestPayload, null, 2) + '\n', { mode: 0o644, flag: 'wx' });
+  try {
+    await lock?.assertHeld();
+    await fs.rename(temporary, manifestPath);
+  } finally {
+    await fs.rm(temporary, { force: true }); // ours: created exclusively above
+  }
   return { manifestWritten: true, gitIgnoreUpdated };
 }
 
@@ -1128,6 +1138,38 @@ export async function applyProjectSkillLinks(plan) {
   return applyProjectSkillInstall({ ...plan, mode: 'symlink' });
 }
 
+// The answers given to `npx nexakit` (skills chosen and discarded, agents, memory), kept in the project manifest
+// so a second run knows what was decided and does not ask again.
+const isNameList = value => Array.isArray(value) && value.every(item => typeof item === 'string' && SKILL_NAME_RE.test(item));
+function validSetupAnswers(answers) {
+  return Boolean(answers && answers.version === 1 &&
+    isNameList(answers.skills?.chosen) && isNameList(answers.skills?.discarded) &&
+    Array.isArray(answers.agents) && answers.agents.every(agent => ['claude', 'codex', 'antigravity'].includes(agent)) &&
+    (answers.memory?.decision === 'later' ||
+      (answers.memory?.decision === 'path' && typeof answers.memory.path === 'string' && path.isAbsolute(answers.memory.path))));
+}
+
+export async function readSetupAnswers(projectRoot) {
+  const manifest = await readProjectToolkitManifest(projectRoot);
+  return validSetupAnswers(manifest?.answers) ? manifest.answers : null;
+}
+
+export async function writeSetupAnswers(projectRoot, answers, lock) {
+  if (!validSetupAnswers(answers)) throw new Error('Respuestas de nexakit no válidas.');
+  await lock.assertHeld();
+  const prevManifest = await readProjectToolkitManifest(projectRoot);
+  const result = await writeProjectManifestAndIgnore({
+    projectRoot,
+    mode: prevManifest?.mode ?? 'symlink',
+    gitIgnore: prevManifest?.gitIgnoreStrategy ?? 'gitignore',
+    prevManifest,
+    coupledEntriesMap: new Map((prevManifest?.entries ?? []).map(entry => [entry.relativePath, entry])),
+    lock,
+    answers
+  });
+  if (!result.manifestWritten) throw new Error(`${PROJECT_TOOLKIT_DIR} no es una carpeta normal; no se guardaron las respuestas.`);
+}
+
 export async function planToolkitDetach({
   projectRoot,
   includeGlobal = false,
@@ -1135,7 +1177,8 @@ export async function planToolkitDetach({
   catalog,
   toolkitRoot = TOOLKIT_ROOT,
   homeDirectory = os.homedir(),
-  codexHome
+  codexHome,
+  skillNames
 } = {}) {
   if (!['codex', 'claude', 'antigravity', 'all'].includes(agent)) {
     throw new Error('El agente debe ser codex, claude, antigravity o all.');
@@ -1167,8 +1210,10 @@ export async function planToolkitDetach({
 
     let candidateEntries = [];
     if (manifest) {
-      candidateEntries = manifest.entries.filter(e => projectClients.includes(e.client));
-      remainingManifestEntries = manifest.entries.filter(e => !projectClients.includes(e.client));
+      // With skillNames only those skills go; the rest of the entries stay in the manifest.
+      const removing = e => projectClients.includes(e.client) && (!skillNames || skillNames.includes(e.name));
+      candidateEntries = manifest.entries.filter(removing);
+      remainingManifestEntries = manifest.entries.filter(e => !removing(e));
     } else {
       const extLinks = await findFallbackExternalToolkitLinks(root, resolvedToolkit, projectClients, homeDirectory);
       const seenKeys = new Set(extLinks.map(e => `${e.client}:${e.name}`));
@@ -1189,6 +1234,7 @@ export async function planToolkitDetach({
       }
     }
 
+    if (skillNames) candidateEntries = candidateEntries.filter(entry => skillNames.includes(entry.name));
     for (const entry of candidateEntries) {
       if (!SKILL_NAME_RE.test(entry.name)) continue;
       const target = path.join(root, entry.client === 'codex' ? '.agents' : '.claude', 'skills', entry.name);
