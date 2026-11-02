@@ -87,9 +87,16 @@ Evita editar o sincronizar la memoria durante --apply: su bloqueo no controla
 editores externos. Ni record ni apply crean commits o hacen push. apply puede
 quedar parcial entre notas: no revierte ni registra automáticamente el PR.`;
 
+// Invoked as `npx nexakit memoria`, the help names that command and keeps project-memory as the compatible executable.
+const DEFAULT_COMMAND = "project-memory";
+function helpFor(commandName = DEFAULT_COMMAND) {
+  if (commandName === DEFAULT_COMMAND) return HELP;
+  return `${HELP.replaceAll(DEFAULT_COMMAND, commandName)}\n\nEl ejecutable ${DEFAULT_COMMAND} es compatible y acepta los mismos subcomandos.`;
+}
+
 export async function runCli(argv, io = defaultIo(), context = {}) {
   if (argv.length === 0 || argv.includes("--help") || argv.includes("-h")) {
-    io.out(HELP);
+    io.out(helpFor(context.commandName));
     return 0;
   }
 
@@ -115,7 +122,7 @@ export async function runCli(argv, io = defaultIo(), context = {}) {
   }
 
   io.err(`Comando desconocido: ${command}`);
-  io.err(HELP);
+  io.err(helpFor(context.commandName));
   return 2;
 }
 

@@ -97,7 +97,7 @@ export async function runToolkitCli(
         out: (message) => out(`${message}\n`),
         err: (message) => err(`${message}\n`),
       },
-      options,
+      { ...options, commandName: 'npx nexakit memoria' },
     );
   }
 

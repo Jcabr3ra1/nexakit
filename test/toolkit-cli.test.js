@@ -242,6 +242,27 @@ test('memoria forwards subcommands and arguments untouched to project-memory', a
   assert.equal(JSON.parse(status.io.out).project.id, 'punto-motos');
 });
 
+test('memoria help and errors name npx nexakit memoria and keep project-memory as the compatible executable', async t => {
+  const w = await world(t);
+  const { runToolkitCli } = await import('../src/toolkit-cli.js');
+
+  for (const argv of [['memoria'], ['memoria', '--help'], ['memoria', '-h']]) {
+    const help = capture();
+    assert.equal(await runToolkitCli(argv, { ...help, options: w.options }), 0, argv.join(' '));
+    assert.match(help.io.out, /^npx nexakit memoria\n/u, argv.join(' '));
+    assert.match(help.io.out, /^ {2}npx nexakit memoria init <destino>/mu, argv.join(' '));
+    assert.match(help.io.out, /^ {2}npx nexakit memoria sync apply /mu, argv.join(' '));
+    assert.doesNotMatch(help.io.out, /^ {2}project-memory /mu, argv.join(' '));
+    assert.match(help.io.out, /project-memory.*compatible/iu, argv.join(' '));
+  }
+
+  const unknown = capture();
+  assert.equal(await runToolkitCli(['memoria', 'inventado'], { ...unknown, options: w.options }), 2);
+  assert.match(unknown.io.err, /Comando desconocido: inventado/u);
+  assert.match(unknown.io.err, /^ {2}npx nexakit memoria init <destino>/mu);
+  assert.doesNotMatch(unknown.io.err, /^ {2}project-memory /mu);
+});
+
 test('--help lists all Spanish subcommands and guide includes Antigravity and new commands', async () => {
   const { runToolkitCli } = await import('../src/toolkit-cli.js');
   const { getToolkitCommandsGuide } = await import('../src/toolkit-commands-guide.js');

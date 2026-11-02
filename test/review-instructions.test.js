@@ -209,7 +209,8 @@ test('project-handoff and cerrar-memoria skills define vault tracking note, sing
   assert.match(handoffSkill, /cambia de proyecto/iu);
   assert.match(handoffSkill, /resumió su contexto o avisa de que va a hacerlo/iu);
   assert.match(handoffSkill, /Retoma <tarea>; el contexto está en <nota de seguimiento>/u);
-  assert.match(handoffSkill, /sin cerrarla.*por su cuenta|nunca.*cierra.*la sesión.*por su cuenta/iu);
+  assert.match(handoffSkill, /nunca la cierres por tu cuenta/iu);
+  assert.equal(handoffSkill.match(/por (?:tu|su) cuenta/giu).length, 1, 'la regla de no cerrar la sesión se dice una sola vez');
   assert.match(handoffSkill, /entre pasos de una misma tarea/iu);
 
   // Connection with cerrar-memoria

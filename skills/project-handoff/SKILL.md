@@ -33,7 +33,7 @@ La nota de seguimiento incluye únicamente estas cinco secciones comprobables:
 
 ## 4. Cuándo recomendar una sesión nueva
 
-Recomienda al usuario cerrar la sesión actual y abrir otra —**nunca la cierres por tu cuenta**, sin cerrarla nunca por su cuenta— en estos cuatro casos:
+Recomienda al usuario cerrar la sesión actual y abrir otra —**nunca la cierres por tu cuenta**— en estos cuatro casos:
 
 1. **Empieza una fase o una tarea grande nueva** tras terminar o dejar lista la anterior.
 2. **Se instalaron o actualizaron skills o instrucciones globales** (por ejemplo, tras ejecutar `npx nexakit`), porque cada IA solo las lee al abrir la sesión.
