@@ -90,3 +90,31 @@ test('global instructions respect CODEX_HOME and never alter project files', asy
   );
   assert.equal(execFileSync('git', ['-C', projectRoot, 'diff'], { encoding: 'utf8' }), '');
 });
+
+test('global detach resolves the injected CODEX_HOME and preserves the rest of that file', async (t) => {
+  const { planToolkitDetach, applyToolkitDetach } = await import('../src/skill-recommendations.js');
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'review-global-detach-')));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const homeDirectory = path.join(root, 'home'),
+    projectRoot = path.join(root, 'repo');
+  const environment = { CODEX_HOME: path.join(root, 'custom-codex') };
+  await fs.mkdir(homeDirectory);
+  await fs.mkdir(projectRoot);
+  await fs.mkdir(environment.CODEX_HOME);
+  const target = path.join(environment.CODEX_HOME, 'AGENTS.md');
+  await fs.writeFile(target, 'USER CODEX RULES\n');
+  await applyReviewInstructions(
+    await planReviewInstructions({ homeDirectory, environment, agents: ['codex'] }),
+    { assertHeld: async () => {} },
+  );
+  const plan = await planToolkitDetach({
+    projectRoot,
+    homeDirectory,
+    environment,
+    includeGlobal: true,
+    agent: 'codex',
+  });
+  assert.deepEqual(plan.reviewInstructions, ['AGENTS.md']);
+  await applyToolkitDetach(plan);
+  assert.equal(await fs.readFile(target, 'utf8'), 'USER CODEX RULES\n');
+});

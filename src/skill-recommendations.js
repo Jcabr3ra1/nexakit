@@ -1179,6 +1179,7 @@ export async function planToolkitDetach({
   toolkitRoot = TOOLKIT_ROOT,
   homeDirectory = os.homedir(),
   codexHome,
+  environment = {},
   skillNames
 } = {}) {
   if (!['codex', 'claude', 'antigravity', 'all'].includes(agent)) {
@@ -1322,7 +1323,7 @@ export async function planToolkitDetach({
   const manualCommands = [];
   if (includeGlobal) {
     const home = await fs.realpath(homeDirectory);
-    const resolvedCodexHome = codexHome ?? path.join(home, '.codex');
+    const resolvedCodexHome = codexHome ?? environment.CODEX_HOME ?? path.join(home, '.codex');
     const bundledSkillsDir = path.join(resolvedToolkit, 'skills');
     const bundledNames = (await fs.readdir(bundledSkillsDir, { withFileTypes: true }).catch(() => []))
       .filter(e => e.isDirectory() && SKILL_NAME_RE.test(e.name))
@@ -1382,12 +1383,12 @@ export async function planToolkitDetach({
     reviewInstructions: includeGlobal && !skillNames
       ? await ownedReviewInstructions({
           homeDirectory: homeReal,
-          codexHome: codexHome ?? path.join(homeReal, '.codex'),
+          codexHome: codexHome ?? environment.CODEX_HOME ?? path.join(homeReal, '.codex'),
           agents: clients
         })
       : [],
     homeDirectory: homeReal,
-    reviewCodexHome: codexHome ?? path.join(homeReal, ".codex"),
+    reviewCodexHome: codexHome ?? environment.CODEX_HOME ?? path.join(homeReal, ".codex"),
     reviewAgents: clients,
     applied: false,
     projectRoot: root,

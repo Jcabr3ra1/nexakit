@@ -161,6 +161,7 @@ export async function runToolkitCli(
       const plan = await planToolkitDetach({
         projectRoot: root,
         includeGlobal: parsed.global,
+        environment: options.environment ?? (options.homeDirectory ? {} : process.env),
         agent: parsed.agent,
         catalog,
         ...(options.toolkitRoot && { toolkitRoot: options.toolkitRoot }),
