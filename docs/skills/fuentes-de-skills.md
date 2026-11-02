@@ -14,6 +14,7 @@ adaptamos para Agent Toolkit. Se amplía conforme incorporemos nuevas fuentes.
 | web-design-guidelines | [Vercel: Web Design Guidelines](https://github.com/vercel-labs/agent-skills/tree/main/skills/web-design-guidelines) | Incorporada sin modificar y enlazada para Claude y Codex en este proyecto. | 2026-10-28 |
 | mcp-builder | [Anthropic](https://github.com/anthropics/skills/tree/b9e19e6f44773509fbdd7001d77ff41a49a486c1/skills/mcp-builder) | Incorporada con recursos originales y licencia Apache-2.0; enlazada para ambos clientes. | 2026-10-28 |
 | differential-review | [Trail of Bits](https://github.com/trailofbits/skills/tree/123037ec8aed26f0d86327cc39137ee5043e5deb/plugins/differential-review/skills/differential-review) | Incorporada con referencias originales y licencia CC BY-SA 4.0; enlazada para ambos clientes. | 2026-10-28 |
+| ui-ux-pro-max | [Next Level Builder (`713eef51b04efc98d6fa565323b495f7c9c89fd4`)](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill/tree/713eef51b04efc98d6fa565323b495f7c9c89fd4/.claude/skills/ui-ux-pro-max) | Referencia externa en `externalReferences` (MIT): se sugiere en proyectos de frontend y se instala como plugin de Claude. No se copia porque `google-fonts.csv` supera 512 KiB y sus órdenes dependen de `CLAUDE_PLUGIN_ROOT`. Escaneo sin bloqueos; no probada. | 2026-11-02 |
 
 ## MCP Builder y revisión de seguridad
 
