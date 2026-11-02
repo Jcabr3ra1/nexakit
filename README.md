@@ -1,67 +1,70 @@
 <div align="center">
 
-<img src="assets/brand/nexakit-readme-hero.png" alt="NexaKit: un comando para elegir skills y preparar tu proyecto con Claude Code y Codex" width="100%">
+<img src="assets/brand/nexakit-readme-hero.png" alt="NexaKit: un comando para preparar tus skills, tu memoria y tus agentes con Claude Code, Codex y Antigravity" width="100%">
 
 # NexaKit
 
-**Tus skills. Tus agentes. Un mismo flujo.**
+**Tus skills. Tu memoria. Tus IA trabajando juntas.**
 
-[Guía paso a paso](docs/guias/guia-de-comandos.html) · [Documentación](docs/README.md) · [Catálogo](catalogs/skills.json)
+[Guía interactiva en 3 pasos](docs/guias/guia-de-comandos.html) · [Documentación](docs/README.md) · [Catálogo](catalogs/skills.json)
 
 </div>
 
-Detecta las tecnologías de tu proyecto, encuentra skills compatibles y revisa cada cambio antes de instalar. Para **Claude Code y Codex**.
+Detecta las tecnologías de tu proyecto (en manifiestos, subcarpetas y `README.md`), sugiere skills compatibles, crea o conecta la memoria del proyecto en Obsidian y deja listas tus IA —**Claude Code, Codex y Antigravity CLI**— con una sola confirmación.
 
 ```bash
 npx nexakit
 ```
 
-## Cómo funciona
+## Inicio en tres pasos
 
-1. **Revisa las skills para tu proyecto.** Cada sugerencia explica por qué encaja y para qué puede servir.
-2. **Añade las opcionales.** Marca lo que necesitas; las recomendaciones con escenarios validados se seleccionan inicialmente cuando requieren instalación.
-3. **Confirma la instalación.** Revisa agentes, modo, reglas de Git y archivos previstos antes de aplicar los cambios.
-
-`↑` / `↓` para moverte, `Espacio` para marcar, `Enter` para continuar. En la revisión, `e` edita la configuración y `Esc` cancela sin modificar el proyecto.
-
-## Skills con contexto
-
-El catálogo incluido contiene **10 skills** con revisión de origen y hashes SHA-256. NexaKit muestra el motivo de cada sugerencia, su utilidad prevista y los solapamientos con otras skills.
-
-Una skill **compatible** coincide con tu tecnología o perfil. Una **recomendada** también necesita un escenario funcional pasado para cada agente destino. Los hashes comprueban integridad; las entradas actuales aún no tienen escenarios funcionales validados.
-
-Las skills se obtienen del catálogo local incluido en el paquete. Consulta las [fuentes y licencias](docs/skills/fuentes-de-skills.md) o aprende a [ampliar el catálogo](docs/skills/ampliar-catalogo.md).
+1. **Requisitos.** Instala **Node.js 24 o superior**, Git y al menos uno de los tres clientes de IA (**Claude Code**, **Codex** o **Antigravity CLI**).
+2. **Ejecuta `npx nexakit` en tu proyecto.** Responde tres preguntas breves (skills para el proyecto, memoria en Obsidian e IA donde dejarlo listo) y confirma una sola vez. Con `npx nexakit --si` aplica directamente las opciones sugeridas.
+3. **Reinicia tu agente y trabaja con normalidad.** No necesitas ningún comando especial para empezar a programar:
+   - **Revisión automática:** al terminar una tarea con cambios de código, la IA pide automáticamente una revisión en solo lectura a otra IA. La primera vez pregunta `«¿A dónde mando la revisión?»` marcando la recomendada; si dices `«sin revisión»`, la omite, y con `/revisar` (o `$revisar`) pides una revisión adicional cuando quieras.
+   - **Seguimiento automático y cierre:** si una tarea larga queda a medias, escribe o actualiza la nota de seguimiento en la bóveda con `project-handoff`, y al fusionar el cambio se cierra con `/cerrar-memoria` (o `$cerrar-memoria`).
 
 ## Comandos
 
 ```bash
-npx nexakit                              # Abrir el asistente
-npx nexakit recommend --project .        # Consultar sugerencias sin modificar archivos
-npx nexakit doctor --agent all           # Comprobar el entorno
-npx nexakit detach --project .           # Revisar qué se retiraría del proyecto
-npx nexakit detach --project . --apply   # Aplicar el desacoplado
+npx nexakit                                    # Preparar el proyecto (3 preguntas y una confirmación)
+npx nexakit --si                               # Aplicar directamente las sugerencias
+npx nexakit comprobar                          # Comprobar que todo esté bien conectado
+npx nexakit quitar                             # Ver qué quitaría del proyecto y de tus IA
+npx nexakit quitar --si                        # Quitar lo que nexakit instaló
+npx nexakit reparar --desde <ruta>             # Reparar enlaces que apuntan a una copia antigua
+npx nexakit memoria <subcomando>               # Operaciones avanzadas de memoria (status, doctor, sync…)
+~/.nexakit/nexakit revision --disponibles --principal <ia>  # Ver IA revisoras certificadas
+~/.nexakit/nexakit modelo                      # Ver catálogo real de modelos y esfuerzos
 ```
 
-También puedes instalarlo con `npm install -g nexakit` y ejecutar `nexakit`. El alias `agent-toolkit` sigue disponible.
+También puedes instalarlo globalmente con `npm install -g nexakit` y ejecutar `nexakit`. El alias `agent-toolkit` y los subcomandos anteriores (`recommend`, `doctor`, `setup`, `detach`) siguen disponibles por compatibilidad.
 
 ## Tecnologías detectadas
 
+NexaKit inspecciona la raíz y las subcarpetas inmediatas del proyecto (`package.json`, `pyproject.toml`, `requirements.txt`, `src-tauri/` y `README.md`):
+
 - **Frontend:** React, Next.js, Tailwind CSS, Astro, Vue y Svelte.
-- **APIs:** Express, Fastify y Hono.
+- **Backend y APIs:** Express, Fastify, Hono, Django, FastAPI, Flask y API REST / OpenAPI.
+- **Escritorio:** Tauri.
 - **Datos:** Supabase, PostgreSQL, Prisma y Drizzle.
 - **MCP:** SDK de Model Context Protocol y FastMCP.
-- **Pruebas:** Playwright. Node.js, TypeScript y Vitest también se reconocen como señales del proyecto, aunque no tienen una skill específica asignada por sí solos.
+- **Pruebas:** Playwright (además de reconocer señales como Node.js, TypeScript y Vitest).
+
+## Skills con contexto
+
+El catálogo incluido contiene **10 skills** con revisión de origen y hashes SHA-256. NexaKit muestra el motivo concreto de cada sugerencia (por ejemplo, qué archivo o `README.md` la activó). Consulta las [fuentes y licencias](docs/skills/fuentes-de-skills.md) o aprende a [ampliar el catálogo](docs/skills/ampliar-catalogo.md).
 
 ## Más herramientas
 
-- **Coordinación entre agentes.** Implementación y revisión cruzada con Claude Code y Codex. [Guía de comandos](docs/guias/guia-de-comandos.md).
-- **Memoria por proyecto.** Contexto separado del código y conectado en solo lectura mediante MCP. [Crear una memoria](docs/memoria/project-memory-init.md).
-- **Guía interactiva.** Inicio, Obsidian, conexión con agentes y comandos copiables. Abre [la guía HTML](docs/guias/guia-de-comandos.html) en tu navegador.
+- **Revisión entre IA en solo lectura.** Aislamiento certificado y procedencia verificada entre Claude Code, Codex y Antigravity. [Flujo de revisión](docs/agentes/coordinacion/revision-entre-ia.md).
+- **Memoria por proyecto.** Contexto separado del código y conectado en solo lectura mediante MCP, con seguimiento de tareas largas y cierre con `/cerrar-memoria`. [Crear una memoria](docs/memoria/project-memory-init.md).
+- **Guía interactiva.** Los tres pasos de inicio, buscador de comandos copiables y resolución de problemas. Abre [la guía HTML](docs/guias/guia-de-comandos.html) en tu navegador.
 - **Catálogo ampliable.** Incorpora skills y comprueba sus archivos con `npm run catalog:validate`. [Añadir una skill](docs/skills/ampliar-catalogo.md).
 
 ## Requisitos
 
-**Node.js 24 o superior** y una terminal interactiva para el asistente.
+**Node.js 24 o superior** y una terminal interactiva para el asistente (o `--si` en modo no interactivo).
 
 Para contribuir: [desarrollo local, pruebas y empaquetado](docs/guias/desarrollo.md).
 
