@@ -72,3 +72,24 @@ extractos estructurados sin conversaciones privadas se versionan en
 
 El alcance de este informe es la comprobación de aislamiento solicitada.
 Procedencia del modelo y API del mod de Claude siguen pendientes de la tarea 1.
+
+## Transporte de Antigravity comprobado en la tarea 3
+
+El modo de texto con `--print=` rechaza un prompt vacío aunque stdin tenga
+texto. Para conservar el encargo fuera de argv se usa:
+
+```text
+agy --print= --input-format stream-json --output-format stream-json --model <id> --effort <esfuerzo> --mode plan --sandbox
+```
+
+Cada línea de stdin tiene la forma
+`{"event":"user","message":{"role":"user","content":"<encargo>"}}`.
+Una llamada mínima real devolvió `OK`, código 0 y un evento `result` completo.
+Los errores de esquema previos devolvieron `num_turns: 0` y cero tokens.
+El evento `init` informa el modelo de ejecución; si el resultado final no
+informa esfuerzo, ese dato queda desconocido. No se infiere de lo pedido.
+
+Los argumentos de transporte y las prohibiciones explícitas del adaptador
+Claude son perfiles distintos del sondeo inicial: la certificación de tarea 4
+debe corresponder exactamente al perfil ejecutado, no reutilizar una marca
+por nombre de cliente únicamente.

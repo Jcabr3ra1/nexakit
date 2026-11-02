@@ -10,7 +10,7 @@ const writeJson = (file, value) => { fs.mkdirSync(path.dirname(file), { recursiv
 const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
 const missing = () => ({ status: 1, stdout: '', stderr: 'No MCP server found' });
 
-export function createFakeClis(home, { fail = {}, installed = ['claude', 'codex', 'agy'] } = {}) {
+export function createFakeClis(home, { fail = {}, installed = ['claude', 'codex', 'agy'], reviewOutputs = {}, versions = {} } = {}) {
   const calls = [];
   const claudeFile = path.join(home, '.claude.json');
   const codexFile = path.join(home, '.codex', 'config.toml');
@@ -26,6 +26,8 @@ export function createFakeClis(home, { fail = {}, installed = ['claude', 'codex'
     calls.push([command, ...args]);
     const cli = command === 'agy' ? 'agy' : command;
     if (!installed.includes(cli)) return { status: null, stdout: '', stderr: '', errorCode: 'ENOENT' };
+    if (args.includes('--version')) return ok(versions[cli] ?? 'test-version');
+    if ((args.includes('exec') || args.includes('-p') || args.includes('--print=')) && Object.hasOwn(reviewOutputs, cli)) return { status: 0, stderr: '', ...reviewOutputs[cli] };
     const [, verb] = args;
     if (fail[`${cli} ${verb}`]) return { status: 1, stdout: '', stderr: `${cli} ${verb} falló` };
     const dash = args.indexOf('--');
