@@ -402,3 +402,16 @@ test('a node reached through a link into an npx cache is not registered either',
   await fs.writeFile(path.join(stable, 'node'), '', { mode: 0o755 });
   assert.equal(await resolveNodeExecutable({ PATH: [viaLink, stable].join(path.delimiter) }), path.join(stable, 'node'));
 });
+test('retired skills are removed only when registered and unchanged', async t => {
+ const f=await fixture(t);const { setupToolkit }=await import(moduleUrl);
+ const target=path.join(f.homeDirectory,'.agents','skills','programar');await fs.mkdir(path.dirname(target),{recursive:true});
+ const source=path.join(f.toolkitRoot,'skills','gone');await fs.symlink(source,target,directoryLinkType);
+ const { acquireLock }=await import(lockUrl);const { recordEntries }=await import(registryUrl);
+ const lock=await acquireLock(path.join(f.homeDirectory,'.nexakit'));
+ try {await recordEntries(path.join(f.homeDirectory,'.nexakit'),[{destino:target,apunta:await fs.readlink(target),raiz:f.toolkitRoot}],lock);}finally{await lock.release();}
+ await fs.mkdir(path.join(f.homeDirectory,'.agents','skills','estado'));
+ const preview=await setupToolkit({...f,agent:'codex',environment:{PATH:''}});
+ assert.equal(preview.retiredSkills.find(s=>s.name==='programar').owned,true);
+ await setupToolkit({...f,agent:'codex',apply:true,environment:{PATH:''}});
+ await assert.rejects(fs.lstat(target));assert.ok((await fs.stat(path.join(f.homeDirectory,'.agents','skills','estado'))).isDirectory());
+});

@@ -45,7 +45,7 @@ no compatible; no lo describas como éxito. No deduzcas datos por nombre de arch
 Muestra la imagen generada si el cliente permite verla. Ante timeout usa
 `historial`/`recuperar`; no repitas inferencia para buscar un resultado tardío.
 Si falla el registro de métricas después de generar, conserva el artefacto y
-registra la medición con `agent-toolkit-inbox medir`, sin repetir la generación.
+informa la medición disponible y su origen, sin repetir la generación.
 
 La carpeta de trabajo limita lo que se entrega explícitamente; no es un sandbox.
 Las herramientas de Antigravity conservan sus permisos. Consulta detalles y

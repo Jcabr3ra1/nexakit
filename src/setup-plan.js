@@ -2,9 +2,13 @@
 // sentences, and the ordered blocks that apply it. No I/O, so every screen and every decision is testable.
 
 export const AGENTS = Object.freeze(['claude', 'codex', 'antigravity']);
-export const AGENT_NAMES = Object.freeze({ claude: 'Claude Code', codex: 'Codex', antigravity: 'Antigravity' });
+export const AGENT_NAMES = Object.freeze({
+  claude: 'Claude Code',
+  codex: 'Codex',
+  antigravity: 'Antigravity',
+});
 // Claude reads project skills from .claude/skills; Codex and Antigravity share .agents/skills.
-const folderOf = agent => (agent === 'claude' ? 'claude' : 'codex');
+const folderOf = (agent) => (agent === 'claude' ? 'claude' : 'codex');
 const FOLDER_PATHS = Object.freeze({ claude: '.claude/skills', codex: '.agents/skills' });
 const PENDING_LINKS = new Set(['missing', 'replace']);
 
@@ -13,8 +17,12 @@ export function joinNames(names) {
 }
 // ~/… for paths under the home folder, with either separator (Windows uses \\).
 export const shortPath = (target, homeDirectory) =>
-  (homeDirectory && (target === homeDirectory || target.startsWith(`${homeDirectory}/`) || target.startsWith(`${homeDirectory}\\`))
-    ? `~${target.slice(homeDirectory.length)}` : target);
+  homeDirectory &&
+  (target === homeDirectory ||
+    target.startsWith(`${homeDirectory}/`) ||
+    target.startsWith(`${homeDirectory}\\`))
+    ? `~${target.slice(homeDirectory.length)}`
+    : target;
 const plural = (count, one, many) => (count === 1 ? one : many);
 
 // "frontend usa React", "el README menciona Tauri": the reason for a suggestion, from where the signal was found.
@@ -22,33 +30,46 @@ export function shortReason(label, source) {
   const file = source.replace(/\s*\(.*\)$/u, '');
   const parts = file.split('/');
   const folder = parts.length > 1 ? parts.slice(0, -1).join('/') : null;
-  if (/^readme\.md$/iu.test(parts.at(-1))) return folder ? `${folder}/README menciona ${label}` : `el README menciona ${label}`;
+  if (/^readme\.md$/iu.test(parts.at(-1)))
+    return folder ? `${folder}/README menciona ${label}` : `el README menciona ${label}`;
   return folder ? `${folder} usa ${label}` : `el proyecto usa ${label}`;
 }
 
-const linkStates = (skill, agents) => [...new Set(agents.map(folderOf))].map(folder => [folder, skill.links?.[folder] ?? 'missing']);
+const linkStates = (skill, agents) =>
+  [...new Set(agents.map(folderOf))].map((folder) => [folder, skill.links?.[folder] ?? 'missing']);
 
 export function suggestedAnswers(state) {
-  const names = new Set(state.skills.map(skill => skill.name));
+  const names = new Set(state.skills.map((skill) => skill.name));
   const saved = state.savedAnswers;
   if (saved) {
     const answered = new Set([...saved.skills.chosen, ...saved.skills.discarded]);
     const chosen = state.skills
-      .filter(skill => saved.skills.chosen.includes(skill.name) || (skill.suggested && !answered.has(skill.name)))
-      .map(skill => skill.name);
-    return { version: 1, skills: { chosen, discarded: saved.skills.discarded.filter(name => names.has(name)) },
-      agents: [...saved.agents], memory: { ...saved.memory } };
+      .filter(
+        (skill) => saved.skills.chosen.includes(skill.name) || (skill.suggested && !answered.has(skill.name)),
+      )
+      .map((skill) => skill.name);
+    return {
+      version: 1,
+      skills: { chosen, discarded: saved.skills.discarded.filter((name) => names.has(name)) },
+      agents: [...saved.agents],
+      memory: { ...saved.memory },
+    };
   }
-  const installed = skill => Object.values(skill.links ?? {}).includes('installed');
-  const found = AGENTS.filter(agent => state.agentsFound[agent]);
+  const installed = (skill) => Object.values(skill.links ?? {}).includes('installed');
+  const found = AGENTS.filter((agent) => state.agentsFound[agent]);
   const memory = state.memory.existing
     ? { decision: 'path', path: state.memory.existing.vaultPath }
-    : state.project.git ? { decision: 'path', path: state.memory.suggestedPath } : { decision: 'later' };
+    : state.project.git
+      ? { decision: 'path', path: state.memory.suggestedPath }
+      : { decision: 'later' };
   return {
     version: 1,
-    skills: { chosen: state.skills.filter(skill => skill.suggested || installed(skill)).map(skill => skill.name), discarded: [] },
+    skills: {
+      chosen: state.skills.filter((skill) => skill.suggested || installed(skill)).map((skill) => skill.name),
+      discarded: [],
+    },
     agents: found.length ? found : [...AGENTS],
-    memory
+    memory,
   };
 }
 
@@ -60,7 +81,7 @@ export function buildConfirmation(state, answers) {
   const add = (mark, text) => lines.push({ mark, text });
   const block = (id, label) => blocks.push({ id, label });
   const answersChanged = !state.savedAnswers || !sameAnswers(state.savedAnswers, answers);
-  const agents = AGENTS.filter(agent => answers.agents.includes(agent));
+  const agents = AGENTS.filter((agent) => answers.agents.includes(agent));
   const home = state.homeDirectory;
 
   if (state.stableCopy.needed) {
@@ -75,8 +96,10 @@ export function buildConfirmation(state, answers) {
   }
 
   // Project skills, in the folders of the chosen agents.
-  const chosen = state.skills.filter(skill => answers.skills.chosen.includes(skill.name));
-  const toInstall = [], conflicts = [], readySkills = [];
+  const chosen = state.skills.filter((skill) => answers.skills.chosen.includes(skill.name));
+  const toInstall = [],
+    conflicts = [],
+    readySkills = [];
   for (const skill of chosen) {
     // Per folder: a user folder is left alone, and the skill is still installed where it is missing.
     const states = linkStates(skill, agents);
@@ -85,12 +108,19 @@ export function buildConfirmation(state, answers) {
     else if (states.every(([, value]) => value === 'installed')) readySkills.push(skill);
   }
   const removeSkills = state.skills
-    .filter(skill => !answers.skills.chosen.includes(skill.name) && Object.values(skill.links ?? {}).includes('installed'))
-    .map(skill => skill.name);
+    .filter(
+      (skill) =>
+        !answers.skills.chosen.includes(skill.name) && Object.values(skill.links ?? {}).includes('installed'),
+    )
+    .map((skill) => skill.name);
   if (toInstall.length) {
-    add('+', `${toInstall.length} ${plural(toInstall.length, 'skill en el proyecto (ignorada en Git)', 'skills en el proyecto (ignoradas en Git)')}`);
+    add(
+      '+',
+      `${toInstall.length} ${plural(toInstall.length, 'skill en el proyecto (ignorada en Git)', 'skills en el proyecto (ignoradas en Git)')}`,
+    );
   }
-  if (removeSkills.length) add('−', `Quitar ${removeSkills.length} ${plural(removeSkills.length, 'skill', 'skills')} del proyecto`);
+  if (removeSkills.length)
+    add('−', `Quitar ${removeSkills.length} ${plural(removeSkills.length, 'skill', 'skills')} del proyecto`);
   for (const [skill, folder] of conflicts) {
     add('!', `${skill.name}: ya hay una carpeta tuya con ese nombre en ${FOLDER_PATHS[folder]}; no la toco`);
   }
@@ -101,12 +131,21 @@ export function buildConfirmation(state, answers) {
   const globalBlocks = [];
   for (const agent of agents) {
     const global = state.globalSkills[agent] ?? { pending: 0, conflicts: 0 };
+    if (global.retiredCount)
+      add('−', `Quitar ${global.retiredCount} comandos antiguos de ${AGENT_NAMES[agent]}`);
+    if (global.retiredCount && !global.pending) globalBlocks.push(agent);
     if (global.pending) {
-      add('+', `${global.pending} ${plural(global.pending, 'skill base', 'skills base')} en ${AGENT_NAMES[agent]}`);
+      add(
+        '+',
+        `${global.pending} ${plural(global.pending, 'skill base', 'skills base')} en ${AGENT_NAMES[agent]}`,
+      );
       globalBlocks.push(agent);
     }
     if (global.conflicts) {
-      add('!', `${global.conflicts} ${plural(global.conflicts, 'skill base', 'skills base')} de ${AGENT_NAMES[agent]} ${plural(global.conflicts, 'choca con una carpeta tuya; no la toco', 'chocan con carpetas tuyas; no las toco')}`);
+      add(
+        '!',
+        `${global.conflicts} ${plural(global.conflicts, 'skill base', 'skills base')} de ${AGENT_NAMES[agent]} ${plural(global.conflicts, 'choca con una carpeta tuya; no la toco', 'chocan con carpetas tuyas; no las toco')}`,
+      );
     }
   }
   for (const agent of globalBlocks) block(`global-skills:${agent}`, `Skills base en ${AGENT_NAMES[agent]}`);
@@ -127,14 +166,18 @@ export function buildConfirmation(state, answers) {
         add('✓', `Memoria del proyecto en ${shortPath(target, home)}`);
       }
       const connections = state.memory.connections?.[target] ?? {};
-      const statusOf = agent => connections[agent] ?? (state.agentsFound[agent] ? 'create' : 'unavailable');
-      const need = agents.filter(agent => statusOf(agent) === 'create');
-      const connected = agents.filter(agent => statusOf(agent) === 'unchanged');
-      if (need.length) add('+', `Conectar la memoria a ${joinNames(need.map(agent => AGENT_NAMES[agent]))}`);
-      else if (connected.length) add('✓', `Memoria conectada a ${joinNames(connected.map(agent => AGENT_NAMES[agent]))}`);
+      const statusOf = (agent) => connections[agent] ?? (state.agentsFound[agent] ? 'create' : 'unavailable');
+      const need = agents.filter((agent) => statusOf(agent) === 'create');
+      const connected = agents.filter((agent) => statusOf(agent) === 'unchanged');
+      if (need.length)
+        add('+', `Conectar la memoria a ${joinNames(need.map((agent) => AGENT_NAMES[agent]))}`);
+      else if (connected.length)
+        add('✓', `Memoria conectada a ${joinNames(connected.map((agent) => AGENT_NAMES[agent]))}`);
       for (const agent of agents) {
-        if (statusOf(agent) === 'conflict') add('!', `${AGENT_NAMES[agent]} ya tiene otra memoria con el mismo nombre; no la toco`);
-        if (statusOf(agent) === 'unavailable') add('!', `No encontré ${AGENT_NAMES[agent]}; no puedo conectarle la memoria`);
+        if (statusOf(agent) === 'conflict')
+          add('!', `${AGENT_NAMES[agent]} ya tiene otra memoria con el mismo nombre; no la toco`);
+        if (statusOf(agent) === 'unavailable')
+          add('!', `No encontré ${AGENT_NAMES[agent]}; no puedo conectarle la memoria`);
       }
       for (const agent of need) block(`memory-connect:${agent}`, `Memoria conectada a ${AGENT_NAMES[agent]}`);
     }
@@ -143,9 +186,10 @@ export function buildConfirmation(state, answers) {
   if (answersChanged && (blocks.length || state.savedAnswers)) {
     // Saved first, before any block that can fail, so a retry starts from what the person decided.
     blocks.unshift({ id: 'answers', label: 'Respuestas guardadas' });
-    if (!blocks.some(item => item.id === 'project-skills')) add('+', 'Guardar tus respuestas en .agent-toolkit (ignorado en Git)');
+    if (!blocks.some((item) => item.id === 'project-skills'))
+      add('+', 'Guardar tus respuestas en .agent-toolkit (ignorado en Git)');
   }
   if (blocks.length) block('final-check', 'Comprobación final');
-  const allReady = !lines.some(line => ['+', '−', '↻'].includes(line.mark));
+  const allReady = !lines.some((line) => ['+', '−', '↻'].includes(line.mark));
   return { lines, blocks, allReady, removeSkills };
 }
