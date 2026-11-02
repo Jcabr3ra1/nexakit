@@ -1,28 +1,35 @@
-# Traspaso: [tarea o etapa]
+---
+tipo: seguimiento
+plan: 03-IMPLEMENTACION/Planes/AAAA-MM-DD-nombre.md
+rama: feat/nombre
+estado: en curso
+actualizado: AAAA-MM-DD
+---
 
-- Fecha: AAAA-MM-DD
-- Responsable anterior: [persona o agente]
-- Estado: En curso | Bloqueado | Listo para revisión | Completado
-- Rama o entorno: [si aplica]
+# Seguimiento: [tarea o fase]
 
-## Objetivo
+## Estado
 
-## Completado y comprobado
+- Rama: `feat/nombre` (desde `main`)
+- Último commit: `<hash>`
+- Archivos modificados:
+- Pruebas ejecutadas y resultado real:
+- Tareas del plan completadas:
 
-## En curso
+## Cambio de diseño
+
+- Ajustes acordados con el usuario respecto al plan inicial (o «Ninguno»).
+
+## Revisiones
+
+- Ronda 1 (`<IA>`, `<modelo> · <esfuerzo>`): hallazgos corregidos y descartados.
 
 ## Pendiente
 
-## Decisiones confirmadas
+- Siguiente tarea del plan o bloqueo actual (con causa y qué lo desbloquea).
 
-## Riesgos y bloqueos
+## Cómo retomar
 
-## Evidencia
-
-- Archivos o notas:
-- Pruebas o comandos:
-- Enlaces:
-
-## Siguiente paso recomendado
-
-## Preguntas abiertas
+1. `cd <ruta-del-proyecto> && git status -sb`
+2. `npm test`
+3. Seguir en la tarea N del plan (`<ruta-del-plan>`).

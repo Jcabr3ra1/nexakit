@@ -53,8 +53,12 @@ si falta, informa la limitación y usa archivos autorizados sin fingir la consul
 
 Comprueba rama, cambios locales, pruebas, PR asociado y evidencia del evento.
 Sigue [el flujo según el estado](references/cierre.md): trabajo local, PR abierto,
-PR fusionado o evento estable sin PR. Una revisión aprobada no demuestra merge;
-un merge no demuestra despliegue. Trabajar en una rama no actualiza memoria estable.
+PR fusionado o evento estable sin PR. Si existe una nota de seguimiento activa
+(`03-IMPLEMENTACION/Planes/*-seguimiento.md`) de la tarea o fase que se integra,
+traslada sus decisiones y estado final comprobado a las notas permanentes de la
+bóveda y marca la nota de seguimiento con `estado: completado`. Una revisión
+aprobada no demuestra merge; un merge no demuestra despliegue. Trabajar en una
+rama no actualiza memoria estable.
 
 ## 3. Actualizar dentro del alcance autorizado
 
