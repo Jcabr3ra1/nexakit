@@ -206,6 +206,24 @@ test('a full run with the suggested answers ends in «Listo», and a second run 
   assert.equal(await second, 0);
 });
 
+test('redraws in place on the alternate screen and leaves only the last frame in the scrollback', async t => {
+  const w = await world(t);
+  const tty = createFakeTty({ columns: 80 });
+  const running = runSetupTui({ input: tty.input, output: tty.output, options: w.options });
+  await tty.waitFor(/¿Qué skills quieres\?/u);
+  for (const key of ['\x1b[B', '\x1b[B', '\x1b[A']) tty.sendKey(key);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  tty.sendKey('q');
+  assert.equal(await running, 0);
+  const out = tty.getOutput();
+  assert.doesNotMatch(out, /\x1b\[2J/u, 'clearing the screen pushes every frame into the scrollback');
+  const enter = out.indexOf('\x1b[?1049h');
+  const leave = out.lastIndexOf('\x1b[?1049l');
+  assert.ok(enter >= 0 && leave > enter, 'the questions are drawn on the alternate screen');
+  const after = out.slice(leave);
+  assert.equal(after.match(/¿Qué skills quieres\?/gu)?.length, 1, 'the last frame is printed once on the normal screen');
+});
+
 test('Ctrl+C at any question, or "No" at the confirmation, writes nothing', async t => {
   const w = await world(t);
   const before = { home: snapshot(w.home), repo: snapshot(w.repo) };

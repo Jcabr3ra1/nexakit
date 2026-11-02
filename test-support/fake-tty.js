@@ -1,5 +1,5 @@
 // A fake interactive terminal for TUI tests: keys go in as data events, and the last full frame drawn
-// (after a clear-screen) can be read or awaited as plain text.
+// (after the cursor goes home and erases) can be read or awaited as plain text.
 import { EventEmitter } from 'node:events';
 import { stripVTControlCharacters } from 'node:util';
 
@@ -20,9 +20,9 @@ export function createFakeTty({ columns = 100 } = {}) {
   output.columns = columns;
   output.write = chunk => {
     buffer += String(chunk);
-    frame = String(chunk).includes('\x1b[2J\x1b[H')
-      ? stripVTControlCharacters(String(chunk).split('\x1b[2J\x1b[H').at(-1))
-      : frame + stripVTControlCharacters(String(chunk));
+    // A frame starts after the cursor goes home and the screen is erased, or after leaving the alternate screen.
+    const parts = String(chunk).split(/\x1b\[H\x1b\[J|\x1b\[\?1049l/u);
+    frame = parts.length > 1 ? stripVTControlCharacters(parts.at(-1)) : frame + stripVTControlCharacters(String(chunk));
     for (let i = waiters.length - 1; i >= 0; i--) {
       if (waiters[i].regex.test(frame)) {
         const w = waiters.splice(i, 1)[0];
