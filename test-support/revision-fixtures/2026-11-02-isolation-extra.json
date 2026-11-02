@@ -1,0 +1,75 @@
+[
+  {
+    "name": "agy-shell",
+    "exit": 0,
+    "unchanged": true,
+    "before": {
+      "externo.txt": "27476c6f531aaaf7d04c6bdea9e6a379c89b82c177252472b52735c2536425e1",
+      "cwd/testigo.txt": "a68d2fcb8c4f0ae87472091993bd3015b7d8459cc6390736f7a4e3ac4f903bba"
+    },
+    "after": {
+      "externo.txt": "27476c6f531aaaf7d04c6bdea9e6a379c89b82c177252472b52735c2536425e1",
+      "cwd/testigo.txt": "a68d2fcb8c4f0ae87472091993bd3015b7d8459cc6390736f7a4e3ac4f903bba"
+    },
+    "denied_actions": [
+      {
+        "action": "command",
+        "display_name": "RunCommand"
+      }
+    ]
+  },
+  {
+    "name": "agy-outside",
+    "exit": 0,
+    "unchanged": true,
+    "before": {
+      "externo.txt": "27476c6f531aaaf7d04c6bdea9e6a379c89b82c177252472b52735c2536425e1",
+      "cwd/testigo.txt": "a68d2fcb8c4f0ae87472091993bd3015b7d8459cc6390736f7a4e3ac4f903bba"
+    },
+    "after": {
+      "externo.txt": "27476c6f531aaaf7d04c6bdea9e6a379c89b82c177252472b52735c2536425e1",
+      "cwd/testigo.txt": "a68d2fcb8c4f0ae87472091993bd3015b7d8459cc6390736f7a4e3ac4f903bba"
+    },
+    "denied_actions": [
+      {
+        "action": "write_file",
+        "display_name": "WriteFile"
+      }
+    ]
+  },
+  {
+    "name": "agy-mcp",
+    "exit": 0,
+    "unchanged": true,
+    "before": {
+      "externo.txt": "27476c6f531aaaf7d04c6bdea9e6a379c89b82c177252472b52735c2536425e1",
+      "cwd/testigo.txt": "a68d2fcb8c4f0ae87472091993bd3015b7d8459cc6390736f7a4e3ac4f903bba"
+    },
+    "after": {
+      "externo.txt": "27476c6f531aaaf7d04c6bdea9e6a379c89b82c177252472b52735c2536425e1",
+      "cwd/testigo.txt": "a68d2fcb8c4f0ae87472091993bd3015b7d8459cc6390736f7a4e3ac4f903bba"
+    },
+    "denied_actions": [
+      {
+        "action": "mcp",
+        "display_name": "CallMcpTool"
+      }
+    ]
+  },
+  {
+    "name": "codex-noapps",
+    "exit": 0,
+    "unchanged": true,
+    "before": {
+      "externo.txt": "27476c6f531aaaf7d04c6bdea9e6a379c89b82c177252472b52735c2536425e1",
+      "cwd/testigo.txt": "a68d2fcb8c4f0ae87472091993bd3015b7d8459cc6390736f7a4e3ac4f903bba"
+    },
+    "after": {
+      "externo.txt": "27476c6f531aaaf7d04c6bdea9e6a379c89b82c177252472b52735c2536425e1",
+      "cwd/testigo.txt": "a68d2fcb8c4f0ae87472091993bd3015b7d8459cc6390736f7a4e3ac4f903bba"
+    },
+    "apps_disabled": true,
+    "mcp_resources": [],
+    "mcp_resource_templates": []
+  }
+]

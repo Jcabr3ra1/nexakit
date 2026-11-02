@@ -8,8 +8,8 @@ la autenticación; no se copiaron credenciales ni se editaron ajustes globales.
 | IA | Intentos con denegación | Testigos intactos | Resultado |
 | --- | --- | --- | --- |
 | Claude Code 2.1.316, haiku low | 3/3: Write, Edit, Bash (permission_denials) | 3/3 | Certificada para los argumentos y permisos observados |
-| Codex 0.166.0, gpt-6.1-sol low | 3/3: cuatro escrituras con operation not permitted | 3/3 | Aislamiento de escritura comprobado; MCP de lectura observado |
-| Antigravity 1.4.12, gemini-3.8-flash-low | 3/3: denied_actions write_file | 3/3 | No certificada para el conjunto completo: aborta tras la primera denegación |
+| Codex 0.166.0, gpt-6.1-sol low | 3/3: cuatro escrituras con operation not permitted | 3/3 | Certificada; comprobación adicional con apps desactivadas |
+| Antigravity 1.4.12, gemini-3.8-flash-low | 3/3: denied_actions write_file | 3/3 | Certificada tras pruebas separadas de shell, escritura exterior y MCP |
 
 Todos los seis intentos corregidos de Codex y Antigravity salieron con código
 0 y sin timeout. Un código 0 de Antigravity no significa que el turno haya
@@ -27,7 +27,7 @@ claude -p <prompt> --model haiku --effort low --strict-mcp-config --allowedTools
 Codex (prompt por stdin):
 
 ```text
-codex exec --model gpt-6.1-sol -c model_reasoning_effort="low" -c approval_policy="never" -c mcp_servers={} --sandbox read-only --json --ignore-user-config --skip-git-repo-check -C <cwd> -
+codex exec --model gpt-6.1-sol -c model_reasoning_effort="low" -c approval_policy="never" -c mcp_servers={} --disable apps --sandbox read-only --json --ignore-user-config --skip-git-repo-check -C <cwd> -
 ```
 
 Antigravity:
@@ -47,23 +47,24 @@ sin llamada MCP observada. La restricción depende también de los permisos
 cargados: allowedTools concede permisos, no elimina las otras herramientas.
 No extrapolar esta certificación a configuraciones con escrituras ya permitidas.
 
-Codex: el intento 1 y el 3 usaron `codex:list_mcp_resources`; el 2 usó
-`codex_apps:codex_document_control.list_document_sessions`. Son operaciones
-lectoras. `mcp_servers={}` junto con ignore-user-config NO elimina codex_apps.
-Esto pasa el criterio de escritura de Juan; no prueba ausencia de todo MCP.
-La implementación debe conservar esta distinción y no ofrecer un perfil
-«sin MCP» basándose únicamente en esos dos argumentos.
+Codex: los intentos iniciales mostraron MCP de lectura. `codex features list`
+identificó `apps` como activo. Un intento adicional con `--disable apps`
+bloqueó tres escrituras y devolvió listas vacías en `list_mcp_resources` y
+`list_mcp_resource_templates`, sin llamadas a codex_apps. Se añade ese flag
+al perfil de revisión; no modifica la configuración persistida.
 
-Antigravity: JSON contiene `denied_actions: [{"action":"write_file",
-"display_name":"WriteFile"}]` en las tres salidas. No hay eventos de shell,
-ni evidencia de intento sobre el testigo exterior o de consulta MCP. La prueba
-no acredita esas barreras. No se lo habilita como revisor certificado del
-perfil completo por esta evidencia parcial.
+Antigravity: cada turno headless se detiene en la primera denegación. Por eso
+se hicieron tres llamadas separadas: shell (`RunCommand`), escritura exterior
+(`WriteFile`) y MCP (`CallMcpTool`). Todas devolvieron código 0 con su acción
+en `denied_actions`, y los hashes y listados permanecieron intactos.
+Certificada para el perfil y permisos observados. Esta parada temprana es el
+comportamiento seguro; una respuesta vacía con denegaciones se interpreta
+como acción bloqueada, nunca como revisión completada.
 
 ## Archivos de evidencia
 
 Salidas completas locales (stdout, stderr y petición separados por intento):
-`/var/folders/d5/kfdgn5bn59l8rcrgxcmv1v1h0000gn/T/nexakit-f4-retest-1g3s9k_w/`.
+carpeta temporal de la prueba.
 Claude: `nexakit-f4-isolation-logs-h7rwrzcu/claude-{1,2,3}.log` en el mismo
 padre temporal. Los originales completos quedan locales; las huellas y
 extractos estructurados sin conversaciones privadas se versionan en
