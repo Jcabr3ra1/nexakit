@@ -245,3 +245,20 @@ test('Ctrl+C at any question, or "No" at the confirmation, writes nothing', asyn
   }
   assert.deepEqual({ home: snapshot(w.home), repo: snapshot(w.repo) }, before);
 });
+
+test('skills without a passed check say «no probada», with review notes in the info view', () => {
+  const skills = [
+    { ...skill('frontend-design', true, 'frontend usa React'), tested: false, reviewNotes: 'Consulta internet.' },
+    { ...skill('api-design-principles', true, 'backend usa Django'), tested: true, reviewNotes: null }
+  ];
+  const model = createSetupModel(state({ skills }));
+  const text = frame(model);
+  assert.match(text, /frontend-design.*· no probada/u);
+  assert.doesNotMatch(text, /api-design-principles.*no probada/u);
+  const info = frame(press(model, 'i'));
+  assert.match(info, /No probada: nadie ha comprobado aún que mejore el trabajo\./u);
+  assert.match(info, /Observaciones: Consulta internet\./u);
+  for (const columns of [40, 68]) {
+    for (const line of stripVTControlCharacters(frame(press(model, 'i'), columns)).split('\n')) assert.ok(cellWidth(line) <= columns, `@${columns}: «${line}»`);
+  }
+});

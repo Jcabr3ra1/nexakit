@@ -159,6 +159,8 @@ export async function gatherSetupState({
       matchCount: entry.matchedSignals?.length ?? 0,
       suggested: (entry.matchedSignals?.length ?? 0) > 0,
       license: entry.license,
+      tested: entry.recommendationStatus === 'validated',
+      reviewNotes: entry.reviewStatus === 'reviewed-with-observations' ? entry.reviewNotes : null,
       links: { claude: linkState(entry.name, 'claude'), codex: linkState(entry.name, 'codex') },
     };
   });
