@@ -56,6 +56,7 @@ En una terminal interactiva puedes abrir el asistente en tres pasos: skills para
 ```sh
 npx nexakit                                   # o node bin/nexakit.js (alias: agent-toolkit)
 npx nexakit recommend --project .
+npx nexakit scan ruta/a/una-skill              # revisa una skill sin ejecutarla
 npx nexakit detach --project .                # vista previa de desacoplado
 npx nexakit detach --project . --apply        # retira lo acoplado sin tocar archivos propios
 ```

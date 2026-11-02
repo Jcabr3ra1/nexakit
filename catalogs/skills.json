@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.0.0",
-  "updatedAt": "2026-10-31",
+  "updatedAt": "2026-11-02",
   "skills": [
     {
       "name": "frontend-design",
@@ -1057,7 +1057,25 @@
       "scenarios": []
     }
   ],
-  "externalReferences": [],
+  "externalReferences": [
+    {
+      "name": "ui-ux-pro-max",
+      "summary": "Guía de diseño UI/UX con datos locales: estilos, paletas, tipografías, reglas de UX y patrones por stack.",
+      "sourceUrl": "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill",
+      "anySignals": [
+        "react",
+        "nextjs",
+        "tailwindcss",
+        "astro",
+        "vue",
+        "svelte"
+      ],
+      "profiles": [
+        "frontend"
+      ],
+      "statusNote": "Se instala como plugin de Claude (necesita Python 3). Revisada el 2026-11-02 en 713eef51: sin bloqueos del escáner; no funciona como skill copiada ni en Codex."
+    }
+  ],
   "addons": [
     {
       "id": "superpowers",

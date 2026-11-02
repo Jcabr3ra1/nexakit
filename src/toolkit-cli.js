@@ -6,6 +6,8 @@ import readline from 'node:readline';
 import { pathToFileURL } from 'node:url';
 import { resolveProjectRoot } from './project-root.js';
 import { loadSkillCatalog } from './skill-catalog.js';
+import { scanSkillDirectory } from './skill-scan.js';
+import { formatScanReport } from './skill-scan-report.js';
 import {
   applyToolkitDetach,
   formatDetachReport,
@@ -30,6 +32,7 @@ const HELP = `Uso: npx nexakit [--project <ruta>] [--si]
      nexakit revision --con <ia> --modelo <m> --esfuerzo <e> --encargo <archivo> [--base <rama>]
      npx nexakit quitar [--project <ruta>] [--global] [--agent codex|claude|antigravity|all] [--apply] [--json]
      npx nexakit recommend [--project <ruta>] [--profile frontend|backend|mcp|security] [--client codex|claude] [--dry-run] [--json]
+     npx nexakit scan <carpeta de skill> [--json]
      npx nexakit reparar --desde <ruta> [--agent codex|claude|antigravity|all]
      npx nexakit doctor [--agent codex|claude|antigravity|all] [--perfil-codex <nombre>] [--json]
      npx nexakit setup [--agent codex|claude|antigravity|all] [--perfil-codex <nombre>] [--apply] [--json]
@@ -41,6 +44,7 @@ Sin terminal interactiva muestra lo que haría; --si lo aplica sin preguntas.
 quitar (o detach) retira las skills del proyecto, .agent-toolkit/ y su bloque de
 .gitignore sin tocar archivos tuyos (--apply para ejecutar; --global incluye las globales).
 recommend inspecciona el proyecto en solo lectura.
+scan revisa el contenido de una skill sin ejecutarla (1 si encuentra un bloqueo).
 reparar re-apunta enlaces rotos de una instalación anterior (--desde es la carpeta
 que ya no existe); lista lo que encontró y siempre pregunta.
 doctor y setup comprueban y preparan las skills base globales.
@@ -80,6 +84,23 @@ export async function runToolkitCli(
   const [command, ...rest] = argv;
   if (command === 'modelo') return runModelCommand(rest, { out, err }, options);
   if (command === 'revision') return runRevisionCommand(rest, { out, err }, { options });
+
+  if (command === 'scan') {
+    const flags = rest.filter(arg => arg.startsWith('--'));
+    const dirs = rest.filter(arg => !arg.startsWith('--'));
+    if (dirs.length !== 1 || flags.some(flag => flag !== '--json') || flags.length > 1) {
+      await err(HELP);
+      return 2;
+    }
+    try {
+      const report = await scanSkillDirectory(dirs[0]);
+      await out(flags.length ? JSON.stringify(report, null, 2) + '\n' : formatScanReport(report, dirs[0]));
+      return report.blocked ? 1 : 0;
+    } catch (error) {
+      await err(`No se pudo escanear ${dirs[0]}: ${error.code === 'ENOENT' ? 'la carpeta no existe' : error.message}\n`);
+      return 2;
+    }
+  }
 
   if (command === 'recommend') {
     const parsed = { projectRoot: process.cwd(), json: false };

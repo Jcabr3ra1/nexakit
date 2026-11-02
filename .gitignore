@@ -11,3 +11,4 @@ assets/runtime/package-lock.json
 docs/planes/
 docs/superpowers/
 .superpowers/
+.catalog-add-*/

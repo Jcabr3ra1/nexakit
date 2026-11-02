@@ -27,7 +27,7 @@ export function formatRecommendationReport(report) {
     }
   }
 
-  lines.push('', `Skills compatibles por tecnología o perfil, sin escenario validado (${report.candidates.length}):`);
+  lines.push('', `Skills compatibles, no probadas (${report.candidates.length}):`);
   if (report.candidates.length === 0) {
     lines.push('  - Ninguna skill específica adicional coincide con las señales actuales.');
   } else {
@@ -35,6 +35,8 @@ export function formatRecommendationReport(report) {
       const state = cand.installed ? ` · en proyecto: ${cand.installed.integrity}` : '';
       lines.push(`  - ${cand.name} (${cand.license}, SHA-256 ✓) ← ${cand.reasons.join(', ')}${state}`);
       lines.push(`    Utilidad prevista: ${cand.summary}`);
+      lines.push('    No probada: nadie ha comprobado aún que mejore el trabajo con este agente.');
+      if (cand.reviewStatus === 'reviewed-with-observations') lines.push(`    Observaciones: ${cand.reviewNotes}`);
       for (const reason of cand.pendingReasons) lines.push(`    Pendiente: ${reason}`);
       if (cand.overlapsWith.length) lines.push(`    Comparte ámbito con: ${cand.overlapsWith.join(', ')}`);
     }
@@ -43,7 +45,17 @@ export function formatRecommendationReport(report) {
   if (report.optional && report.optional.length > 0) {
     lines.push('', `Opcionales disponibles en el catálogo (${report.optional.length}):`);
     for (const opt of report.optional) {
-      lines.push(`  - ${opt.name} (${opt.license}) ← perfil ${opt.profiles.join('/')}`);
+      lines.push(`  - ${opt.name} (${opt.license}) ← perfil ${opt.profiles.join('/')} · no probada`);
+    }
+  }
+
+  if (report.externalCandidates?.length > 0) {
+    lines.push('', `Disponibles fuera del catálogo, se instalan aparte (${report.externalCandidates.length}):`);
+    for (const ref of report.externalCandidates) {
+      lines.push(`  - ${ref.name} ← ${ref.reasons.join(', ')} · no probada`);
+      lines.push(`    Utilidad prevista: ${ref.summary}`);
+      lines.push(`    Dónde: ${ref.sourceUrl}`);
+      lines.push(`    Nota: ${ref.statusNote}`);
     }
   }
 
