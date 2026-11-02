@@ -34,9 +34,13 @@ npx nexakit quitar                             # Ver qué quitaría del proyecto
 npx nexakit quitar --si                        # Quitar lo que nexakit instaló
 npx nexakit reparar --desde <ruta>             # Reparar enlaces que apuntan a una copia antigua
 npx nexakit memoria <subcomando>               # Operaciones avanzadas de memoria (status, doctor, sync…)
+npx nexakit setup --omitir <skill> --apply   # Declarar quitada una skill global que ya no enlazas
+npx nexakit setup --reponer <skill> --apply  # Devolver una skill global que quitaste
 ~/.nexakit/nexakit revision --disponibles --principal <ia>  # Ver IA revisoras certificadas
 ~/.nexakit/nexakit modelo                      # Ver catálogo real de modelos y esfuerzos
 ```
+
+Si quitas a mano el enlace de una skill global que nexakit instaló, `npx nexakit` no la vuelve a crear en esa IA. `frontend-design`, `web-design-guidelines` y `mcp-builder` ya no forman parte de la base global: se instalan por proyecto cuando se detecta su stack.
 
 También puedes instalarlo globalmente con `npm install -g nexakit` y ejecutar `nexakit`. El alias `agent-toolkit` y los subcomandos anteriores (`recommend`, `doctor`, `setup`, `detach`) siguen disponibles por compatibilidad.
 

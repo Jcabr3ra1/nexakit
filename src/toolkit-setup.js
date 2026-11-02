@@ -10,6 +10,8 @@ import { acquireLock } from './install-lock.js';
 import { isRegistered, readRegistry, recordEntries } from './install-registry.js';
 import {
   ACTIONABLE_LINK_STATES,
+  READY_LINK_STATES,
+  REMOVED_BY_USER_STATE,
   chooseActiveRoot,
   classifyLink,
   classifyReference,
@@ -72,9 +74,12 @@ export async function resolveNodeExecutable(environment) {
   if (stable) return stable;
   return (await outsideNpxCache(process.execPath)) ? process.execPath : 'node';
 }
+// Skills de catálogo para stacks concretos: el recomendador las instala por proyecto, así que no son base global.
+// Los enlaces globales que ya existían no se tocan.
+export const PROJECT_ONLY_SKILLS = Object.freeze(['frontend-design', 'web-design-guidelines', 'mcp-builder']);
 async function baseSkillNames(root) {
   const names = (await fs.readdir(path.join(root, 'skills'), { withFileTypes: true }))
-    .filter((e) => e.isDirectory() && /^[a-z0-9-]+$/u.test(e.name))
+    .filter((e) => e.isDirectory() && /^[a-z0-9-]+$/u.test(e.name) && !PROJECT_ONLY_SKILLS.includes(e.name))
     .map((e) => e.name)
     .sort();
   for (const name of names) {
@@ -130,6 +135,8 @@ export async function setupToolkit({
   environment = process.env,
   codexHome = environment.CODEX_HOME ?? path.join(homeDirectory, '.codex'),
   codexProfile,
+  restore = [],
+  omit = [],
   runNpm,
   packageSpec,
   lockOptions,
@@ -172,6 +179,23 @@ export async function setupToolkit({
       });
       skills.push({ client, name, ...state });
     }
+  // Un enlace que falta pero que nexakit registró como suyo lo quitó el usuario: se respeta. Solo si esa IA aún
+  // conserva otros enlaces de nexakit; si se quedó sin ninguno (carpeta borrada), se reconstruye entera.
+  // `omit` declara lo mismo de forma explícita para enlaces antiguos que el registro no llegó a conocer; se anota
+  // en el registro al aplicar. `restore` gana sobre ambos.
+  const clientsWithLinks = new Set(skills.filter((s) => READY_LINK_STATES.includes(s.state)).map((s) => s.client));
+  const toRestore = new Set(restore);
+  const toOmit = new Set(omit);
+  const toRecord = new Map();
+  for (const item of skills) {
+    if (item.state !== 'falta' || toRestore.has(item.name)) continue;
+    if (registry.entradas.some((entry) => entry.destino === item.target)) {
+      if (clientsWithLinks.has(item.client)) item.state = REMOVED_BY_USER_STATE;
+    } else if (toOmit.has(item.name)) {
+      item.state = REMOVED_BY_USER_STATE;
+      toRecord.set(item.target, item);
+    }
+  }
 
   // Origins are never mixed: if most links already use another valid copy, that copy stays the root to link to.
   const activeRoot = chooseActiveRoot(skills, linkRoot);
@@ -239,8 +263,10 @@ export async function setupToolkit({
         entries.push({ destino: item.target, apunta: literal, raiz: activeRoot });
         Object.assign(item, { state: 'instalado', literal, root: activeRoot });
       }
-      await recordEntries(nexakitDir(home), entries, lock);
       created = entries.length;
+      for (const [destino, item] of toRecord)
+        entries.push({ destino, apunta: path.join(activeRoot, 'skills', item.name), raiz: activeRoot });
+      await recordEntries(nexakitDir(home), entries, lock);
       applied = true;
     } finally {
       await lock.release();
