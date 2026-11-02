@@ -60,9 +60,11 @@ export async function addCatalogSkill({ toolkitRoot, sourceDir, entry, apply = f
   if (!apply) return result;
 
   const target = path.join(toolkitRoot, installedPath);
-  const backup = `${target}.anterior-${process.pid}`;
   const catalogBefore = await fs.readFile(catalogPath);
   const hadTarget = await fs.lstat(target).then(() => true, () => false);
+  // The backup lives at the toolkit root, outside catalogs/, so an interrupted run never ships it in the package.
+  const backupRoot = hadTarget ? await fs.mkdtemp(path.join(toolkitRoot, '.catalog-add-')) : null;
+  const backup = backupRoot && path.join(backupRoot, entry.name);
   if (hadTarget) await fs.rename(target, backup);
   try {
     for (const file of sourceFiles) {
@@ -73,11 +75,16 @@ export async function addCatalogSkill({ toolkitRoot, sourceDir, entry, apply = f
     const report = await audit({ toolkitRoot });
     if (!report.ok) throw new SkillCatalogError(`La validación del catálogo falló: ${report.errors.join(' ')}`);
   } catch (error) {
-    await fs.rm(target, { recursive: true, force: true });
-    if (hadTarget) await fs.rename(backup, target);
-    await fs.writeFile(catalogPath, catalogBefore);
+    // Each restore step runs even if an earlier one fails; the catalog first, and the original error wins.
+    const failures = [];
+    const attempt = async (label, step) => { try { await step(); } catch (cause) { failures.push(`${label}: ${cause.message}`); } };
+    await attempt('catálogo', () => fs.writeFile(catalogPath, catalogBefore));
+    await attempt('carpeta nueva', () => fs.rm(target, { recursive: true, force: true }));
+    if (hadTarget) await attempt('carpeta anterior', () => fs.rename(backup, target));
+    if (backupRoot && !failures.length) await attempt('respaldo', () => fs.rm(backupRoot, { recursive: true, force: true }));
+    if (failures.length) error.message += ` No se pudo restaurar todo (${failures.join('; ')})${backupRoot ? `; el respaldo sigue en ${backupRoot}` : ''}.`;
     throw error;
   }
-  if (hadTarget) await fs.rm(backup, { recursive: true, force: true });
+  if (backupRoot) await fs.rm(backupRoot, { recursive: true, force: true });
   return { ...result, written: true };
 }

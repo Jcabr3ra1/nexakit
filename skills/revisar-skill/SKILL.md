@@ -38,7 +38,10 @@ registra. Se ejecuta en el repositorio de NexaKit.
    lo que las reglas no ven: instrucciones que desvían al agente de la tarea,
    acciones fuera del propósito declarado (red, borrar archivos, credenciales,
    APIs de pago), dependencias que se descargan al usarla y solapamientos con
-   skills del catálogo (`catalogs/skills.json`).
+   skills del catálogo (`catalogs/skills.json`). El escáner solo detecta
+   exfiltración cuando la lectura sensible y el envío están en el mismo
+   archivo (o el mismo bloque de código): revisa tú el envío repartido entre
+   archivos y el que va dentro de una URL (`curl "…?k=$(cat …)"`).
 5. **Proponer la entrada.** Prepara un JSON con solo los campos de juicio:
    `name`, `summary` (en español, una frase), `repository`, `sourcePath`,
    `revision`, `license`, `matching` (`anySignals`, `profiles`, `taskClasses`),

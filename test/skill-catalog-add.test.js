@@ -109,3 +109,16 @@ test('si la auditoría falla tras escribir, se restaura todo', async t => {
   assert.equal(await fs.readFile(path.join(tk.root, 'catalogs/skills.json'), 'utf8'), tk.catalogText);
   await assert.rejects(fs.stat(path.join(tk.root, 'catalogs/skills/nueva-skill')));
 });
+
+test('la copia de respaldo nunca queda dentro de catalogs/', async t => {
+  const tk = await toolkit(t);
+  const dir = await source(t, { 'SKILL.md': '# Cambiada\n' });
+  let during = [];
+  const audit = async () => { during = await fs.readdir(path.join(tk.root, 'catalogs/skills')); return { ok: false, errors: ['fallo simulado'] }; };
+  await assert.rejects(addCatalogSkill({ toolkitRoot: tk.root, sourceDir: dir, entry: entry({ name: tk.existing.name }), apply: true, audit }), /fallo simulado/);
+  assert.deepEqual(during, [tk.existing.name]);
+  assert.deepEqual(await fs.readdir(path.join(tk.root, 'catalogs/skills')), [tk.existing.name]);
+  assert.equal(await fs.readFile(path.join(tk.root, tk.existing.installedPath, 'SKILL.md'), 'utf8'), '# Existente\n');
+  assert.equal(await fs.readFile(path.join(tk.root, 'catalogs/skills.json'), 'utf8'), tk.catalogText);
+  assert.deepEqual((await fs.readdir(tk.root)).filter(n => n.startsWith('.catalog-add-')), []);
+});

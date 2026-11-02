@@ -161,3 +161,11 @@ test('audit warns about undeclared capabilities', async t => {
   assert.ok(report.warnings.includes(`${skill.name}: capacidad no declarada: network.`));
   assert.ok(!report.warnings.includes(`${skill.name}: capacidad no declarada: processes.`));
 });
+
+test('audit warns about folders in catalogs/skills that the catalog does not list', async t => {
+  const { auditSkillCatalog } = await import('../src/skill-catalog-audit.js');
+  const f = await fixture(t);
+  await fs.mkdir(path.join(f.root, 'catalogs/skills/huerfana.anterior-123'), { recursive: true });
+  const report = await auditSkillCatalog({ toolkitRoot: f.root });
+  assert.ok(report.warnings.includes('Carpeta sin entrada en el catálogo: catalogs/skills/huerfana.anterior-123.'));
+});

@@ -88,6 +88,13 @@ export async function auditSkillCatalog({ toolkitRoot = DEFAULT_CATALOG_ROOT } =
       report.errors.push(error.message);
     }
   }
+  // Anything left in catalogs/skills without an entry (an interrupted registration, a stray copy) would ship in the package.
+  const listed = new Set(catalog.skills.map(skill => skill.installedPath));
+  const entries = await fs.readdir(path.join(toolkitRoot, 'catalogs/skills'), { withFileTypes: true }).catch(() => []);
+  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    const rel = `catalogs/skills/${entry.name}`;
+    if (!listed.has(rel)) report.warnings.push(`Carpeta sin entrada en el catálogo: ${rel}.`);
+  }
   report.ok = report.errors.length === 0;
   return report;
 }
