@@ -5,10 +5,10 @@ export const RECOMMENDED_REVIEWERS = Object.freeze({
   codex: 'claude',
   antigravity: 'claude',
 });
-export function selectReviewer({ principal, available, certified, sessionChoice, requested }) {
+export function selectReviewer({ principal, available, certified, pending = [], sessionChoice, requested }) {
   if (!CLIENTS.includes(principal)) throw new Error('IA principal inválida.');
   const options = CLIENTS.filter(
-    (ia) => ia !== principal && available.includes(ia) && certified.includes(ia),
+    (ia) => ia !== principal && available.includes(ia) && (certified.includes(ia) || pending.includes(ia)),
   );
   const recommended = options.includes(RECOMMENDED_REVIEWERS[principal])
     ? RECOMMENDED_REVIEWERS[principal]
@@ -17,6 +17,7 @@ export function selectReviewer({ principal, available, certified, sessionChoice,
   const selected = options.includes(preferred) ? preferred : options.length === 1 ? options[0] : null;
   return {
     options,
+    pending: options.filter((ia) => !certified.includes(ia) && pending.includes(ia)),
     recommended,
     selected,
     ask: options.length > 1 && !selected,

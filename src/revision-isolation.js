@@ -8,6 +8,19 @@ import { runRevisionProcess } from './revision-process.js';
 import { snapshotRevision, compareRevisionSnapshots } from './revision-snapshot.js';
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 
+export async function readReviewerRecords(homeDirectory) {
+  const file = path.join(homeDirectory, '.nexakit', 'revisores.json');
+  try {
+    const info = await fs.lstat(file);
+    if (!info.isFile() || info.isSymbolicLink() || info.size > 4 * 1024 * 1024) return {};
+    const saved = JSON.parse(await fs.readFile(file, 'utf8'));
+    return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+  } catch (error) {
+    if (error.code === 'ENOENT' || error instanceof SyntaxError) return {};
+    throw error;
+  }
+}
+
 export async function checkReviewerIsolation({
   client,
   version,
@@ -20,36 +33,47 @@ export async function checkReviewerIsolation({
   const identity = { client, version, platform, isolationProfile };
   const dir = path.join(homeDirectory, '.nexakit'),
     file = path.join(dir, 'revisores.json');
-  const lock = await acquire(dir);
+  const key = hash(JSON.stringify(identity));
+  const matches = (record) =>
+    record && Object.entries(identity).every(([field, value]) => record.identity?.[field] === value);
+  let lock = await acquire(dir);
+  let cached;
   try {
-    let records = {};
-    try {
-      const saved = JSON.parse(await fs.readFile(file, 'utf8'));
-      if (saved && typeof saved === 'object' && !Array.isArray(saved)) records = saved;
-    } catch {}
-    const key = hash(JSON.stringify(identity));
+    cached = (await readReviewerRecords(homeDirectory))[key];
+  } finally {
+    await lock.release();
+  }
+  if (matches(cached) && ['passed', 'failed'].includes(cached.status)) return cached;
+
+  // Model calls never hold the shared installation lock.
+  let evidence;
+  try {
+    evidence = runProbe
+      ? await runProbe()
+      : { status: 'unverified', reason: 'Falta evidencia de aislamiento.' };
+  } catch {
+    evidence = { status: 'unverified', reason: 'No se pudo completar la prueba de aislamiento.' };
+  }
+  const result = {
+    identity,
+    status: ['passed', 'failed'].includes(evidence?.status) ? evidence.status : 'unverified',
+    reason: String(evidence?.reason ?? 'Sin evidencia'),
+    testedAt: new Date().toISOString(),
+  };
+
+  lock = await acquire(dir);
+  try {
+    const latest = await readReviewerRecords(homeDirectory);
+    const other = latest[key];
+    // A concurrent failure always wins over approval. Preserve unrelated records.
     if (
-      records[key]?.status === 'passed' &&
-      JSON.stringify(records[key].identity) === JSON.stringify(identity)
+      matches(other) &&
+      (other.status === 'failed' || (other.status === 'passed' && result.status !== 'failed'))
     )
-      return records[key];
-    let evidence;
-    try {
-      evidence = runProbe
-        ? await runProbe()
-        : { status: 'unverified', reason: 'Falta evidencia de aislamiento.' };
-    } catch {
-      evidence = { status: 'unverified', reason: 'No se pudo completar la prueba de aislamiento.' };
-    }
-    const result = {
-      identity,
-      status: ['passed', 'failed'].includes(evidence?.status) ? evidence.status : 'unverified',
-      reason: String(evidence?.reason ?? 'Sin evidencia'),
-      testedAt: new Date().toISOString(),
-    };
+      return other;
     const temporary = file + '.' + randomUUID();
     await lock.assertHeld();
-    await fs.writeFile(temporary, JSON.stringify({ ...records, [key]: result }), { mode: 0o600, flag: 'wx' });
+    await fs.writeFile(temporary, JSON.stringify({ ...latest, [key]: result }), { mode: 0o600, flag: 'wx' });
     try {
       await lock.assertHeld();
       await fs.rename(temporary, file);

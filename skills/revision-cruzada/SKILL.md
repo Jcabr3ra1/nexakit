@@ -18,13 +18,16 @@ problemas graves, avisa y no declares aprobación. No uses subagentes.
 
 ## Elegir el destino durante la sesión
 
-Detecta las otras CLI disponibles y sus perfiles certificados con nexakit.
+Antes de cada revisión y antes de preguntar ejecuta `nexakit revision --disponibles --principal <IA>`
+(IA: claude, codex o antigravity), una consulta sin llamadas a modelos. Ofrece
+otras IA instaladas con certificación «sí» o «pendiente». Para pendientes,
+avisa de que la primera vez se certifican; no ofrezcas certificación «no».
 Nunca elijas la IA que programa. No elijas un destino durante el arranque ni
 lo guardes en answers, configuración, disco o memoria: vive en la conversación.
 Recomendación: Claude → Codex; Codex → Claude; Antigravity → Claude.
 
 En la primera revisión con varias opciones pregunta «¿A dónde mando la revisión?»
-y ofrece solo otras IA disponibles y certificadas, marcando la recomendada.
+y ofrece solo otras IA instaladas elegibles según esa consulta, marcando la recomendada.
 Claude usa su selector de preguntas; Codex y Antigravity hacen una pregunta
 normal. Si solo hay una opción, úsala sin preguntar; ninguna: avisa que no hay
 revisión disponible. Las siguientes usan la misma y anuncian «Revisando con

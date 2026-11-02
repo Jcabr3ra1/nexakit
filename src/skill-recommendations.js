@@ -1379,8 +1379,16 @@ export async function planToolkitDetach({
   }
 
   return {
-    reviewInstructions: root && !skillNames ? await ownedReviewInstructions(root) : [],
+    reviewInstructions: includeGlobal && !skillNames
+      ? await ownedReviewInstructions({
+          homeDirectory: homeReal,
+          codexHome: codexHome ?? path.join(homeReal, '.codex'),
+          agents: clients
+        })
+      : [],
     homeDirectory: homeReal,
+    reviewCodexHome: codexHome ?? path.join(homeReal, ".codex"),
+    reviewAgents: clients,
     applied: false,
     projectRoot: root,
     toolkitRoot: resolvedToolkit,
@@ -1441,7 +1449,15 @@ export async function applyToolkitDetach(plan) {
 
   if (plan.reviewInstructions?.length) {
     const lock = await acquireLock(nexakitDir(plan.homeDirectory));
-    try { await removeReviewInstructions(plan.projectRoot, lock); } finally { await lock.release(); }
+    try {
+      await removeReviewInstructions({
+        homeDirectory: plan.homeDirectory,
+        codexHome: plan.reviewCodexHome,
+        agents: plan.reviewAgents
+      }, lock);
+    } finally {
+      await lock.release();
+    }
   }
   let removedCount = 0;
   let conflicts = 0;

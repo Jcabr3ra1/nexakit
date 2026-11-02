@@ -121,3 +121,29 @@ test('changing permission settings invalidates the isolation profile without sto
   assert.notEqual(first, second);
   assert.equal(second.includes('write_file'), false);
 });
+
+test('model probes run outside the install lock and failed results are cached by version/profile', async (t) => {
+  const { acquireLock } = await import('../src/install-lock.js');
+  const homeDirectory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'review-unlocked-')));
+  t.after(() => fs.rm(homeDirectory, { recursive: true, force: true }));
+  let calls = 0;
+  const options = {
+    client: 'claude',
+    version: '1',
+    isolationProfile: 'a',
+    homeDirectory,
+    runProbe: async () => {
+      calls++;
+      const lock = await acquireLock(path.join(homeDirectory, '.nexakit'), { waitMs: 0 });
+      await lock.release();
+      return { status: 'failed', reason: 'write succeeded' };
+    },
+  };
+  assert.equal((await checkReviewerIsolation(options)).status, 'failed');
+  assert.equal((await checkReviewerIsolation(options)).status, 'failed');
+  assert.equal(calls, 1);
+  await checkReviewerIsolation({ ...options, version: '2' });
+  assert.equal(calls, 2);
+  await checkReviewerIsolation({ ...options, isolationProfile: 'b' });
+  assert.equal(calls, 3);
+});

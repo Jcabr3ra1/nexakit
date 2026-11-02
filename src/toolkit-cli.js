@@ -26,6 +26,7 @@ const PROFILE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const RECOMMEND_PROFILES = ['frontend', 'backend', 'mcp', 'security'];
 
 const HELP = `Uso: npx nexakit [--project <ruta>] [--si]
+     nexakit revision --disponibles [--principal claude|codex|antigravity]
      nexakit revision --con <ia> --modelo <m> --esfuerzo <e> --encargo <archivo> [--base <rama>]
      npx nexakit quitar [--project <ruta>] [--global] [--agent codex|claude|antigravity|all] [--apply] [--json]
      npx nexakit recommend [--project <ruta>] [--profile frontend|backend|mcp|security] [--client codex|claude] [--dry-run] [--json]

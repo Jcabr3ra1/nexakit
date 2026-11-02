@@ -9,7 +9,7 @@ Los cambios solo documentales y «sin revisión» omiten la revisión automátic
 se retiran. La automatización es una instrucción para la IA, sin hooks.
 
 La primera revisión de la sesión pregunta el destino entre las otras IA
-instaladas y certificadas. Claude usa el selector; Codex y Antigravity una
+instaladas: antes de cada revisión se ejecuta `nexakit revision --disponibles --principal <IA>` (claude, codex o antigravity). La consulta es de solo lectura y no llama modelos. Se ofrecen las certificadas y las pendientes, avisando de que estas últimas se certifican la primera vez; las fallidas no se ofrecen. Claude usa el selector; Codex y Antigravity una
 pregunta normal. Con una opción no pregunta; sin opciones avisa. Recomendadas:
 Claude → Codex; Codex → Claude; Antigravity → Claude. La elección vive en la
 conversación, no en las respuestas del asistente ni en archivos. «que lo revise
@@ -18,6 +18,7 @@ conversación, no en las respuestas del asistente ni en archivos. «que lo revis
 ## Comandos
 
 ```text
+nexakit revision --disponibles --principal codex
 nexakit modelo
 nexakit modelo --nivel Exigente --ia codex
 nexakit revision --con codex --modelo <id real> --esfuerzo high --encargo <archivo> --base main
@@ -41,7 +42,7 @@ carpetas temporales: tres llamadas (escritura dentro, fuera y shell), más una
 consulta MCP de lectura para Antigravity. Estas llamadas adicionales consumen
 tokens. Las instrucciones deben informar su número y alcance antes de consumo
 fuera de lo autorizado. La evidencia se guarda en `~/.nexakit/revisores.json`
-bajo bloqueo. Solo se reutiliza un resultado aprobado para el mismo cliente,
+con el bloqueo limitado a leer y publicar el registro; las llamadas al modelo se hacen fuera de él. Se reutilizan resultados aprobados y fallidos para el mismo cliente,
 versión, plataforma, argumentos y huellas de los ajustes de permisos. No se leen archivos de autenticación ni se guardan los contenidos de esos ajustes. Una CLI no verificable se rechaza.
 
 Las pruebas requieren denegaciones de herramienta, no el relato del modelo.
@@ -71,11 +72,12 @@ sin resolver deben aparecer en el resumen del principal, sin aprobación falsa.
 
 ## Instrucciones y mod opcional
 
-El asistente muestra las escrituras en la confirmación. Instala bloques en
-AGENTS.md, CLAUDE.md y GEMINI.md para las IA elegidas y conserva el contenido
-del usuario. La retirada borra solo el bloque cuyo hash acredita el registro;
-las reglas editadas se conservan. No se modifica la configuración global para
-instalar estas instrucciones. Las skills antiguas registradas se retiran;
+El asistente anuncia «Reglas de trabajo en tus instrucciones de Claude Code,
+Codex…» en la confirmación. Instala los bloques en `~/.claude/CLAUDE.md`,
+`~/.codex/AGENTS.md` (respetando CODEX_HOME) y `~/.gemini/GEMINI.md`, según las
+IA elegidas. Conserva el contenido del usuario y guarda la prueba de propiedad
+en `~/.nexakit/review-instructions.json`; no escribe las reglas en el proyecto. La retirada borra solo el bloque cuyo hash acredita el registro;
+las reglas editadas se conservan. Solo se modifican esos archivos de instrucciones tras la confirmación. Los ajustes, credenciales y permisos de las IA no se reescriben. Las instrucciones globales se retiran únicamente con la retirada global (`quitar --global --apply`); quitar un proyecto no retira reglas compartidas. Las skills antiguas registradas se retiran;
 los conflictos ajenos y MCP/agentes obsoletos se informan para acción manual.
 
 El mod opcional `nexakit-modelo` muestra modelo y esfuerzo observado frente a

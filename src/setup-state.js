@@ -236,7 +236,7 @@ export async function gatherSetupState({
       memory.connections[candidate] = await memoryConnections(candidate, { ...context, kind });
   }
 
-  const reviewInstructions = await planReviewInstructions({ projectRoot: project.root });
+  const reviewInstructions = await planReviewInstructions({ homeDirectory, environment, codexHome });
   return {
     reviewInstructions,
     homeDirectory,

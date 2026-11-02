@@ -7,7 +7,12 @@ import { snapshotRevision, compareRevisionSnapshots } from './revision-snapshot.
 import { buildRevisionInvocation, parseRevisionOutput } from './revision-adapters.js';
 import { runRevisionProcess } from './revision-process.js';
 import { readRevisionProvenance } from './revision-provenance.js';
-import { checkReviewerIsolation, probeReviewer, reviewerProfile } from './revision-isolation.js';
+import {
+  checkReviewerIsolation,
+  probeReviewer,
+  reviewerProfile,
+  readReviewerRecords,
+} from './revision-isolation.js';
 import { resolveCliInvocation } from './cli-executable.js';
 
 async function versionOf(client, environment) {
@@ -108,7 +113,92 @@ export async function runRevision(options, dependencies = {}) {
   }
 }
 
+export async function listAvailableReviewers(
+  { principal, homeDirectory = os.homedir(), environment = process.env },
+  { getVersion = versionOf } = {},
+) {
+  if (!['claude', 'codex', 'antigravity'].includes(principal))
+    throw new Error('Indica la IA principal con --principal claude|codex|antigravity.');
+  const records = Object.values(await readReviewerRecords(homeDirectory));
+  const rows = [];
+  for (const client of ['claude', 'codex', 'antigravity'].filter((client) => client !== principal)) {
+    let version;
+    try {
+      version = await getVersion(client, environment);
+    } catch (error) {
+      rows.push({
+        client,
+        installed: error.code !== 'ENOENT',
+        version: null,
+        certification: error.code === 'ENOENT' ? 'no' : 'pendiente',
+        reason: error.code === 'ENOENT' ? 'CLI no instalada' : 'No se pudo consultar su versión.',
+      });
+      continue;
+    }
+    const profiles = records.filter(
+      (record) =>
+        record?.identity?.client === client &&
+        record.identity.version === version &&
+        record.identity.platform === process.platform,
+    );
+    const certification = profiles.some((record) => record.status === 'passed')
+      ? 'sí'
+      : profiles.some((record) => record.status === 'failed')
+        ? 'no'
+        : 'pendiente';
+    rows.push({
+      client,
+      installed: true,
+      version,
+      certification,
+      profiles: profiles.map((record) => ({
+        profile: record.identity.isolationProfile,
+        status: record.status,
+      })),
+      reason:
+        certification === 'pendiente'
+          ? 'La primera revisión certifica el perfil.'
+          : 'El comando de revisión comprueba además el perfil exacto.',
+    });
+  }
+  return rows;
+}
+
 export async function runRevisionCommand(args, { out, err }, dependencies = {}) {
+  if (args.includes('--disponibles')) {
+    const options = { ...dependencies.options };
+    const seen = new Set();
+    for (let i = 0; i < args.length; i++) {
+      const flag = args[i];
+      if (seen.has(flag)) {
+        await err('Argumentos de disponibilidad inválidos.\n');
+        return 2;
+      }
+      seen.add(flag);
+      if (flag === '--disponibles') continue;
+      if (flag === '--principal' && args[i + 1]) options.principal = args[++i];
+      else {
+        await err('Usa revision --disponibles [--principal <IA>].\n');
+        return 2;
+      }
+    }
+    const env = options.environment ?? process.env;
+    options.principal ??= env.CLAUDECODE
+      ? 'claude'
+      : env.CODEX_THREAD_ID
+        ? 'codex'
+        : env.GEMINI_CLI
+          ? 'antigravity'
+          : null;
+    try {
+      await out(JSON.stringify(await (dependencies.list ?? listAvailableReviewers)(options), null, 2) + '\n');
+      return 0;
+    } catch (error) {
+      await err(error.message + '\n');
+      return 2;
+    }
+  }
+
   const flags = {
     '--con': 'client',
     '--modelo': 'model',

@@ -47,3 +47,15 @@ test('automatic review is once per task for code, respects opt-out, and ignores 
   assert.equal(shouldAutoReview({ changedFiles: ['app.js'], withoutReview: true }), false);
   assert.equal(shouldAutoReview({ changedFiles: ['app.js'], alreadyReviewed: true }), false);
 });
+
+test('installed pending reviewers are offered with a certification warning', () => {
+  const result = selectReviewer({
+    principal: 'claude',
+    available: ['claude', 'codex'],
+    certified: [],
+    pending: ['codex'],
+  });
+  assert.deepEqual(result.options, ['codex']);
+  assert.deepEqual(result.pending, ['codex']);
+  assert.equal(result.selected, 'codex');
+});

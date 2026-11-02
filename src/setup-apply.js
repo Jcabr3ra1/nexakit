@@ -134,7 +134,9 @@ export async function applySetup(
     'review-instructions': () =>
       withLock(homeDirectory, acquire, async (lock) => {
         const plan = await planReviewInstructions({
-          projectRoot: state.project.root,
+          homeDirectory,
+          environment,
+          codexHome,
           agents: answers.agents,
         });
         await applyReviewInstructions(plan, lock);

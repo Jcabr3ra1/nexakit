@@ -195,7 +195,7 @@ export function buildConfirmation(state, answers) {
   if (pendingInstructions.length) {
     add(
       '+',
-      `Reglas de trabajo y revisión automática en ${pendingInstructions.map((item) => item.name).join(', ')}`,
+      `Reglas de trabajo en tus instrucciones de ${joinNames(pendingInstructions.map((item) => AGENT_NAMES[item.client]))}`,
     );
     block('review-instructions', 'Reglas de trabajo de tus IA');
   }

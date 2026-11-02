@@ -69,7 +69,7 @@ test('successful review presents reported usage and does not infer unknown prove
     { client: 'codex', model: 'model', effort: 'low', briefFile, homeDirectory: home },
     {
       validateChoice: async () => {},
-    collectContext: async () => ({ root: home, base: 'main', changedFiles: [], diff: '' }),
+      collectContext: async () => ({ root: home, base: 'main', changedFiles: [], diff: '' }),
       buildInvocation: async () => ({ executable: 'fake', args: [] }),
       getVersion: async () => '1',
       checkIsolation: async () => ({ status: 'passed' }),
@@ -125,7 +125,7 @@ test('blank report is a failure even when a parser returns success', async (t) =
     { client: 'codex', model: 'x', effort: 'low', homeDirectory: home, briefFile },
     {
       validateChoice: async () => {},
-    collectContext: async () => ({ root: home, diff: '', changedFiles: [] }),
+      collectContext: async () => ({ root: home, diff: '', changedFiles: [] }),
       buildInvocation: async () => ({ args: [] }),
       getVersion: async () => '1',
       checkIsolation: async () => ({ status: 'passed' }),
@@ -136,4 +136,71 @@ test('blank report is a failure even when a parser returns success', async (t) =
   );
   assert.equal(result.exitCode, 1);
   assert.equal(result.report, 'El revisor no devolvió informe');
+});
+
+test('availability is read-only, excludes the principal and uses current-version certificates', async (t) => {
+  const { listAvailableReviewers } = await import('../src/revision.js');
+  const homeDirectory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'review-list-')));
+  t.after(() => fs.rm(homeDirectory, { recursive: true, force: true }));
+  await fs.mkdir(path.join(homeDirectory, '.nexakit'));
+  const file = path.join(homeDirectory, '.nexakit', 'revisores.json');
+  const record = (client, version, status) => ({
+    identity: { client, version, platform: process.platform, isolationProfile: 'test' },
+    status,
+  });
+  await fs.writeFile(
+    file,
+    JSON.stringify({ old: record('codex', 'old', 'passed'), agy: record('antigravity', '3', 'failed') }),
+  );
+  const before = await fs.readFile(file, 'utf8');
+  const queried = [];
+  const deps = {
+    getVersion: async (client) => {
+      queried.push(client);
+      return client === 'codex' ? '2' : '3';
+    },
+  };
+  let rows = await listAvailableReviewers({ principal: 'claude', homeDirectory, environment: {} }, deps);
+  assert.deepEqual(
+    rows.map((r) => [r.client, r.installed, r.certification]),
+    [
+      ['codex', true, 'pendiente'],
+      ['antigravity', true, 'no'],
+    ],
+  );
+  assert.equal(queried.includes('claude'), false);
+  assert.equal(await fs.readFile(file, 'utf8'), before);
+  await fs.writeFile(file, JSON.stringify({ current: record('codex', '2', 'passed') }));
+  rows = await listAvailableReviewers(
+    { principal: 'claude', homeDirectory, environment: {} },
+    {
+      getVersion: async (client) => {
+        if (client === 'antigravity') throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+        return '2';
+      },
+    },
+  );
+  assert.equal(rows[0].certification, 'sí');
+  assert.equal(rows[1].installed, false);
+  assert.equal(rows[1].certification, 'no');
+  let output = '';
+  let calls = 0;
+  assert.equal(
+    await runRevisionCommand(
+      ['--disponibles', '--principal', 'claude'],
+      { out: (s) => (output += s), err: () => {} },
+      {
+        options: { homeDirectory, environment: {} },
+        list: async (options) => {
+          calls++;
+          assert.equal(options.principal, 'claude');
+          return rows;
+        },
+        run: () => assert.fail('must not run a model'),
+      },
+    ),
+    0,
+  );
+  assert.equal(calls, 1);
+  assert.equal(JSON.parse(output)[0].client, 'codex');
 });
