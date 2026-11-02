@@ -7,7 +7,8 @@ import { applySetup } from './setup-apply.js';
 import { AGENTS, AGENT_NAMES, buildConfirmation, joinNames, shortPath, suggestedAnswers } from './setup-plan.js';
 import { gatherSetupState, inspectMemoryPath, memoryConnections } from './setup-state.js';
 import { applyToolkitDetach, planToolkitDetach } from './skill-recommendations.js';
-import { cellWidth, fitLine, style, wrapText } from './terminal-text.js';
+import { LOGO_WIDTH, colorLevel, levelOf, paint, renderLogo } from './brand.js';
+import { cellWidth, fitLine, wrapText } from './terminal-text.js';
 
 const KEYS = Object.freeze({
   up: ['\x1b[A', 'k'], down: ['\x1b[B', 'j'], toggle: [' '], enter: ['\r', '\n'],
@@ -328,8 +329,8 @@ function finalLines(model) {
   return { lines, end };
 }
 
-export function renderSetupFrame(model, { columns = 80, color = true } = {}) {
-  const c = style(color);
+function renderBody(model, { columns, level }) {
+  const c = paint(level);
   const width = Math.max(30, columns - 1);
   const out = [];
   const push = (text, paint = value => value) => out.push(paint(fitLine(text, width)));
@@ -338,7 +339,6 @@ export function renderSetupFrame(model, { columns = 80, color = true } = {}) {
     const lines = wrapText(text, Math.max(10, width - Math.max(cellWidth(prefix), cellWidth(continuation))));
     lines.forEach((line, index) => out.push(paint(`${index === 0 ? prefix : continuation}${line}`)));
   };
-  push(`◆ nexakit${model.state.version ? ` v${model.state.version}` : ''}`, c.bold);
   const { state } = model;
 
   if (model.step === 'menu') {
@@ -348,8 +348,8 @@ export function renderSetupFrame(model, { columns = 80, color = true } = {}) {
     push('◇  Todo está listo', c.green);
     for (const text of ready) push(`│  ${text}`, c.dim);
     push('│');
-    push('◆  ¿Quieres cambiar algo?', c.cyan);
-    MENU.forEach(([, label], index) => push(`│ ${index === model.cursor ? '❯' : ' '} ${index === model.cursor ? '●' : '○'} ${label}`, index === model.cursor ? c.cyan : undefined));
+    push('◆  ¿Quieres cambiar algo?', c.accent);
+    MENU.forEach(([, label], index) => push(`│ ${index === model.cursor ? '❯' : ' '} ${index === model.cursor ? '●' : '○'} ${label}`, index === model.cursor ? c.accent : undefined));
     push('└  Enter elegir · q salir', c.dim);
     return out.join('\n');
   }
@@ -357,10 +357,10 @@ export function renderSetupFrame(model, { columns = 80, color = true } = {}) {
   if (['applying', 'done'].includes(model.step)) {
     const agents = joinNames(model.answers.agents.map(agent => AGENT_NAMES[agent]));
     const memory = model.answers.memory.decision === 'path' ? ' · memoria' : '';
-    push(`◇  ${state.project.displayName} · ${model.answers.skills.chosen.length} skills${memory} · ${agents}`, c.dim);
+    push(`◇  ${state.project.displayName} · ${model.answers.skills.chosen.length} ${model.answers.skills.chosen.length === 1 ? 'skill' : 'skills'}${memory} · ${agents}`, c.dim);
     push('│');
     const { lines, end } = finalLines(model);
-    for (const line of lines) push(line, line.startsWith('✗') ? c.red : line.startsWith('◆') ? c.cyan : undefined);
+    for (const line of lines) push(line, line.startsWith('✗') ? c.red : line.startsWith('◆') ? c.accent : undefined);
     if (end.length) {
       push('│');
       push(`└  ${end[0]}`, model.result?.ok ? c.green : c.red);
@@ -380,7 +380,7 @@ export function renderSetupFrame(model, { columns = 80, color = true } = {}) {
       push(`└  Se quitaron ${removable} enlaces. La memoria y tus IA no se tocaron.`);
       return out.join('\n');
     }
-    push('◆  ¿Quitar nexakit de este proyecto?', c.cyan);
+    push('◆  ¿Quitar nexakit de este proyecto?', c.accent);
     push(`│   − ${removable} skills del proyecto y su bloque en .gitignore`);
     if (kept) push(`│   ! ${kept} carpetas tuyas se quedan como están`);
     push('│   La memoria y la configuración de tus IA no se tocan.');
@@ -390,17 +390,26 @@ export function renderSetupFrame(model, { columns = 80, color = true } = {}) {
     return out.join('\n');
   }
 
-  for (const line of folded(model)) pushWrapped('◇  ', line, c.dim, '   ');
+  for (const line of folded(model)) {
+    if (level !== 'none' && line.startsWith('Detecté: ')) {
+      const labels = line.slice('Detecté: '.length).split(' · ');
+      if (cellWidth(`◇  Detecté: ${labels.map((label) => ` ${label} `).join(' ')}`) <= width) {
+        out.push(`${c.dim('◇  Detecté:')} ${labels.map((label) => (/^y \d+ más$/u.test(label) ? c.dim(label) : c.chip(label))).join(' ')}`);
+        continue;
+      }
+    }
+    pushWrapped('◇  ', line, c.dim, '   ');
+  }
   push('│');
   const q = question(model);
-  push(`◆  ${q.title}`, c.cyan);
+  push(`◆  ${q.title}`, c.accent);
   for (const row of q.body) {
     const text = row.text.startsWith(' ') ? row.text.slice(1) : row.text;
     const marker = row.text.startsWith(' ') && /^ [+−↻!✓] /u.test(row.text) ? `│   ${text.slice(0, 2)}` : `│ ${row.cursor ? '❯' : ' '} `;
     const shown = marker.startsWith('│   ') && /^[+−↻!✓] /u.test(text) ? text.slice(2) : text;
     // A checkbox or radio row continues under its label, not under the box.
     const continuation = /^[◼◻●○] /u.test(shown) ? `│${' '.repeat(marker.length + 1)}` : undefined;
-    pushWrapped(marker, shown, row.cursor ? c.cyan : undefined, continuation);
+    pushWrapped(marker, shown, row.cursor ? c.accent : undefined, continuation);
   }
   for (const line of q.info) {
     if (!line) push('│');
@@ -412,8 +421,47 @@ export function renderSetupFrame(model, { columns = 80, color = true } = {}) {
 
 // ── Loop ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
+const STEP_NUMBER = Object.freeze({ skills: 1, memory: 2, 'memory-path': 2, agents: 3, confirm: 4 });
+const STEP_COUNT = 4;
+const TAGLINE = 'Tus skills. Tu memoria. Tus IA trabajando juntas.';
+const TAGLINE_SHORT = 'Skills, memoria e IA, juntas.';
+
+// El logo solo sale cuando hay color, ancho y alto de sobra; si no, queda la línea de siempre con el paso.
+function renderHeader(model, { columns, rows, level, bodyRows }) {
+  const c = paint(level);
+  const width = Math.max(30, columns - 1);
+  const version = model.state.version ? ` v${model.state.version}` : '';
+  const number = model.flow === 'full' ? STEP_NUMBER[model.step] : undefined;
+  const steps = number ? `Paso ${number} de ${STEP_COUNT}` : '';
+  const dots = number ? Array.from({ length: STEP_COUNT }, (_, index) => (index < number ? '●' : '○')).join('') : '';
+  const celebrates = model.step === 'done' && model.result?.ok;
+
+  if (level !== 'none' && columns >= LOGO_WIDTH + 4 && (['skills', 'menu'].includes(model.step) || celebrates)) {
+    const tagline = fitLine(width - 2 >= cellWidth(TAGLINE) ? TAGLINE : TAGLINE_SHORT, width - 2);
+    const sub = celebrates ? `✓ Todo listo · ${version.trim()}` : `${version.trim()}${steps ? ` · ${steps} ${dots}` : ''}`;
+    const fitted = fitLine(sub, width - 2);
+    const painted = fitted === sub && steps && !celebrates
+      ? `${c.dim(`${version.trim()} · ${steps} `)}${c.accent(dots.slice(0, number))}${c.dim(dots.slice(number))}`
+      : celebrates ? c.green(fitted) : c.dim(fitted);
+    const block = ['', ...renderLogo(level).map((line) => `  ${line}`), '', `  ${c.soft(tagline)}`, `  ${painted}`, ''];
+    if (!rows || block.length + bodyRows <= rows - 1) return block;
+  }
+
+  const plain = `◆ nexakit${version}${steps ? ` · ${steps} ${dots}` : ''}`;
+  if (cellWidth(plain) > width) return [c.bold(fitLine(plain, width))];
+  const tail = steps ? `${c.dim(` · ${steps} `)}${c.accent(dots.slice(0, number))}${c.dim(dots.slice(number))}` : '';
+  return [`${c.accent('◆ nexakit')}${c.dim(version)}${tail}`];
+}
+
+export function renderSetupFrame(model, { columns = 80, rows, color = true } = {}) {
+  const level = levelOf(color);
+  const body = renderBody(model, { columns, level });
+  const header = renderHeader(model, { columns, rows, level, bodyRows: body.split('\n').length });
+  return `${header.join('\n')}\n${body}`;
+}
+
 export async function runSetupTui({ input = process.stdin, output = process.stdout, options = {}, applyOptions = {} } = {}) {
-  const useColor = Boolean(output.isTTY && !process.env.NO_COLOR);
+  const level = colorLevel(output);
   const home = options.homeDirectory ?? os.homedir();
   output.write('Revisando el proyecto…\n');
   let model = createSetupModel(await gatherSetupState(options));
@@ -421,7 +469,7 @@ export async function runSetupTui({ input = process.stdin, output = process.stdo
   // The questions live on the alternate screen, where moving home and erasing redraws in place: clearing the
   // normal screen pushes a copy of every frame into the scrollback in most terminals. On exit the last frame is
   // printed once on the normal screen, so the result stays readable.
-  const frame = () => renderSetupFrame(model, { columns: output.columns || 80, color: useColor });
+  const frame = () => renderSetupFrame(model, { columns: output.columns || 80, rows: output.rows, color: level });
   const render = () => output.write(`\x1b[H\x1b[J${frame()}\n`);
 
   return new Promise(resolve => {
