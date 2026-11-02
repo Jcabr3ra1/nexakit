@@ -125,7 +125,10 @@ export function parseRevisionOutput(client, stdout) {
       data = events.findLast((e) => e.event === 'result')?.result;
       const init = events.find((e) => e.event === 'init')?.init;
       if (data && init?.model) data = { ...data, model: init.model };
-    } else data = JSON.parse(stdout);
+    } else {
+      data = JSON.parse(stdout);
+      if (client === 'antigravity' && data.event === 'result') data = data.result;
+    }
     if (
       !data ||
       data.is_error ||

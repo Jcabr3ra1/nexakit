@@ -412,6 +412,7 @@ test('retired skills are removed only when registered and unchanged', async t =>
  await fs.mkdir(path.join(f.homeDirectory,'.agents','skills','estado'));
  const preview=await setupToolkit({...f,agent:'codex',environment:{PATH:''}});
  assert.equal(preview.retiredSkills.find(s=>s.name==='programar').owned,true);
+ assert.equal(preview.conflicts,1);
  await setupToolkit({...f,agent:'codex',apply:true,environment:{PATH:''}});
  await assert.rejects(fs.lstat(target));assert.ok((await fs.stat(path.join(f.homeDirectory,'.agents','skills','estado'))).isDirectory());
 });

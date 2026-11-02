@@ -282,7 +282,9 @@ export async function setupToolkit({
     skills,
     retiredSkills,
     obsolete,
-    conflicts: skills.filter((s) => ['conflicto', 'roto-ajeno'].includes(s.state)).length,
+    conflicts:
+      skills.filter((s) => ['conflicto', 'roto-ajeno'].includes(s.state)).length +
+      retiredSkills.filter((s) => !s.owned).length,
     changed,
     clients,
     linkRoot,

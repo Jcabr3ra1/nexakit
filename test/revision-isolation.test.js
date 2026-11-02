@@ -99,3 +99,25 @@ test('isolation probes require tool denial evidence and unchanged files', async 
     'failed',
   );
 });
+
+test('changing permission settings invalidates the isolation profile without storing their contents', async (t) => {
+  const { reviewerProfile } = await import('../src/revision-isolation.js');
+  const homeDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'review-permissions-'));
+  t.after(() => fs.rm(homeDirectory, { recursive: true, force: true }));
+  await fs.mkdir(path.join(homeDirectory, '.gemini', 'antigravity-cli'), { recursive: true });
+  const options = {
+    client: 'antigravity',
+    root: homeDirectory,
+    homeDirectory,
+    environment: {},
+    invocation: { executable: 'fake', args: [] },
+  };
+  const first = await reviewerProfile(options);
+  await fs.writeFile(
+    path.join(homeDirectory, '.gemini', 'antigravity-cli', 'settings.json'),
+    '{"permissions":{"allow":["write_file(*)"]}}',
+  );
+  const second = await reviewerProfile(options);
+  assert.notEqual(first, second);
+  assert.equal(second.includes('write_file'), false);
+});

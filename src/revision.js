@@ -2,13 +2,12 @@ import fs from 'node:fs/promises';
 import { validateReviewChoice } from './model-command.js';
 import os from 'node:os';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
 import { collectRevisionContext, enforceReviewDiffLimit } from './revision-context.js';
 import { snapshotRevision, compareRevisionSnapshots } from './revision-snapshot.js';
 import { buildRevisionInvocation, parseRevisionOutput } from './revision-adapters.js';
 import { runRevisionProcess } from './revision-process.js';
 import { readRevisionProvenance } from './revision-provenance.js';
-import { checkReviewerIsolation, probeReviewer } from './revision-isolation.js';
+import { checkReviewerIsolation, probeReviewer, reviewerProfile } from './revision-isolation.js';
 import { resolveCliInvocation } from './cli-executable.js';
 
 async function versionOf(client, environment) {
@@ -46,14 +45,13 @@ export async function runRevision(options, dependencies = {}) {
     enforceReviewDiffLimit(context.diff);
     const invocation = await buildInvocation({ ...options, root: context.root, environment });
     const version = await getVersion(options.client, environment);
-    const profile = createHash('sha256')
-      .update(
-        JSON.stringify({
-          executable: invocation.executable,
-          args: invocation.args.map((a) => (a === context.root ? '<root>' : a)),
-        }),
-      )
-      .digest('hex');
+    const profile = await reviewerProfile({
+      client: options.client,
+      invocation,
+      root: context.root,
+      homeDirectory,
+      environment,
+    });
     const evidence = await checkIsolation({
       client: options.client,
       version,

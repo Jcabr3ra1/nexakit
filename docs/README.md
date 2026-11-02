@@ -104,3 +104,5 @@ Para una reorganización, utiliza la skill
 - [Integración y adaptación de Superpowers](skills/superpowers-integration.md)
 - [Fuentes de las skills](skills/fuentes-de-skills.md)
 
+
+- [Revisión entre IA en una terminal](agentes/coordinacion/revision-entre-ia.md)

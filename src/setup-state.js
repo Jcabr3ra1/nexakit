@@ -178,7 +178,9 @@ export async function gatherSetupState({
         agent,
         {
           pending: items.filter((item) => ACTIONABLE_LINK_STATES.includes(item.state)).length,
-          conflicts: items.filter((item) => CONFLICT_LINK_STATES.has(item.state)).length,
+          conflicts:
+            items.filter((item) => CONFLICT_LINK_STATES.has(item.state)).length +
+            (setup.retiredSkills ?? []).filter((item) => item.client === agent && !item.owned).length,
         },
       ];
     }),

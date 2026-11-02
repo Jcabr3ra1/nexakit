@@ -150,3 +150,49 @@ export async function probeReviewer({
     await fs.rm(temp, { recursive: true, force: true });
   }
 }
+
+export async function reviewerProfile({
+  client,
+  invocation,
+  root,
+  homeDirectory,
+  environment = process.env,
+}) {
+  const files = {
+    claude: [
+      path.join(environment.CLAUDE_CONFIG_DIR ?? path.join(homeDirectory, '.claude'), 'settings.json'),
+      path.join(homeDirectory, '.claude.json'),
+      path.join(root, '.claude', 'settings.json'),
+      path.join(root, '.claude', 'settings.local.json'),
+    ],
+    codex: [
+      path.join(environment.CODEX_HOME ?? path.join(homeDirectory, '.codex'), 'config.toml'),
+      path.join(root, '.codex', 'config.toml'),
+    ],
+    antigravity: [
+      path.join(homeDirectory, '.gemini', 'antigravity-cli', 'settings.json'),
+      path.join(homeDirectory, '.gemini', 'config', 'mcp_config.json'),
+      path.join(root, '.gemini', 'settings.json'),
+    ],
+  };
+  const configurations = [];
+  for (const file of files[client] ?? []) {
+    try {
+      const stat = await fs.lstat(file);
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 4 * 1024 * 1024)
+        throw new Error('Configuración de permisos no verificable.');
+      configurations.push(hash(await fs.readFile(file)));
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      configurations.push('absent');
+    }
+  }
+  // Only digests enter the certificate. Never read authentication files.
+  return hash(
+    JSON.stringify({
+      executable: invocation.executable,
+      args: invocation.args.map((arg) => (arg === root ? '<root>' : arg)),
+      configurations,
+    }),
+  );
+}

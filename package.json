@@ -14,10 +14,11 @@
     "agent-toolkit-gemini": "./bin/agent-toolkit-gemini.js"
   },
   "scripts": {
-    "test": "node --test --import ./test-support/git-quiet.js",
+    "test": "node --test --import ./test-support/git-quiet.js \"test/*.test.js\"",
     "catalog:validate": "node scripts/validate-skill-catalog.js",
     "catalog:files": "node scripts/validate-skill-catalog.js --files",
-    "prepack": "node scripts/prepare-package.js"
+    "prepack": "node scripts/prepare-package.js",
+    "test:mod": "claude plugin test plugins/nexakit-modelo"
   },
   "engines": {
     "node": ">=24"
