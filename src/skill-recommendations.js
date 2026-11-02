@@ -1,3 +1,4 @@
+import { ownedReviewInstructions, removeReviewInstructions } from './review-instructions.js';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -1378,6 +1379,8 @@ export async function planToolkitDetach({
   }
 
   return {
+    reviewInstructions: root && !skillNames ? await ownedReviewInstructions(root) : [],
+    homeDirectory: homeReal,
     applied: false,
     projectRoot: root,
     toolkitRoot: resolvedToolkit,
@@ -1436,6 +1439,10 @@ export async function applyToolkitDetach(plan) {
     throw new Error('Se requiere una vista previa válida de desacoplado.');
   }
 
+  if (plan.reviewInstructions?.length) {
+    const lock = await acquireLock(nexakitDir(plan.homeDirectory));
+    try { await removeReviewInstructions(plan.projectRoot, lock); } finally { await lock.release(); }
+  }
   let removedCount = 0;
   let conflicts = 0;
   const updatedItems = [];
@@ -1629,5 +1636,6 @@ export function formatDetachReport(report) {
     for (const cmd of report.manualCommands) lines.push(`  $ ${cmd}`);
   }
 
+  if (report.reviewInstructions?.length) lines.push(`  - Quitar solo el bloque de revisión de ${report.reviewInstructions.join(', ')}`);
   return lines.join('\n') + '\n';
 }

@@ -183,6 +183,22 @@ export function buildConfirmation(state, answers) {
     }
   }
 
+  const instructionNames = new Set(
+    agents.map((agent) => ({ claude: 'CLAUDE.md', codex: 'AGENTS.md', antigravity: 'GEMINI.md' })[agent]),
+  );
+  const instructionItems = (state.reviewInstructions?.items ?? []).filter((item) =>
+    instructionNames.has(item.name),
+  );
+  for (const item of instructionItems.filter((item) => item.state === 'conflict'))
+    add('!', `${item.name}: las instrucciones existentes no se pueden actualizar; no las toco`);
+  const pendingInstructions = instructionItems.filter((item) => item.state === 'pending');
+  if (pendingInstructions.length) {
+    add(
+      '+',
+      `Reglas de trabajo y revisión automática en ${pendingInstructions.map((item) => item.name).join(', ')}`,
+    );
+    block('review-instructions', 'Reglas de trabajo de tus IA');
+  }
   if (answersChanged && (blocks.length || state.savedAnswers)) {
     // Saved first, before any block that can fail, so a retry starts from what the person decided.
     blocks.unshift({ id: 'answers', label: 'Respuestas guardadas' });

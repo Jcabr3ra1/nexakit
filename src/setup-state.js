@@ -3,6 +3,7 @@
 // Nothing here writes; setup-apply.js does, after the person confirms.
 import fs from 'node:fs/promises';
 import os from 'node:os';
+import { planReviewInstructions } from './review-instructions.js';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { connectMemory } from './connect.js';
@@ -233,7 +234,9 @@ export async function gatherSetupState({
       memory.connections[candidate] = await memoryConnections(candidate, { ...context, kind });
   }
 
+  const reviewInstructions = await planReviewInstructions({ projectRoot: project.root });
   return {
+    reviewInstructions,
     homeDirectory,
     version,
     project,
