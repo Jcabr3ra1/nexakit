@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing';
 import {
   alias, barra, barraEsfuerzo, crear, duracion, ejemplo, estadoPorFamilia, etiquetaEnjambre, etiquetaModelo, familia, hora,
-  iniciarAgente, registrarAsesor, registrarHerramienta, registrarPaso, registrarRecomendacion, registrarUso, resumenDelegacion, sinSecretos, terminarAgente, tituloDeOrquesta, tokens,
+  iniciarAgente, registrarAsesor, registrarHerramienta, registrarPaso, registrarRecomendacion, registrarUso, resumenDelegacion, sinSecretos, esRevision, iniciarRevision, leerSalidaRevision, terminarRevision, terminarAgente, tituloDeOrquesta, tokens,
 } from '../hooks/panel.js';
 
 describe('nexakit-panel · lógica', () => {
@@ -210,6 +210,31 @@ describe('nexakit-panel · diagrama', () => {
     expect(sinSecretos('API_KEY=sk-123 node app')).toBe('API_KEY=*** node app');
     expect(sinSecretos('mysql --password=hunter2 db')).toBe('mysql --password=*** db');
     expect(sinSecretos('npm test')).toBe('npm test');
+  });
+
+  test('reconoce una revisión enviada a otra IA y no confunde la consulta de disponibles', () => {
+    expect(esRevision('~/.nexakit/nexakit revision --con codex --modelo gpt-6.1-sol --esfuerzo high --encargo /tmp/e.md')).toEqual({ ia: 'codex', modelo: 'gpt-6.1-sol', esfuerzo: 'high' });
+    expect(esRevision('C:\\Users\\x\\.nexakit\\nexakit.cmd revision --con antigravity --modelo gemini-3.8-flash-high --esfuerzo high --encargo e.md')).toMatchObject({ ia: 'antigravity' });
+    expect(esRevision('~/.nexakit/nexakit revision --disponibles --principal claude')).toBeNull();
+    expect(esRevision('npm test')).toBeNull();
+  });
+
+  test('lee del resultado de la revisión el modelo que respondió y los tokens reales', () => {
+    const salida = 'Informe…\nModelo pedido: gpt-6.1-sol · high · Modelo que respondió: gpt-6.1-sol · high (registro)\nTokens: entrada 41000 (caché 3000) · salida 900\n';
+    expect(leerSalidaRevision(salida)).toEqual({ respondio: 'gpt-6.1-sol', entrada: 41000, cache: 3000, salida: 900 });
+    expect(leerSalidaRevision('Tokens: entrada no informado (caché no informado) · salida no informado')).toEqual({ respondio: null, entrada: null, cache: null, salida: null });
+    expect(leerSalidaRevision('')).toEqual({ respondio: null, entrada: null, cache: null, salida: null });
+  });
+
+  test('una revisión empieza, termina con sus cifras y se ve en el estado y el registro', () => {
+    let s = iniciarRevision(crear(), { id: 'r1', ia: 'codex', modelo: 'gpt-6.1-sol', esfuerzo: 'high', at: 1000 });
+    expect(s.revisiones[0]).toMatchObject({ ia: 'codex', estado: 'revisando', fin: null });
+    expect(estadoPorFamilia(s)).toContain('codex [revisando]');
+    s = terminarRevision(s, { id: 'r1', ok: true, at: 46_000, cifras: { respondio: 'gpt-6.1-sol', entrada: 41000, cache: 3000, salida: 900 } });
+    expect(s.revisiones[0]).toMatchObject({ estado: 'lista', fin: 46_000, entrada: 41000, salida: 900 });
+    expect(estadoPorFamilia(s)).toContain('codex [revisó]');
+    expect(s.registro.map((r) => r.quien)).toEqual(['codex', 'codex']);
+    expect(terminarRevision(s, { id: 'no', ok: true, at: 1, cifras: null })).toBe(s);
   });
 });
 

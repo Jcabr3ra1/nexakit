@@ -10,6 +10,19 @@ export type PanelAgente = {
   escritos: number;
   ultimo: string;
 };
+export type PanelRevision = {
+  id: string;
+  ia: string;
+  modelo: string | null;
+  esfuerzo: string | null;
+  estado: 'revisando' | 'lista' | 'error';
+  inicio: number;
+  fin: number | null;
+  entrada: number | null;
+  cache: number | null;
+  salida: number | null;
+  respondio: string | null;
+};
 export type PanelRegistro = { t: number; quien: string; texto: string; ms?: number };
 export type PanelEstado = {
   lider: { modelo: string | null; esfuerzo: string | null; leidos: number; escritos: number; herramientas: number };
@@ -18,6 +31,7 @@ export type PanelEstado = {
   registro: PanelRegistro[];
   pasos: number;
   recomendacion: { modelo: string; esfuerzo: string; motivo: string } | null;
+  revisiones: PanelRevision[];
 };
 
 declare module 'claude-code' {

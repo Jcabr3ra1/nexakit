@@ -9,7 +9,11 @@ export const ANCHO = 104;
 export const COLOR = {
   sonnet: '#fb923c', haiku: '#60a5fa', opus: '#a78bfa', fable: '#f472b6', otro: '#9ca3af',
   ok: '#4ade80', error: '#f87171', texto: '#e5e7eb', tenue: '#6b7280', resalte: '#2e2a4a',
+  codex: '#2dd4bf', antigravity: '#fbbf24', claude: '#fb923c',
 };
+const NOMBRE_IA = { codex: 'Codex', antigravity: 'Antigravity', claude: 'Claude' };
+const colorIA = (ia) => COLOR[ia] ?? COLOR.otro;
+const REVISION = { x: 84, w: 20, h: 8 };
 const colorDe = (modelo) => COLOR[familia(modelo)] ?? COLOR.otro;
 
 // Geometría, tomada de la imagen de referencia.
@@ -60,25 +64,26 @@ function aTramos(celdas) {
 
 export const texto = (filas) => filas.map((tramos) => tramos.map((x) => x.t).join(''));
 
-export function dibujar(estado, { ahora, uso, carpeta = '', filasMax, asesorModelo = null, esEjemplo = false } = {}) {
+export function dibujar(estado, { ahora, uso, carpeta = '', filasMax, asesorModelo = null, esEjemplo = false, codex = null } = {}) {
   const s = estado;
   const vacio = s.pasos === 0 && s.agentes.length === 0 && s.registro.length === 0;
   const medidores = medidoresDeUso(uso);
 
   if (vacio) {
-    const L = lienzo(7);
+    const L = lienzo(codex ? 8 : 7);
     L.centro(0, ANCHO, 0, 'NEXAKIT · ORQUESTA', { c: COLOR.opus, b: true });
     L.poner(2, 1, '═'.repeat(ANCHO - 4), { c: COLOR.tenue });
     L.centro(0, ANCHO, 3, 'Aún no hay actividad en esta sesión.', { c: COLOR.texto });
     L.centro(0, ANCHO, 4, 'Trabaja con normalidad: este panel se llena solo.', { c: COLOR.tenue });
     if (medidores.length) pintarMedidores(L, 6, medidores);
-    return { filas: aTramos(L.celdas), ancho: ANCHO, alto: 7 };
+    if (codex) pintarCodex(L, medidores.length ? 7 : 6, codex, ahora);
+    return { filas: aTramos(L.celdas), ancho: ANCHO, alto: codex ? 8 : 7 };
   }
 
   // El registro ocupa lo que sobre: entre 1 y 8 líneas (4 por defecto, como la referencia).
   // Filas fijas: hasta el registro, sus dos bordes, una en blanco, la orden, el estado y el uso si lo hay.
   const lineaModelo = s.lider.modelo ? modeloFrenteARecomendado(s) : null;
-  const fijas = REGISTRO_Y + 2 + 3 + (medidores.length ? 1 : 0) + (lineaModelo ? 1 : 0);
+  const fijas = REGISTRO_Y + 2 + 3 + (medidores.length ? 1 : 0) + (lineaModelo ? 1 : 0) + (codex ? 1 : 0);
   const lineasRegistro = Math.max(1, Math.min(8, filasMax ? filasMax - fijas : 4, s.registro.length || 1));
   const alto = fijas + lineasRegistro;
   const L = lienzo(alto);
@@ -104,6 +109,8 @@ export function dibujar(estado, { ahora, uso, carpeta = '', filasMax, asesorMode
   if (s.lider.modelo) leyenda.push([`${lider.toLowerCase()} · líder`, cLider]);
   if (enjambre) leyenda.push([`${enjambre.toLowerCase()} · enjambre`, cEnjambre]);
   leyenda.push(['delegación', COLOR.ok], ['asesor', COLOR.opus]);
+  const revision = (s.revisiones ?? []).at(-1);
+  if (revision) leyenda.push([`${revision.ia} · revisa`, colorIA(revision.ia)]);
   x = 4;
   for (const [txt, color] of leyenda) { L.poner(x, 2, '■', { c: color }); L.poner(x + 2, 2, txt, { c: COLOR.texto }); x += [...txt].length + 7; }
 
@@ -116,6 +123,23 @@ export function dibujar(estado, { ahora, uso, carpeta = '', filasMax, asesorMode
   const esf = `esfuerzo ${barraEsfuerzo(s.lider.esfuerzo)} ${s.lider.esfuerzo ?? ''}`.trimEnd();
   L.centro(lx + 1, LIDER.w - 2, LIDER.y + 4, esf, { c: COLOR.texto });
   L.centro(lx + 1, LIDER.w - 2, LIDER.y + 5, `--model ${alias(s.lider.modelo)}`, { c: COLOR.tenue });
+
+  // ---- Revisión externa (a la derecha del líder)
+  if (revision) {
+    const c = colorIA(revision.ia);
+    L.poner(lx + LIDER.w, LIDER.y + 3, '▶', { c });
+    L.caja(REVISION.x, LIDER.y, REVISION.w, REVISION.h, c);
+    const dentro = (y, txt, estilo) => L.centro(REVISION.x + 1, REVISION.w - 2, y, txt, estilo);
+    dentro(LIDER.y + 1, 'REVISIÓN', { c, b: true });
+    dentro(LIDER.y + 2, NOMBRE_IA[revision.ia] ?? revision.ia, { c });
+    dentro(LIDER.y + 3, revision.respondio ?? revision.modelo ?? 'modelo ?', { c: COLOR.texto });
+    dentro(LIDER.y + 4, revision.esfuerzo ? `esfuerzo ${revision.esfuerzo}` : '', { c: COLOR.tenue });
+    const t = duracion((revision.fin ?? ahora) - revision.inicio);
+    const est = revision.estado === 'lista' ? [`✓ lista · ${t}`, COLOR.ok] : revision.estado === 'error' ? ['✗ falló', COLOR.error] : [`◐ revisando ${t}`, c];
+    dentro(LIDER.y + 5, est[0], { c: est[1] });
+    const total = (revision.entrada ?? 0) + (revision.salida ?? 0);
+    dentro(LIDER.y + 6, total ? `tokens ${tokens(total)}` : 'tokens —', { c: COLOR.tenue });
+  }
 
   // ---- Delegación
   const dx = CX - DELEGACION.w / 2;
@@ -253,7 +277,9 @@ export function dibujar(estado, { ahora, uso, carpeta = '', filasMax, asesorMode
   if (lineaModelo) {
     L.poner(2, ly, lineaModelo.actual, { c: COLOR.texto });
     L.poner(2 + [...lineaModelo.actual].length, ly, lineaModelo.cola, { c: lineaModelo.coincide ? COLOR.ok : '#facc15', b: !lineaModelo.coincide });
+    ly++;
   }
+  if (codex) pintarCodex(L, ly, codex, ahora);
 
   return { filas: aTramos(L.celdas), ancho: ANCHO, alto };
 }
@@ -280,6 +306,24 @@ function pintarMedidores(L, y, medidores) {
     L.poner(x, y, pct, { c: COLOR.texto, b: true }); x += pct.length + 4;
   }
 }
+const hace = (ms) => (ms < 60_000 ? `hace ${Math.max(0, Math.round(ms / 1000))} s` : ms < 3_600_000 ? `hace ${Math.round(ms / 60_000)} min` : `hace ${Math.round(ms / 3_600_000)} h`);
+// Uso de Codex leído de su propia sesión: tokens, límites y cuándo fue la última actividad.
+function pintarCodex(L, y, codex, ahora) {
+  let x = 2;
+  const cabeza = `codex ${codex.modelo ?? '?'}${codex.esfuerzo ? ` · ${codex.esfuerzo}` : ''}`;
+  L.poner(x, y, cabeza, { c: COLOR.codex, b: true }); x += [...cabeza].length + 2;
+  const tok = `leídos ${tokens(codex.leidos)} · escritos ${tokens(codex.escritos)}`;
+  L.poner(x, y, tok, { c: COLOR.texto }); x += [...tok].length + 2;
+  for (const [nombre, p] of [['5 h', codex.limite5h], ['semana', codex.limiteSemana]]) {
+    if (!esNumero(p)) continue;
+    L.poner(x, y, nombre, { c: COLOR.tenue }); x += [...nombre].length + 1;
+    L.poner(x, y, barra(p / 100, 5), { c: colorDeNivel(p) }); x += 6;
+    const pct = `${Math.round(p)} %`;
+    L.poner(x, y, pct, { c: COLOR.texto, b: true }); x += pct.length + 2;
+  }
+  if (esNumero(codex.actualizado)) L.poner(x, y, hace(ahora - codex.actualizado), { c: COLOR.tenue });
+}
+
 export function modeloFrenteARecomendado(s) {
   const actual = `modelo ${s.lider.modelo} · ${s.lider.esfuerzo ?? 'esfuerzo ?'}`;
   const rec = s.recomendacion;

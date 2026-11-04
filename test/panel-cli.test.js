@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import { stripVTControlCharacters } from 'node:util';
 import { ANCHO } from '../plugins/nexakit-panel/hooks/lienzo.js';
 import { ejemplo } from '../plugins/nexakit-panel/hooks/panel.js';
-import { INACTIVA_MS, leerFoto, marcoDelPanel } from '../src/panel-cli.js';
+import { INACTIVA_MS, leerCodex, leerFoto, marcoDelPanel } from '../src/panel-cli.js';
 import { runToolkitCli } from '../src/toolkit-cli.js';
 import { cellWidth } from '../src/terminal-text.js';
 
@@ -91,4 +91,44 @@ test('la ayuda general menciona nexakit panel', async () => {
   let out = '';
   await runToolkitCli(['--help'], { out: (x) => { out += x; }, err: (x) => { out += x; } });
   assert.match(out, /nexakit panel/u);
+});
+
+async function sesionCodex(codexHome, nombre, lineas, mtimeMs) {
+  const dir = path.join(codexHome, 'sessions', '2026', '11', '02');
+  await fs.mkdir(dir, { recursive: true });
+  const file = path.join(dir, nombre);
+  await fs.writeFile(file, lineas.map((l) => (typeof l === 'string' ? l : JSON.stringify(l))).join('\n') + '\n');
+  if (mtimeMs) await fs.utimes(file, mtimeMs / 1000, mtimeMs / 1000);
+  return file;
+}
+const turno = (model, effort) => ({ timestamp: '2026-11-02T20:00:00Z', type: 'turn_context', payload: { model, effort } });
+const cuenta = (input, cached, output, p5, psem) => ({ timestamp: '2026-11-02T20:33:29.933Z', type: 'event_msg', payload: { type: 'token_count',
+  info: { total_token_usage: { input_tokens: input, cached_input_tokens: cached, output_tokens: output } },
+  rate_limits: { primary: { used_percent: p5, window_minutes: 300 }, secondary: { used_percent: psem, window_minutes: 10080 } } } });
+
+test('leerCodex toma la sesión más reciente de Codex y saca modelo, tokens y límites', async (t) => {
+  const home = await casa(t);
+  const codexHome = path.join(home, '.codex');
+  assert.equal(await leerCodex(codexHome), null);
+  await sesionCodex(codexHome, 'vieja.jsonl', [turno('gpt-5.6-sol', 'low'), cuenta(10, 0, 1, 50, 50)], Date.now() - 3_600_000);
+  await sesionCodex(codexHome, 'nueva.jsonl', ['{ línea rota', turno('gpt-6.1-sol', 'low'), cuenta(372693, 323584, 3899, 1, 14)], Date.now());
+  const codex = await leerCodex(codexHome);
+  assert.deepEqual({ ...codex, actualizado: typeof codex.actualizado },
+    { modelo: 'gpt-6.1-sol', esfuerzo: 'low', leidos: 372693, cache: 323584, escritos: 3899, limite5h: 1, limiteSemana: 14, actualizado: 'number' });
+});
+
+test('leerCodex no inventa nada si la sesión no trae cifras', async (t) => {
+  const home = await casa(t);
+  await sesionCodex(path.join(home, '.codex'), 'sin.jsonl', [turno('gpt-6.1-sol', 'low')], Date.now());
+  assert.equal(await leerCodex(path.join(home, '.codex')), null);
+});
+
+test('nexakit panel enseña también el uso de Codex cuando lo hay', async (t) => {
+  const home = await casa(t);
+  await escribirFoto(home, foto({ actualizado: Date.now() }));
+  await sesionCodex(path.join(home, '.codex'), 'nueva.jsonl', [turno('gpt-6.1-sol', 'low'), cuenta(372693, 323584, 3899, 1, 14)], Date.now());
+  let out = '';
+  const code = await runToolkitCli(['panel', '--una-vez'], { out: (x) => { out += x; }, err: (x) => { out += x; }, isTTY: false, options: { homeDirectory: home, environment: {} } });
+  assert.equal(code, 0, out);
+  assert.match(out, /codex gpt-6\.1-sol/u);
 });

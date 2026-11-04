@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing';
 import { ANCHO, aAnsi, dibujar, texto } from '../hooks/lienzo.js';
-import { crear, ejemplo, registrarPaso, registrarRecomendacion } from '../hooks/panel.js';
+import { crear, ejemplo, iniciarRevision, registrarPaso, registrarRecomendacion } from '../hooks/panel.js';
 
 const AHORA = 1_800_000_000_000;
 const USO = { context: { window: 1000000, percent: 31 }, rateLimits: [{ kind: 'five_hour', percentUsed: 43 }, { kind: 'seven_day', percentUsed: 60 }] };
@@ -115,6 +115,28 @@ describe('nexakit-panel · lienzo', () => {
     const igual = registrarRecomendacion(registrarPaso(ejemplo(AHORA), { modelo: 'claude-sonnet-5-5', esfuerzo: 'medium' }), { modelo: 'sonnet', esfuerzo: 'medium', motivo: 'x' });
     expect(texto(dibujar(igual, { ahora: AHORA, uso: USO, carpeta: 'app' }).filas).some((x) => x.includes('modelo claude-sonnet-5-5 · medium ✓'))).toBe(true);
     for (const x of l) expect([...x].length).toBe(ANCHO);
+  });
+
+  test('una revisión externa sale en su caja a la derecha del líder, con su IA y modelo', () => {
+    const conRev = iniciarRevision(ejemplo(AHORA), { id: 'r1', ia: 'codex', modelo: 'gpt-6.1-sol', esfuerzo: 'high', at: AHORA - 45_000 });
+    const l = texto(dibujar(conRev, { ahora: AHORA, uso: USO, carpeta: 'app' }).filas);
+    expect(l.some((x) => x.includes('Sonnet 5.5 · sesión principal') && x.includes('REVISIÓN'))).toBe(true);
+    for (const t of ['Codex', 'gpt-6.1-sol', '◐ revisando', '■ codex · revisa']) expect(l.some((x) => x.includes(t))).toBe(true);
+    for (const x of l) expect([...x].length).toBe(ANCHO);
+    expect(texto(dibujar(ejemplo(AHORA), { ahora: AHORA, uso: USO, carpeta: 'app' }).filas).some((x) => x.includes('REVISIÓN'))).toBe(false);
+  });
+
+  test('si se le pasa el uso de Codex, lo enseña abajo con sus límites y cuándo fue', () => {
+    const codex = { modelo: 'gpt-6.1-sol', esfuerzo: 'low', leidos: 372_693, cache: 323_584, escritos: 3_899, limite5h: 1, limiteSemana: 14, actualizado: AHORA - 180_000 };
+    const l = texto(dibujar(ejemplo(AHORA), { ahora: AHORA, uso: USO, carpeta: 'app', codex }).filas);
+    const fila = l.find((x) => x.includes('codex gpt-6.1-sol'));
+    expect(fila).toBeTruthy();
+    expect(fila).toMatch(/leídos 373k · escritos 3.9k/);
+    expect(fila).toMatch(/5 h .* 1 %/);
+    expect(fila).toMatch(/semana .* 14 %/);
+    expect(fila).toMatch(/hace 3 min/);
+    const vacio = texto(dibujar(crear(), { ahora: AHORA, uso: null, carpeta: 'app', codex }).filas);
+    expect(vacio.some((x) => x.includes('codex gpt-6.1-sol'))).toBe(true);
   });
 });
 

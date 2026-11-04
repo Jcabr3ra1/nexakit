@@ -5,7 +5,8 @@ import type { PanelEstado } from '../types'
 import { ANCHO, dibujar, medidoresDeUso, modeloFrenteARecomendado, tramosParaPanel } from './lienzo.js'
 import {
   alias, barra, barraEsfuerzo, crear, duracion, ejemplo, estadoPorFamilia, etiquetaEnjambre, etiquetaModelo, familia, hora, iniciarAgente,
-  registrarAsesor, registrarHerramienta, registrarPaso, registrarRecomendacion, registrarUso, resumenDelegacion, sinSecretos, terminarAgente, textoDeUso, tituloDeOrquesta,
+  registrarAsesor, registrarHerramienta, registrarPaso, registrarRecomendacion, registrarUso, resumenDelegacion, sinSecretos,
+  esRevision, iniciarRevision, leerSalidaRevision, terminarRevision, terminarAgente, textoDeUso, tituloDeOrquesta,
 } from './panel.js'
 
 const PANE = 'panel'
@@ -14,7 +15,7 @@ const TITULO = 'Orquesta'
 const ANCHO_DIAGRAMA = ANCHO
 const RECOMENDACION = 'mcp__nexakit-modelo__nexakit_recomendacion'
 // Cambia la etiqueta cuando cambien los campos del estado: descarta lo que guardó una versión anterior.
-const panel = atom({ plugin: 'nexakit-panel', key: 'panel' } as const, crear() as PanelEstado, { shape: 'panel-3' })
+const panel = atom({ plugin: 'nexakit-panel', key: 'panel' } as const, crear() as PanelEstado, { shape: 'panel-4' })
 // Con `/panel-demo` el panel enseña datos de ejemplo (marcados como tales) sin tocar los reales.
 const demo = atom({ plugin: 'nexakit-panel', key: 'demo' } as const, false, { shape: 'demo-1' })
 
@@ -119,19 +120,35 @@ export const register: Register = on => {
   })
 
   on('tool.call', async ($, e, next) => {
+    const entrada = e as unknown as Record<string, unknown>
+    let revision: { id: string } | null = null
     try {
       const at = await $.clock.now()
-      const detalle = breve(e as unknown as Record<string, unknown>)
-      const entrada = e as unknown as Record<string, unknown>
+      const detalle = breve(entrada)
+      const pedida = e.tool === 'Bash' ? esRevision(entrada.command) : null
+      if (pedida) revision = { id: String(entrada.tool_use_id ?? at) }
       await update($, panel, s => {
-        const siguiente = registrarHerramienta(s, { tool: e.tool, detalle, agentId: e.agentId, at })
-        return e.tool === RECOMENDACION
-          ? registrarRecomendacion(siguiente, { modelo: String(entrada.model ?? ''), esfuerzo: String(entrada.effort ?? ''), motivo: String(entrada.reason ?? '') })
-          : siguiente
+        let siguiente = registrarHerramienta(s, { tool: e.tool, detalle, agentId: e.agentId, at })
+        if (e.tool === RECOMENDACION) {
+          siguiente = registrarRecomendacion(siguiente, { modelo: String(entrada.model ?? ''), esfuerzo: String(entrada.effort ?? ''), motivo: String(entrada.reason ?? '') })
+        }
+        if (pedida && revision) siguiente = iniciarRevision(siguiente, { id: revision.id, ...pedida, at })
+        return siguiente
       })
       await guardarFoto($)
     } catch { /* idem */ }
-    return next(e)
+    const resultado = await next(e)
+    if (revision) {
+      try {
+        const at = await $.clock.now()
+        const r = resultado as { result?: { stdout?: string }; text?: string; isError?: boolean; deny?: string }
+        const cifras = leerSalidaRevision(r?.result?.stdout ?? r?.text ?? '')
+        const id = revision.id
+        await update($, panel, s => terminarRevision(s, { id, ok: !r?.isError && !r?.deny, at, cifras }))
+        await guardarFoto($)
+      } catch { /* idem */ }
+    }
+    return resultado
   })
 
   on('session.end', async ($, e, next) => {

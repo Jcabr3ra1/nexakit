@@ -14,14 +14,14 @@ const drain = async (stream: any) => {
 };
 
 // Lo que el motor contestaría por debajo del mod.
-function motor($: any, on: any, uso: any = { startedAt: 0, context: { window: 1000000, percent: 31 }, rateLimits: [{ kind: 'five_hour', percentUsed: 43 }, { kind: 'seven_day', percentUsed: 60 }] }, falla = false) {
+function motor($: any, on: any, uso: any = { startedAt: 0, context: { window: 1000000, percent: 31 }, rateLimits: [{ kind: 'five_hour', percentUsed: 43 }, { kind: 'seven_day', percentUsed: 60 }] }, falla = false, salidaBash = '') {
   on('command.register', () => ({ value: { command: 'panel' } }));
   on('ui.open', () => ({ value: { isPlaced: true } }));
   on('session.start', (_: any, e: any) => ({ cwd: e.cwd }));
   on('clock.now', () => ({ value: (reloj += 1000) }));
   on('session.cwd', () => ({ value: '/prueba/mi-app' }));
   on('session.usage', () => { if (falla) throw new Error('sin datos'); return { value: uso }; });
-  on('tool.call', () => ({ result: {} }));
+  on('tool.call', () => ({ result: { stdout: salidaBash, stderr: '' } }));
   on('agent.spawn', (_: any, e: any) => ({ model: e.model ?? 'claude-haiku-5-5', agentId: `ag-${e.name ?? 'x'}` }));
   on('turn.complete', () => ({ text: '' }));
   on('turn.step', async function* (_: any, e: any) {
@@ -132,6 +132,18 @@ describe('nexakit-panel · en la sesión', () => {
     expect(foto.uso.context.percent).toBe(31);
     expect(JSON.stringify(foto)).not.toContain('abc123');
     expect(escritos['/home/prueba/.nexakit/panel/sesion-123.json']).toBe(escritos['/home/prueba/.nexakit/panel/actual.json']);
+  });
+
+  test('una revisión que Claude manda a Codex aparece con su modelo y los tokens que informa', async ($, on) => {
+    motor($, on, undefined, false, 'informe\nModelo pedido: gpt-6.1-sol · high · Modelo que respondió: gpt-6.1-sol · high (registro)\nTokens: entrada 41000 (caché 3000) · salida 900\n');
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/prueba' });
+    await paso($, {});
+    await $.tool.call({ tool: 'Bash', command: '~/.nexakit/nexakit revision --con codex --modelo gpt-6.1-sol --esfuerzo high --encargo /tmp/e.md' } as any);
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 120 } });
+    for (const t of [/REVISIÓN/, /Codex/, /✓ lista/, /tokens 42k/, /codex · revisa/, /\[revisó\]/]) {
+      expect((await ui.find({ type: 'Text', text: t }))?.text, String(t)).toBeTruthy();
+    }
+    await ui.unmount();
   });
 
   test('sin actividad el panel lo dice y no inventa nada', async ($, on) => {

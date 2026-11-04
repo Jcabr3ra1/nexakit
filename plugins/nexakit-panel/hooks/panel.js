@@ -10,6 +10,7 @@ export const crear = () => ({
   registro: [],
   pasos: 0,
   recomendacion: null,
+  revisiones: [],
 });
 
 export function familia(modelo) {
@@ -169,6 +170,8 @@ export function estadoPorFamilia(estado) {
     partes.push(`subagentes [${r.total - r.corriendo}/${r.total}]`);
   }
   if (estado.asesor.llamadas > 0) partes.push(`asesor [consultado ${estado.asesor.llamadas}]`);
+  const ultimaPorIa = new Map((estado.revisiones ?? []).map((r) => [r.ia, r]));
+  for (const [ia, r] of ultimaPorIa) partes.push(`${ia} [${r.estado === 'revisando' ? 'revisando' : r.estado === 'lista' ? 'revisó' : 'falló'}]`);
   return partes;
 }
 
@@ -226,4 +229,51 @@ export function sinSecretos(texto) {
     .replace(/\b([A-Za-z0-9_]*(?:TOKEN|KEY|SECRET|PASSWORD|PASSWD)[A-Za-z0-9_]*)=([^\s"']+)/giu, '$1=***')
     .replace(/(Bearer\s+)[^\s"']+/giu, '$1***')
     .replace(/(--?(?:password|passwd|token|secret|api-key)[= ])[^\s"']+/giu, '$1***');
+}
+
+// --- Revisiones que la sesión manda a otra IA con `nexakit revision --con <ia>` -----------------------------------
+export function esRevision(comando) {
+  const c = String(comando ?? '');
+  if (!/nexakit(?:\.cmd)?['"]?\s+revision\b/u.test(c) || /--disponibles\b/u.test(c)) return null;
+  const valor = (bandera) => {
+    const m = c.match(new RegExp(`${bandera}\\s+(?:"([^"]+)"|'([^']+)'|(\\S+))`, 'u'));
+    return m ? (m[1] ?? m[2] ?? m[3]) : null;
+  };
+  const ia = valor('--con');
+  return ia ? { ia, modelo: valor('--modelo'), esfuerzo: valor('--esfuerzo') } : null;
+}
+
+// Las dos líneas fijas que imprime `nexakit revision` al terminar: modelo que respondió y tokens.
+export function leerSalidaRevision(texto) {
+  const t = String(texto ?? '');
+  const numero = (v) => (v && /^\d+$/u.test(v.trim()) ? Number(v.trim()) : null);
+  const tokensLinea = t.match(/Tokens: entrada (.+?) \(caché (.+?)\) · salida (.+?)\s*$/mu);
+  const respondio = t.match(/Modelo que respondió: (.+?) · /u)?.[1]?.trim();
+  return {
+    respondio: respondio && respondio !== 'no informado' ? respondio : null,
+    entrada: numero(tokensLinea?.[1]),
+    cache: numero(tokensLinea?.[2]),
+    salida: numero(tokensLinea?.[3]),
+  };
+}
+
+export function iniciarRevision(estado, { id, ia, modelo, esfuerzo, at }) {
+  const revision = { id, ia, modelo, esfuerzo, estado: 'revisando', inicio: at, fin: null, entrada: null, cache: null, salida: null, respondio: null };
+  return conRegistro(
+    { ...estado, revisiones: [...(estado.revisiones ?? []), revision].slice(-4) },
+    { t: at, quien: ia, texto: `revisión · ${modelo ?? 'modelo ?'}${esfuerzo ? ` · ${esfuerzo}` : ''}` },
+  );
+}
+
+export function terminarRevision(estado, { id, ok, at, cifras }) {
+  if (!(estado.revisiones ?? []).some((r) => r.id === id)) return estado;
+  let ia = '';
+  const revisiones = estado.revisiones.map((r) => {
+    if (r.id !== id) return r;
+    ia = r.ia;
+    const datos = Object.fromEntries(Object.entries(cifras ?? {}).filter(([, v]) => v != null));
+    return { ...r, ...datos, estado: ok ? 'lista' : 'error', fin: at };
+  });
+  const total = (cifras?.entrada ?? 0) + (cifras?.salida ?? 0);
+  return conRegistro({ ...estado, revisiones }, { t: at, quien: ia, texto: ok ? `revisión lista${total ? ` · tokens ${tokens(total)}` : ''}` : 'revisión falló' });
 }
