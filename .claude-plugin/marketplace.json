@@ -18,6 +18,11 @@
       "name": "nexakit-panel",
       "source": "./plugins/nexakit-panel",
       "description": "Panel en vivo de la orquestación: líder, asesor, subagentes, uso y límites."
+    },
+    {
+      "name": "nexakit-sesion",
+      "source": "./plugins/nexakit-sesion",
+      "description": "Contexto y límites en la línea de estado, con aviso para abrir sesión nueva."
     }
   ]
 }
