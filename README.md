@@ -38,6 +38,7 @@ npx nexakit setup --omitir <skill> --apply   # Declarar quitada una skill global
 npx nexakit setup --reponer <skill> --apply  # Devolver una skill global que quitaste
 ~/.nexakit/nexakit revision --disponibles --principal <ia>  # Ver IA revisoras certificadas
 ~/.nexakit/nexakit modelo                      # Ver catálogo real de modelos y esfuerzos
+~/.nexakit/nexakit panel                       # Ver la orquesta de Claude Code a pantalla completa
 ```
 
 Si quitas a mano el enlace de una skill global que nexakit instaló, `npx nexakit` no la vuelve a crear en esa IA. `frontend-design`, `web-design-guidelines` y `mcp-builder` ya no forman parte de la base global: se instalan por proyecto cuando se detecta su stack.
@@ -63,6 +64,7 @@ El catálogo incluido contiene **10 skills** con revisión de origen y hashes SH
 
 - **Revisión entre IA en solo lectura.** Aislamiento certificado y procedencia verificada entre Claude Code, Codex y Antigravity. [Flujo de revisión](docs/agentes/coordinacion/revision-entre-ia.md).
 - **Memoria por proyecto.** Contexto separado del código y conectado en solo lectura mediante MCP, con seguimiento de tareas largas y cierre con `/cerrar-memoria`. [Crear una memoria](docs/memoria/project-memory-init.md).
+- **Panel de la orquesta.** El mod `nexakit-panel` muestra en Claude Code el modelo líder, el asesor, los subagentes y el uso real; `nexakit panel` lo dibuja a pantalla completa en otra división de la terminal.
 - **Guía interactiva.** Los tres pasos de inicio, buscador de comandos copiables y resolución de problemas. Abre [la guía HTML](docs/guias/guia-de-comandos.html) en tu navegador.
 - **Catálogo ampliable.** Incorpora skills y comprueba sus archivos con `npm run catalog:validate`. [Añadir una skill](docs/skills/ampliar-catalogo.md).
 
