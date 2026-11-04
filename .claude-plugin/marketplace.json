@@ -13,6 +13,11 @@
       "name": "nexakit-modelo",
       "source": "./plugins/nexakit-modelo",
       "description": "Muestra modelo y esfuerzo observados frente a la recomendación sin cambiarlos."
+    },
+    {
+      "name": "nexakit-panel",
+      "source": "./plugins/nexakit-panel",
+      "description": "Panel en vivo de la orquestación: líder, asesor, subagentes, uso y límites."
     }
   ]
 }
