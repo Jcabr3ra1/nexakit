@@ -7,7 +7,7 @@ adaptamos para Agent Toolkit. Se amplía conforme incorporemos nuevas fuentes.
 
 | Skill o biblioteca | Origen | Relación con Agent Toolkit | Fecha de consulta |
 | --- | --- | --- | --- |
-| Superpowers | [Repositorio original: obra/superpowers](https://github.com/obra/superpowers) | El plugin original puede seguir instalado. Se adaptaron prácticas seleccionadas (`7.0.1`, MIT) en `spec-driven-development`, `depurar`, `desarrollo-con-pruebas` y `quality-gate`; ver [guía de integración](superpowers-integration.md). | 2026-10-31 |
+| Superpowers | [Repositorio original: obra/superpowers](https://github.com/obra/superpowers) | Obligatorio: `npx nexakit` lo instala con el gestor de plugins de cada IA. `quality-gate` conserva una adaptación parcial (`7.0.1`, MIT); ver [Superpowers en nexakit](superpowers-integration.md). | 2026-11-05 |
 | ordenar-proyecto | [Fuente local de Agent Toolkit](../../skills/ordenar-proyecto/SKILL.md) | Skill propia para organizar archivos y mantener referencias. Incorporada a la biblioteca; sin URL publicada independiente. | 2026-10-28 |
 | Impeccable | [Repositorio original: pbakaus/impeccable](https://github.com/pbakaus/impeccable) | Disponible en el entorno local; no distribuida por Toolkit. | 2026-10-28 |
 | frontend-design | [Claude Code Templates: creative-design/frontend-design](https://github.com/davila7/claude-code-templates/tree/main/cli-tool/components/skills/creative-design/frontend-design) | Incorporada sin modificar a skills/frontend-design y enlazada para Claude y Codex en este proyecto. | 2026-10-28 |
@@ -122,16 +122,11 @@ La instalación local consultada corresponde a Superpowers **7.0.1** (`Copyright
 identifica la copia revisada; los enlaces a `main` muestran el contenido vigente
 del repositorio y pueden cambiar.
 
-La [guía de integración y adaptación](superpowers-integration.md) relaciona cada
-práctica revisada (`using-superpowers`, `brainstorming`, `writing-plans`,
-`systematic-debugging`, `test-driven-development` y `verification-before-completion`)
-con las skills [`spec-driven-development`](../../skills/spec-driven-development/SKILL.md),
-[`depurar`](../../skills/depurar/SKILL.md),
-[`desarrollo-con-pruebas`](../../skills/desarrollo-con-pruebas/SKILL.md) y
-[`quality-gate`](../../skills/quality-gate/SKILL.md), cada una con su copia de
-`LICENSE.txt` original. El diseño de adaptación (en la memoria de Obsidian de NexaKit (`03-IMPLEMENTACION/Planes/2026-10-28-integracion-superpowers-design.md`)
-conserva las decisiones de alcance. El plugin original y las adaptaciones de
-Toolkit mantienen mantenimiento separado.
+[Superpowers en nexakit](superpowers-integration.md) explica cómo se instala en cada IA, qué reglas mandan
+sobre sus skills y qué skills propias se retiraron (`spec-driven-development`, `depurar` y
+`desarrollo-con-pruebas`). [`quality-gate`](../../skills/quality-gate/SKILL.md) conserva su `LICENSE.txt` original.
+El diseño de la primera adaptación está en la memoria de Obsidian de NexaKit
+(`03-IMPLEMENTACION/Planes/2026-10-28-integracion-superpowers-design.md`).
 
 ## Cómo ampliar el registro
 

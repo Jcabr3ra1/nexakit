@@ -17,26 +17,20 @@ Evidencia antes de afirmaciones, siempre. Decide si una entrega está lista, nec
 | Cambio de lógica, CLI, esquemas o interfaz | Revisión completa del diff, requisitos línea a línea y ejecución fresca de las pruebas relevantes y de la suite afectada. |
 | Seguridad, permisos, datos críticos o migraciones | Revisión rigurosa de fronteras, permisos y regresiones (combinable con `differential-review`). |
 
-Si `verification-before-completion` de Superpowers está activo en la sesión, reutiliza las comprobaciones frescas ya ejecutadas sobre el mismo árbol de trabajo sin duplicar informes vacíos; si hubo cualquier edición posterior, vuelve a verificar.
+## Evidencia fresca
 
-## Puerta de verificación (antes de afirmar éxito o cierre)
+Superpowers es obligatorio en nexakit: `superpowers:verification-before-completion` pone la regla de base (identificar el comando que demuestra cada afirmación, ejecutarlo completo sobre el estado actual y leer su salida real antes de afirmar nada). Esta puerta la da por aplicada y reutiliza las comprobaciones ya ejecutadas sobre el mismo árbol de trabajo; si hubo cualquier edición posterior, vuelve a verificar. Lo que añade nexakit:
 
-Antes de decir que algo «funciona», «pasa», «quedó corregido» o «está listo»:
-
-1. **Identificar:** ¿qué comando o inspección concreta demuestra esta afirmación?
-2. **Ejecutar o inspeccionar:** corre el comando completo sobre el estado actual cuando tus permisos lo permitan. Si actúas en un rol de solo lectura (por ejemplo, revisor en `revision-cruzada`), inspecciona el código y declara expresamente qué comandos **no** ejecutaste.
-3. **Leer la salida real:** revisa código de retorno, totales aprobados/fallidos/omitidos y mensajes de advertencia. Una corrida anterior a la última edición no sirve como evidencia vigente.
-4. **Contrastar requisitos y delegaciones:**
-   - Revisa cada criterio de aceptación de la especificación o encargo uno por uno.
-   - Si delegaste código a un subagente o recibiste una entrega externa, inspecciona tú mismo `git status` y `git diff`; el resumen de otro agente es una declaración, no una prueba.
-5. **Declarar resultado y límites:** informa lo comprobado con datos concretos y separa lo pendiente o fuera de cobertura (por ejemplo, validar un archivo `SKILL.md` acredita su formato en disco, no que un cliente abierto ya lo haya cargado).
+- **Rol de solo lectura:** como revisor en `revision-cruzada`, inspecciona el código y declara expresamente qué comandos **no** ejecutaste.
+- **Requisitos y delegaciones:** revisa cada criterio de aceptación uno por uno. Si delegaste código a un subagente o recibiste una entrega externa, inspecciona tú mismo `git status` y `git diff`; el resumen de otro agente es una declaración, no una prueba.
+- **Límites declarados:** separa lo comprobado de lo pendiente o fuera de cobertura (por ejemplo, validar un archivo `SKILL.md` acredita su formato en disco, no que un cliente abierto ya lo haya cargado).
 
 ## Flujo de revisión
 
 1. Reúne objetivo, criterios de aceptación y alcance aprobado del cambio.
 2. Inspecciona el diff real y las fronteras afectadas; evita mezclar archivos ajenos.
 3. Aplica [la lista de comprobación](references/review-checklist.md) proporcional al riesgo.
-4. Ejecuta o verifica la evidencia fresca según la puerta anterior.
+4. Ejecuta o verifica la evidencia fresca según la sección anterior.
 5. Clasifica los hallazgos por impacto (`Alta`, `Media`, `Baja`) con ubicación exacta y evidencia reproducible.
 6. Emite uno de estos resultados: `Aprobado`, `Aprobado con observaciones`, `Requiere cambios` o `Sin evidencia suficiente`.
 

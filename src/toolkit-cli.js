@@ -291,7 +291,8 @@ export async function runToolkitCli(
         Object.values(result.dependencies).every(Boolean) &&
         Object.values(result.clients).some((c) => c.available) &&
         result.skills.every((s) => SETTLED_LINK_STATES.includes(s.state)) &&
-        !(result.retiredSkills ?? []).some((s) => !s.owned)
+        !(result.retiredSkills ?? []).some((s) => !s.owned) &&
+        superpowersReady(result)
         ? 0
         : 1;
     }
@@ -300,7 +301,8 @@ export async function runToolkitCli(
       Object.values(result.clients).every((c) => c.available) &&
       Object.values(result.mcp).every((m) => READY_LINK_STATES.includes(m.state)) &&
       result.skills.every((s) => SETTLED_LINK_STATES.includes(s.state)) &&
-      (!result.codexSandbox || ['allowed', 'not-needed', 'unknown'].includes(result.codexSandbox.state))
+      (!result.codexSandbox || ['allowed', 'not-needed', 'unknown'].includes(result.codexSandbox.state)) &&
+      superpowersReady(result)
       ? 0
       : 1;
   } catch {
@@ -312,6 +314,9 @@ export async function runToolkitCli(
 }
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+// Required: missing or disabled fails the check; a list that could not be read is reported but does not fail.
+const superpowersReady = (result) =>
+  !Object.values(result.superpowers?.states ?? {}).some((state) => ['falta', 'desactivado'].includes(state));
 
 function formatComprobarReport(result, { homeDirectory }) {
   const short = (value) =>
@@ -363,6 +368,18 @@ function formatComprobarReport(result, { homeDirectory }) {
   }
   for (const item of (result.retiredSkills ?? []).filter((s) => !s.owned)) {
     lines.push(`! ${item.client} · ${item.name}: comando retirado con contenido ajeno; no lo toco`);
+  }
+  const superpowers = Object.entries(result.superpowers?.states ?? {});
+  const active = superpowers.filter(([, state]) => state === 'activo').map(([name]) => name);
+  if (active.length) lines.push(`✓ Superpowers activo en ${active.join(', ')}`);
+  for (const [name, state] of superpowers.filter(([, state]) => state !== 'activo')) {
+    lines.push(
+      state === 'falta'
+        ? `! Falta Superpowers en ${name} (ejecuta npx nexakit para instalarlo)`
+        : state === 'desactivado'
+          ? `! Superpowers está desactivado en ${name}; actívalo desde su gestor de plugins`
+          : `! No pude comprobar Superpowers en ${name}`,
+    );
   }
   for (const item of result.obsolete ?? []) {
     lines.push(`! ${item.message} ${item.command}`);

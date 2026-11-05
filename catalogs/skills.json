@@ -1082,20 +1082,17 @@
       "name": "obra/superpowers",
       "versionReviewed": "7.0.1",
       "license": "MIT",
-      "optional": true,
-      "autoInstall": false,
+      "optional": false,
+      "autoInstall": true,
       "repository": "https://github.com/obra/superpowers",
-      "summary": "Plugin externo opcional. Sus prácticas principales ya están adaptadas en spec-driven-development, depurar, desarrollo-con-pruebas y quality-gate.",
+      "summary": "Obligatorio: lleva el proceso de trabajo (diseño, planes, depuración, TDD y verificación). npx nexakit lo instala o activa en cada IA; quality-gate añade la puerta propia de nexakit.",
       "adaptedSkills": [
-        "spec-driven-development",
-        "depurar",
-        "desarrollo-con-pruebas",
         "quality-gate"
       ],
       "installHints": {
-        "claude": "/plugin marketplace add obra/superpowers-marketplace && /plugin install superpowers@superpowers-marketplace",
-        "codex": "Instalar desde el catálogo de plugins de Codex (obra/superpowers)",
-        "antigravity": "Añadir desde Agent Marketplace: antigravity-plugins-partners/plugin/superpowers"
+        "claude": "claude plugin install superpowers@claude-plugins-official",
+        "codex": "codex plugin add superpowers@openai-curated-remote",
+        "antigravity": "agy plugin install superpowers@antigravity-plugins-partners"
       }
     }
   ]
