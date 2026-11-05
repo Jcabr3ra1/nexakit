@@ -150,6 +150,26 @@ export function buildConfirmation(state, answers) {
   }
   for (const agent of globalBlocks) block(`global-skills:${agent}`, `Skills base en ${AGENT_NAMES[agent]}`);
 
+  // Superpowers is required: the work process (brainstorming, plans, debugging, TDD, verification) comes from it.
+  const superpowers = state.superpowers ?? {};
+  const activeIn = [];
+  for (const agent of agents.filter((item) => Object.hasOwn(superpowers, item))) {
+    const status = superpowers[agent];
+    if (status === 'activo') activeIn.push(AGENT_NAMES[agent]);
+    else if (status === 'falta') {
+      add('+', `Superpowers en ${AGENT_NAMES[agent]}`);
+      block(`superpowers:${agent}`, `Superpowers en ${AGENT_NAMES[agent]}`);
+    } else if (status === 'desactivado' && agent !== 'codex') {
+      add('↻', `Activar Superpowers en ${AGENT_NAMES[agent]}`);
+      block(`superpowers:${agent}`, `Superpowers activo en ${AGENT_NAMES[agent]}`);
+    } else if (status === 'desactivado') {
+      add('!', `Superpowers está desactivado en ${AGENT_NAMES[agent]}; actívalo desde /plugins`);
+    } else {
+      add('!', `No pude comprobar Superpowers en ${AGENT_NAMES[agent]}; revisa ${agent === 'claude' ? '/plugin' : '/plugins'}`);
+    }
+  }
+  if (activeIn.length) add('✓', `Superpowers activo en ${joinNames(activeIn)}`);
+
   // Memory: create it if needed, then connect it to each chosen agent.
   if (answers.memory.decision === 'path') {
     const target = answers.memory.path;

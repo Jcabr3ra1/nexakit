@@ -29,8 +29,8 @@ escritura (EPERM). Si `sandbox_mode` está presente, manda sobre
 evaluar `<nombre>.config.toml` sobre `config.toml`; sin él, el resultado lista
 los perfiles que encuentra y avisa de que no los evaluó.
 Que algo esté configurado no demuestra que una sesión nueva lo haya cargado.
-Superpowers es opcional y separado; no lo instala Agent Toolkit. Su estado debe
-consultarse en el gestor de plugins del cliente. Para agentes por nivel, usa
+Superpowers es obligatorio: `npx nexakit` lo instala o activa con el gestor de
+plugins de cada IA, y `doctor` informa su estado por IA. Para agentes por nivel, usa
 `agent-toolkit-inbox agentes` y la guía de revisión cruzada.
 
 ## Medir sin inventar ahorro

@@ -210,7 +210,7 @@ test('comprobar prints a readable Spanish report with obsolete and legacy warnin
   await fs.mkdir(path.join(w.home, '.codex/agents'), { recursive: true });
   await fs.writeFile(path.join(w.home, '.codex/agents/nivel-normal.toml'), 'model = "gpt-6.1-sol"\n');
   const deadRoot = path.join(w.home, 'viejo-toolkit');
-  for (const skill of ['depurar', 'revisar', 'quality-gate']) {
+  for (const skill of ['project-handoff', 'revisar', 'quality-gate']) {
     const link = path.join(w.home, '.claude/skills', skill);
     await fs.rm(link, { force: true });
     await fs.symlink(path.join(deadRoot, 'skills', skill), link);
