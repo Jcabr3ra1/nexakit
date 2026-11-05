@@ -364,7 +364,7 @@ La arquitectura inicial del sistema de memoria está en [`docs/memoria/project-m
 
 - `mcp-builder`: diseño y revisión de servidores MCP; conserva recursos de evaluación opcionales con requisitos propios.
 - `differential-review`: revisión de seguridad de cambios concretos, con historia Git y evidencia; alcance y licencia en [Fuentes de las skills](../skills/fuentes-de-skills.md).
-- `web-design-guidelines`: revisión de interfaces con las guías de Vercel; consulta reglas vigentes en línea antes de cada revisión.
+- `web-design-guidelines`: revisión de interfaces con las Web Interface Guidelines de Vercel Labs, fijadas en la skill con su licencia MIT.
 - `frontend-design`: guía de diseño frontend de Claude Code Templates, con fuente y licencia registradas en [Fuentes de las skills](../skills/fuentes-de-skills.md).
 - `ordenar-proyecto`: organiza archivos y carpetas y ayuda a ubicar archivos nuevos conservando sus referencias.
 - `spec-driven-development`: alinea intención, alternativas, especificación verificable y plan de tareas ejecutables antes de implementar.

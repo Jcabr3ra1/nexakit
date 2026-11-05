@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.0.0",
-  "updatedAt": "2026-11-02",
+  "updatedAt": "2026-11-05",
   "skills": [
     {
       "name": "frontend-design",
@@ -56,16 +56,24 @@
     {
       "name": "web-design-guidelines",
       "bundled": true,
-      "summary": "Auditoría de accesibilidad, UX y cumplimiento de Web Interface Guidelines sobre código de interfaz.",
-      "repository": "https://github.com/vercel-labs/agent-skills",
-      "sourcePath": "skills/web-design-guidelines",
+      "summary": "Revisa código de interfaz contra las Web Interface Guidelines de Vercel Labs: accesibilidad, foco, formularios, animación, tipografía y rendimiento.",
+      "repository": "https://github.com/vercel-labs/web-interface-guidelines",
+      "sourcePath": "AGENTS.md",
       "installedPath": "skills/web-design-guidelines",
-      "revision": "ba46938889d4e58635362fb8f618e1178ac3ec46",
+      "revision": "434b7f91364665f2f733b310ec54809bf8f37937",
       "license": "MIT",
       "files": [
         {
+          "path": "AGENTS.md",
+          "sha256": "35411b4a2dcfa651fd33706a92cc860947364b521643107fbf3116abe3826d44"
+        },
+        {
+          "path": "LICENSE.txt",
+          "sha256": "6cd1609c9c12233507cdd2ce0d32e9a721e3c27494951be06b90090deeeb7af2"
+        },
+        {
           "path": "SKILL.md",
-          "sha256": "f4647ca866a3accf763777f83e7682954f0187cd6bea7eea0399796652414e8f"
+          "sha256": "139ea99fb40ce66992b58a93d68d741eea4fb56b78a743701bd80fe209a3c451"
         }
       ],
       "matching": {
@@ -88,13 +96,13 @@
         "frontend-design"
       ],
       "review": {
-        "status": "reviewed-with-observations",
-        "reviewedAt": "2026-10-28",
-        "notes": "Sus instrucciones piden consultar por internet las reglas vigentes de Vercel antes de revisar; ese recurso externo puede cambiar.",
+        "status": "reviewed",
+        "reviewedAt": "2026-11-05",
+        "notes": "Reglas de Vercel Labs (MIT, LICENSE.txt incluido) fijadas en AGENTS.md; instrucciones propias de nexakit. Ya no descarga reglas en cada revisión.",
         "capabilities": {
           "filesystem": "read-only",
           "processes": "none",
-          "network": "optional",
+          "network": "none",
           "paidApi": "none"
         }
       },
@@ -260,16 +268,16 @@
           "sha256": "fc93e7421177bbf869cce892bc60a6c83a4517d974bc3bf65c4e2c1e58a6ccf6"
         },
         {
-          "path": "README.md",
-          "sha256": "9eafb2123d3b8b2aef41fba0db2648a3f4f49996f8c7c8bb2c86263befd8b48a"
-        },
-        {
-          "path": "SKILL.md",
-          "sha256": "71ed7794962fa6e803ee83030517b5b93a9f70fbfeb431ec4535c5480a8d8355"
+          "path": "LICENSE.txt",
+          "sha256": "2701bedfb108e232b3d0c90976dd0ab3b0a9e2b97bdb9afb417435d510d02bf1"
         },
         {
           "path": "metadata.json",
           "sha256": "c4e18bac3290fbe1b471a605867d4df68b03144ea26b8befdbe8f9d8fd124354"
+        },
+        {
+          "path": "README.md",
+          "sha256": "9eafb2123d3b8b2aef41fba0db2648a3f4f49996f8c7c8bb2c86263befd8b48a"
         },
         {
           "path": "rules/_sections.md",
@@ -558,6 +566,10 @@
         {
           "path": "rules/server-serialization.md",
           "sha256": "f4c7d68b29c82381baad059c4a7f09e868e71ec9c3115a26ad3ae7d24c0dfe1f"
+        },
+        {
+          "path": "SKILL.md",
+          "sha256": "71ed7794962fa6e803ee83030517b5b93a9f70fbfeb431ec4535c5480a8d8355"
         }
       ],
       "matching": {
@@ -578,7 +590,7 @@
       "review": {
         "status": "reviewed",
         "reviewedAt": "2026-10-31",
-        "notes": "Reglas estáticas Markdown y metadata.json sin scripts ejecutables ni llamadas externas.",
+        "notes": "Reglas estáticas Markdown y metadata.json sin scripts ejecutables ni llamadas externas. LICENSE.txt añadido con el texto MIT que declara su SKILL.md.",
         "capabilities": {
           "filesystem": "none",
           "processes": "none",
@@ -603,16 +615,16 @@
           "sha256": "89e3ddd58fcf99a53a50e25dfd21b8cde1be5f10b7df6bacd3dfa6796932f516"
         },
         {
-          "path": "README.md",
-          "sha256": "85915a43a6f0b4efe525e3cf6398dd866166da2025837c4460468a24a940da94"
-        },
-        {
-          "path": "SKILL.md",
-          "sha256": "e38e0eaa609316b10423a9a138ed95e35099accd3f735585295c8a8f165c28a3"
+          "path": "LICENSE.txt",
+          "sha256": "2701bedfb108e232b3d0c90976dd0ab3b0a9e2b97bdb9afb417435d510d02bf1"
         },
         {
           "path": "metadata.json",
           "sha256": "49262ed5cb4186f31ee980cf8d990be0170c51efed4908d0464a1cff9905bd05"
+        },
+        {
+          "path": "README.md",
+          "sha256": "85915a43a6f0b4efe525e3cf6398dd866166da2025837c4460468a24a940da94"
         },
         {
           "path": "rules/_sections.md",
@@ -653,6 +665,10 @@
         {
           "path": "rules/state-lift-state.md",
           "sha256": "74c54038a6c554c748fe31cec673b80861b5d920b7553cf78cdf10d18b4b759b"
+        },
+        {
+          "path": "SKILL.md",
+          "sha256": "e38e0eaa609316b10423a9a138ed95e35099accd3f735585295c8a8f165c28a3"
         }
       ],
       "matching": {
@@ -673,7 +689,7 @@
       "review": {
         "status": "reviewed",
         "reviewedAt": "2026-10-31",
-        "notes": "Guías Markdown y metadata.json sin scripts ni procesos.",
+        "notes": "Guías Markdown y metadata.json sin scripts ni procesos. LICENSE.txt añadido con el texto MIT que declara su SKILL.md.",
         "capabilities": {
           "filesystem": "none",
           "processes": "none",
