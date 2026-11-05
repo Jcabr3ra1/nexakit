@@ -246,7 +246,10 @@ function question(model) {
       const external = state.externalSkills?.length
         ? ['', ...wrapText(`Se instalan aparte: ${state.externalSkills.map(ref => ref.name).join(', ')}`, 60)]
         : [];
-      const info = [...(model.info && current ? ['', ...wrapText(current.summary, 60), ...skillTrust(current)] : []), ...external];
+      const missing = state.uncoveredTech?.length
+        ? ['', ...wrapText(`Sin skill en el catálogo: ${joinNames(state.uncoveredTech.map(item => item.label))}. Para buscar una, pide a tu IA «busca una skill para ${state.uncoveredTech[0].label}».`, 60)]
+        : [];
+      const info = [...(model.info && current ? ['', ...wrapText(current.summary, 60), ...skillTrust(current)] : []), ...external, ...missing];
       return { title: '¿Qué skills quieres?', body, info, keys: 'espacio marcar · i qué hace · Enter seguir · q salir' };
     }
     case 'memory': {

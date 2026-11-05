@@ -273,3 +273,14 @@ test('the skills step lists external skills apart, as something installed separa
     for (const line of stripVTControlCharacters(frame(model, columns)).split('\n')) assert.ok(cellWidth(line) <= columns, `@${columns}: «${line}»`);
   }
 });
+
+test('the skills step says which technologies have no skill and how to ask for one', () => {
+  const model = createSetupModel(state({ uncoveredTech: [{ id: 'tauri', label: 'Tauri' }, { id: 'rust', label: 'Rust' }] }));
+  const text = stripVTControlCharacters(frame(model));
+  assert.match(text, /Sin skill en el catálogo: Tauri y Rust\./u);
+  assert.match(text, /busca una skill para Tauri/u);
+  assert.doesNotMatch(frame(createSetupModel(state())), /Sin skill en el catálogo/u);
+  for (const columns of [40, 68]) {
+    for (const line of stripVTControlCharacters(frame(model, columns)).split('\n')) assert.ok(cellWidth(line) <= columns, `@${columns}: «${line}»`);
+  }
+});

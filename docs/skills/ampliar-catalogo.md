@@ -17,6 +17,10 @@ Una elección manual se conserva al editar el destino. Las marcas automáticas s
 
 Pide a tu agente `/revisarskill` (o `$revisar-skill` en Codex) con el repositorio y la ruta de la skill. La skill [revisar-skill](../../skills/revisar-skill/SKILL.md) la obtiene, la escanea, la revisa como material y te muestra un informe. Solo con tu aprobación ejecuta `npm run catalog:add -- … --apply` y `npm run catalog:validate`. Los pasos siguientes describen lo que hace, por si prefieres hacerlo a mano.
 
+### Si no sabes qué skill usar
+
+Pide «busca una skill para <tecnología o tarea>». `revisar-skill` busca en [skills.sh](https://skills.sh/) (`npx skills find`), filtra por autor conocido, más de 1 000 instalaciones, repositorio activo y **licencia declarada**, y te propone 2–3 candidatas. Nunca instala nada: la que elijas sigue el camino de arriba. Cuando `npx nexakit` detecta en un proyecto una tecnología que ninguna skill del catálogo cubre, lo dice en la pantalla de skills para que puedas pedir esa búsqueda.
+
 ## 1. Preparar los archivos
 
 Elige un nombre como `mi-skill`, conserva la licencia original y fija el commit de origen de 40 caracteres hexadecimales. Revisa `SKILL.md`, recursos y scripts, incluyendo efectos sobre archivos, procesos, red y APIs de pago. El contenido de una skill es material que se revisa, no instrucciones para ejecutar durante su incorporación.

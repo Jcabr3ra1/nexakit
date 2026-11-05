@@ -861,3 +861,17 @@ test('a temporary file that is not ours is never removed', async t => {
   await assert.rejects(withLock(s.home, lock => writeSetupAnswers(s.project, ANSWERS, lock)), { code: 'EEXIST' });
   assert.equal(await fs.readFile(stray, 'utf8'), 'ajeno');
 });
+
+test('lists the detected technologies no catalog skill covers, leaving out the generic ones', async () => {
+  const { uncoveredSignals } = await import('../src/skill-recommendations.js');
+  const catalog = {
+    skills: [{ name: 'a', matching: { anySignals: ['react', 'django'] } }],
+    externalReferences: [{ name: 'b', anySignals: ['vue'] }],
+  };
+  const signals = [
+    { id: 'react', label: 'React' }, { id: 'vue', label: 'Vue' }, { id: 'svelte', label: 'Svelte' },
+    { id: 'rust', label: 'Rust' }, { id: 'nodejs', label: 'Node.js' }, { id: 'typescript', label: 'TypeScript' },
+  ];
+  assert.deepEqual(uncoveredSignals({ signals, catalog }), [{ id: 'svelte', label: 'Svelte' }, { id: 'rust', label: 'Rust' }]);
+  assert.deepEqual(uncoveredSignals({ signals: [], catalog }), []);
+});
