@@ -1,6 +1,6 @@
 import { constants } from 'node:fs';
 import { runCleanCommand } from './clean-command.js';
-import { sinSecretos } from '../plugins/nexakit-panel/hooks/panel.js';
+import { sinSecretos } from './redact.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { gitTopLevel, runGit as defaultRunGit } from './project-root.js';
