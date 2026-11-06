@@ -1,3 +1,6 @@
+import { inspectFolder } from './clean-project.js';
+import { loadGeneratorsCatalog } from './generators-catalog.js';
+import { readCleanProjectAnswers } from './skill-recommendations.js';
 // Gathers, read-only, everything the setup questions and the confirmation need: the project and what it uses, the
 // skills and their links, the agents installed, their base skills, the stable command and the project memory.
 // Nothing here writes; setup-apply.js does, after the person confirms.
@@ -243,6 +246,10 @@ export async function gatherSetupState({
   const reviewInstructions = await planReviewInstructions({ homeDirectory, environment, codexHome });
   const superpowers = await inspectSuperpowers({ agentsFound, runCommand, environment });
   return {
+    folder:await inspectFolder(start),
+    creationRoot:await fs.realpath(start),
+    generators:await loadGeneratorsCatalog(),
+    cleanProject:await readCleanProjectAnswers(start),
     reviewInstructions,
     superpowers,
     homeDirectory,

@@ -2,6 +2,9 @@
 // in the style of `npm create vite`. Answered questions fold into one ◇ line; the active one uses ◆. The model,
 // the drawing and the keys are pure, so every screen is tested as text; runSetupTui is the only part with I/O.
 import os from 'node:os';
+import fs from 'node:fs/promises';
+import { planCleanProject, checkRequirements } from './clean-project.js';
+import { runCleanCommand } from './clean-command.js';
 import path from 'node:path';
 import { applySetup } from './setup-apply.js';
 import { AGENTS, AGENT_NAMES, buildConfirmation, joinNames, shortPath, suggestedAnswers } from './setup-plan.js';
@@ -64,8 +67,19 @@ export function createSetupModel(state) {
   };
   model.memoryChoice = answers.memory.decision === 'later' ? 'later'
     : answers.memory.path === (state.memory.existing?.vaultPath ?? state.memory.suggestedPath) ? memoryOptions(model)[0] : 'other';
+  model.cleanChoice = {frontend:null,backend:null,database:null,mobile:null};
+  model.cleanGit = true; model.cleanFolder = state.creationRoot ?? state.project.root;
+  model.folderInput = ''; model.requirements = null; model.cleanPlan = null;
+  if (state.folder && !state.savedAnswers && !state.cleanProject) { model.step = 'mode'; model.cursor = state.folder.empty ? 0 : 1; }
+  if (state.cleanProject && state.cleanProject.status !== 'creado') model.step = 'clean-failed';
   return model;
 }
+
+const cleanParts = ['frontend','backend','database','mobile'];
+function technologyOptions(model, part) {
+  return model.state.generators.generators.filter(g=>g.part===part && (part!=='database' || model.cleanChoice.backend || g.id==='supabase'));
+}
+function goTechnology(model, part) { return go(model, `tech-${part}`, {cursor:part==='frontend'?0:technologyOptions(model,part).length}); }
 
 // Leaving the skills question: a suggestion left unchecked is remembered as discarded, so it is not offered again.
 function closeSkills(model) {
@@ -100,6 +114,17 @@ export function handleSetupKey(model, key) {
   if (key === '\x03') return { model, effect: 'exit' };
   const { step } = model;
 
+  if (step === 'clean-folder') {
+    if (is(key,'enter')) {
+      const name = model.folderInput.trim();
+      if (!name || /[\\/:\x00-\x1f]/.test(name) || ['.','..','.git','.agent-toolkit'].includes(name)) return {model:{...model,message:'Escribe el nombre de una subcarpeta nueva.'}};
+      return {model,effect:'check-clean-folder',path:path.join(model.cleanFolder,name)};
+    }
+    if (key==='\x1b') return {model:go(model,'mode')};
+    if (key==='\x7f'||key==='\x08') return {model:{...model,folderInput:[...model.folderInput].slice(0,-1).join('')}};
+    if (/^[^\x00-\x1f\x7f]+$/u.test(key) && !key.startsWith('\x1b')) return {model:{...model,folderInput:model.folderInput+key,message:null}};
+    return {model};
+  }
   if (step === 'memory-path') {
     if (is(key, 'enter')) {
       const raw = model.memoryInput.trim();
@@ -113,7 +138,41 @@ export function handleSetupKey(model, key) {
     return { model };
   }
 
-  if (is(key, 'quit') && !['applying'].includes(step)) return { model, effect: 'exit' };
+  if (is(key, 'quit') && !['applying','creating'].includes(step)) return { model, effect: 'exit' };
+
+  if (step==='mode') {
+    if(is(key,'up')||is(key,'down')) return {model:{...model,cursor:model.cursor===0?1:0}};
+    if(is(key,'enter')) return {model:model.cursor===1?go(model,'skills'):model.state.folder.empty?goTechnology(model,'frontend'):go(model,'clean-folder')};
+    return {model};
+  }
+  if (step.startsWith('tech-')) {
+    const part=step.slice(5), options=technologyOptions(model,part);
+    if(is(key,'up')) return {model:{...model,cursor:Math.max(0,model.cursor-1)}};
+    if(is(key,'down')) return {model:{...model,cursor:Math.min(options.length,model.cursor+1)}};
+    if(is(key,'back')) { const i=cleanParts.indexOf(part);return {model:i?goTechnology(model,cleanParts[i-1]):go(model,'mode')}; }
+    if(is(key,'enter')) {
+      const next={...model,cleanChoice:{...model.cleanChoice,[part]:options[model.cursor]?.id ?? null}};
+      if(part==='backend' && !next.cleanChoice.backend) next.cleanChoice.database=null;
+      if(part!=='mobile') return {model:goTechnology(next,cleanParts[cleanParts.indexOf(part)+1])};
+      if(!next.cleanChoice.frontend && !next.cleanChoice.backend && !next.cleanChoice.mobile) return {model:{...next,message:'Elige al menos una parte.'}};
+      if(next.cleanChoice.database==='supabase' && !next.cleanChoice.frontend && !next.cleanChoice.backend) return {model:{...next,message:'Supabase necesita frontend o backend.'}};
+      return next.state.folder.insideGit ? {model:go(next,'clean-confirm'),effect:'prepare-clean'} : {model:go(next,'git')};
+    }
+    return {model};
+  }
+  if(step==='git') {
+    if(is(key,'toggle')||is(key,'left')||is(key,'right')) return {model:{...model,cleanGit:!model.cleanGit}};
+    if(is(key,'enter')) return {model:go(model,'clean-confirm'),effect:'prepare-clean'};
+    if(is(key,'back')) return {model:goTechnology(model,'mobile')};
+    return {model};
+  }
+  if(step==='clean-confirm') {
+    if(is(key,'back')) return {model:goTechnology(model,'mobile')};
+    if(is(key,'enter') && model.cleanPlan && model.requirements && model.requirements.every(r=>r.ok)) return {model,effect:'create-project',choice:model.cleanChoice,git:!model.state.folder.insideGit && model.cleanGit,folder:model.cleanFolder};
+    return {model};
+  }
+  if(step==='clean-failed') return is(key,'enter') ? {model:go(model,'skills')} : {model};
+  if(step==='creating') return {model};
 
   if (step === 'done' || step === 'detached') return { model, effect: 'exit' };
   if (step === 'applying') return { model };
@@ -234,7 +293,21 @@ function folded(model) {
 function question(model) {
   const { state, answers } = model;
   const home = state.homeDirectory;
+  if (model.step.startsWith('tech-')) {
+    const part=model.step.slice(5),labels={frontend:'frontend',backend:'backend',database:'base de datos',mobile:'app móvil'};
+    const options=[...technologyOptions(model,part).map(g=>g.label),`No quiero ${labels[part]}`];
+    return {title:`Elige ${labels[part]}`,body:options.map((text,i)=>({text:`${i===model.cursor?'●':'○'} ${text}`,cursor:i===model.cursor})),info:model.message?[model.message]:[],keys:'↑/↓ elegir · Enter continuar · q salir'};
+  }
   switch (model.step) {
+    case 'mode': return {title:'¿Proyecto limpio o ya empezado?',body:['Proyecto limpio: crear la base desde cero','Ya empezado: preparar lo que hay'].map((text,i)=>({text:`${i===model.cursor?'●':'○'} ${text}`,cursor:i===model.cursor})),info:[],keys:'↑/↓ elegir · Enter continuar · q salir'};
+    case 'clean-folder': return {title:'Nombre de la subcarpeta nueva',body:[{text:model.folderInput+'▌'}],info:model.message?[model.message]:[],keys:'Enter comprobar · Esc volver'};
+    case 'git': return {title:'¿Inicio Git con un primer commit?',body:[{text:model.cleanGit?'● Sí / ○ No':'○ Sí / ● No'}],info:[],keys:'←/→ cambiar · Enter continuar · q salir'};
+    case 'clean-confirm': return {title:'¿Creo la base del proyecto?',body:(model.cleanPlan?.parts ?? []).flatMap(p=>[
+      {text:`${p.part}: ${p.id} → ${p.dir}`},...p.commands.map(c=>({text:`${c.cwd}: ${c.argv.map(a=>JSON.stringify(a)).join(' ')}`})),
+      ...p.writes.map(w=>({text:`Crear ${w.path}: ${w.content}`})),{text:`Comprobar ${p.check.cwd}: ${p.check.argv.map(a=>JSON.stringify(a)).join(' ')}`}]),
+      info:model.requirements===null?['Comprobando requisitos…']:[...model.requirements.filter(r=>!r.ok).map(r=>`! Falta ${r.program} ${r.minVersion} o superior (${r.found ?? 'no encontrado'}).`),...(model.message?[model.message]:[])],keys:'Enter crear · retroceso volver · q salir'};
+    case 'creating': return {title:'Creando el proyecto…',body:(model.cleanProgress ?? []).map(text=>({text})),info:[],keys:'Espera a que termine la orden'};
+    case 'clean-failed': return {title:'La creación no terminó',body:[{text:model.cleanFailure ?? `Revisa el registro en .agent-toolkit/creacion.log.`}],info:['Se conserva lo creado. Enter prepara lo existente.'],keys:'Enter continuar · q salir'};
     case 'skills': {
       const rows = skillRows(model);
       const width = Math.min(28, Math.max(...rows.filter(r => r.skill).map(r => r.skill.name.length), 10));
@@ -499,6 +572,15 @@ export async function runSetupTui({ input = process.stdin, output = process.stdo
             kind, mcpName: `${model.state.project.id}-memory` })
           : null;
         model = applyMemoryPathCheck(model, extra.path, kind, connections);
+      } else if (effect === 'check-clean-folder') {
+        const exists=await fs.lstat(extra.path).catch(e=>{if(e.code==='ENOENT')return null;throw e;});
+        model=exists?{...model,message:'Esa carpeta ya existe. Elige otra.'}:goTechnology({...model,cleanFolder:extra.path},'frontend');
+      } else if (effect === 'prepare-clean') {
+        try {
+          const cleanPlan=planCleanProject({choice:model.cleanChoice,catalog:model.state.generators,name:path.basename(model.cleanFolder)});
+          const requirements=await checkRequirements(cleanPlan,model.state.generators,{runCommand:options.runCommand ?? runCleanCommand});
+          model={...model,cleanPlan,requirements};
+        } catch(e) { model={...model,cleanPlan:null,requirements:[],message:e.message}; }
       } else if (effect === 'apply') {
         const labels = Object.fromEntries(buildConfirmation(model.state, model.answers).blocks.map(block => [block.id, block.label]));
         model = { ...model, step: 'applying', progress: [] };
