@@ -10,6 +10,9 @@ const MAX_README_BYTES = 64 * 1024;
 const MAX_SUBFOLDERS = 20;
 
 export const SIGNAL_LABELS = Object.freeze({
+  angular: 'Angular',
+  nestjs: 'NestJS',
+  expo: 'Expo',
   nodejs: 'Node.js',
   typescript: 'TypeScript',
   'mcp-sdk': 'MCP SDK',
@@ -36,6 +39,9 @@ export const SIGNAL_LABELS = Object.freeze({
 });
 
 export const PACKAGE_TO_SIGNAL = Object.freeze({
+  '@angular/core': 'angular',
+  '@nestjs/core': 'nestjs',
+  expo: 'expo',
   '@modelcontextprotocol/sdk': 'mcp-sdk',
   '@modelcontextprotocol/server': 'mcp-sdk',
   '@modelcontextprotocol/client': 'mcp-sdk',

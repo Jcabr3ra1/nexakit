@@ -207,3 +207,11 @@ test('pyproject.toml: comments, escapes, include-group and other tables do not i
   assert.deepEqual(result.signals.find(s => s.id === 'django').sources, ['grupos/pyproject.toml (django)']);
   assert.deepEqual(result.signals.find(s => s.id === 'fastapi').sources, ['escape/pyproject.toml (fastapi)']);
 });
+
+test('detects Angular, NestJS and Expo from package.json', async t => {
+  const root = await tree(t, { 'package.json': { dependencies: { '@angular/core': '*', '@nestjs/core': '*', expo: '*' } } });
+  const result = await detectSignals(root, { git: false });
+  for (const [id, label] of [['angular', 'Angular'], ['nestjs', 'NestJS'], ['expo', 'Expo']]) {
+    assert.equal(result.signals.find(signal => signal.id === id)?.label, label);
+  }
+});
