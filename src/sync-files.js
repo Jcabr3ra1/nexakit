@@ -102,7 +102,8 @@ export function assertSameState(before, after) {
 }
 export function assertOwnedArtifact(file, expected) {
   assertPhysicalPath(file);
-  const stat = fs.lstatSync(file);
+  // Inodes on Windows may exceed Number.MAX_SAFE_INTEGER. Never round ownership.
+  const stat = fs.lstatSync(file, { bigint: true });
   if (!stat.isFile() || stat.isSymbolicLink() || stat.dev !== expected.dev || stat.ino !== expected.ino) rejectFile("artifact-conflict", "Un artefacto fue sustituido; no se tocará.");
 }
 function identity(stat) { return [stat.dev, stat.ino, stat.mode, stat.size, stat.mtimeMs, stat.ctimeMs]; }
