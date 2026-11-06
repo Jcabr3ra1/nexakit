@@ -21,7 +21,7 @@ export function projectIdentity(root) {
 const realpathOrNull = target => fs.realpath(target).catch(() => null);
 
 // Any Git failure (not installed, not a repository, dubious ownership) means "no Git": detection never breaks on it.
-async function gitTopLevel(startedIn, run) {
+export async function gitTopLevel(startedIn, run) {
   try {
     const output = String(run(['rev-parse', '--show-toplevel'], startedIn) ?? '').trim();
     return output ? await realpathOrNull(output) : null;
