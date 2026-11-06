@@ -83,3 +83,11 @@ test('a memory path is new, an existing memory, or something else that is not to
   await fs.writeFile(path.join(w.base, 'archivo'), 'x');
   assert.equal(await inspectMemoryPath(path.join(w.base, 'archivo')), 'invalid');
 });
+
+test('clean mode answers are found at the project root when starting from frontend',async t=>{
+ const w=await world(t);await fs.mkdir(path.join(w.repo,'.agent-toolkit'));
+ await fs.writeFile(path.join(w.repo,'.agent-toolkit/manifest.json'),JSON.stringify({manifestVersion:1,managedBy:'nexakit',mode:'symlink',entries:[],answers:{version:1,cleanProject:{choice:{frontend:'react-vite',backend:null,database:null,mobile:null},git:true,status:'creado'}}}));
+ const state=await gatherSetupState({start:path.join(w.repo,'frontend'),homeDirectory:w.home,environment:w.environment,toolkitRoot:TOOLKIT_ROOT,runCommand:notFound});
+ assert.equal(state.project.root,w.repo);assert.equal(state.cleanProject?.status,'creado');
+ const {createSetupModel}=await import('../src/setup-tui.js');assert.notEqual(createSetupModel(state).step,'mode');
+});

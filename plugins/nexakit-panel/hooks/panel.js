@@ -1,3 +1,4 @@
+import { sinSecretos } from './redact.js';
 // Lógica pura del panel: reduce los eventos de la sesión a un estado que el panel dibuja. Sin datos inventados:
 // todo sale de lo que el motor informa (pasos, subagentes, llamadas del servidor, herramientas).
 export const MAX_REGISTRO = 60;
@@ -223,14 +224,7 @@ export function registrarRecomendacion(estado, { modelo, esfuerzo, motivo }) {
   return { ...estado, recomendacion: { modelo, esfuerzo, motivo } };
 }
 
-// Tacha los secretos evidentes de un detalle antes de mostrarlo o guardarlo en disco.
-export function sinSecretos(texto) {
-  return String(texto)
-    .replace(/\b([A-Za-z0-9_]*(?:TOKEN|KEY|SECRET|PASSWORD|PASSWD)[A-Za-z0-9_]*)=([^\s"']+)/giu, '$1=***')
-    .replace(/(Bearer\s+)[^\s"']+/giu, '$1***')
-    .replace(/(--?(?:password|passwd|token|secret|api-key)[= ])[^\s"']+/giu, '$1***');
-}
-
+export { sinSecretos } from './redact.js';
 // --- Revisiones que la sesión manda a otra IA con `nexakit revision --con <ia>` -----------------------------------
 export function esRevision(comando) {
   const c = String(comando ?? '');

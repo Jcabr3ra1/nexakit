@@ -672,3 +672,25 @@ publicado ni aplicado sobre una memoria real. Consulta el
 
 La biblioteca se versiona con Git y se respalda en un repositorio privado de
 GitHub. Esta publicación manual no añade creación de remotos a la CLI.
+
+## Crear un proyecto limpio
+
+La primera ejecución de `npx nexakit` pregunta «¿Proyecto limpio o ya empezado?». El camino «Ya empezado» prepara
+el código existente como antes. «Proyecto limpio» ofrece frontend, backend, base de datos y app móvil; cada parte
+permite «No quiero». Con una sola parte se usa la raíz; con varias, `frontend/`, `backend/` y `movil/`.
+
+En una carpeta con archivos, el modo limpio exige una subcarpeta nueva. Antes de crear muestra las órdenes exactas,
+los archivos mínimos de FastAPI y los requisitos que falten; un requisito ausente bloquea la confirmación. Usa
+los generadores oficiales actuales, instala dependencias y comprueba cada parte antes de continuar con skills,
+memoria y agentes. No instala Node/Python del sistema, no levanta bases de datos ni despliega.
+
+Python usa su propio `.venv`. PostgreSQL añade el controlador y `.env.example`; Supabase inicializa su configuración
+y añade el cliente al frontend cuando existe, o al backend. Git y el primer commit son opcionales; dentro de otro
+repositorio no se crea uno anidado. Lo ya creado se conserva al fallar: se informa la parte, la orden y el registro
+`.agent-toolkit/creacion.log`, con los secretos evidentes tachados. No reejecutes sobre los archivos para intentar
+sobrescribirlos: revisa el registro y prepara lo existente o usa otra carpeta nueva.
+
+Las respuestas se conservan y no se repite el selector en ejecuciones posteriores. Los generadores trabajan en
+una zona temporal propia dentro de `.agent-toolkit` y se trasladan los archivos sin sobrescribir destinos. Tras
+un fallo, esa zona se conserva para recuperar lo generado; tras éxito se limpia. Ctrl+C durante una orden la
+cancela y conserva lo creado. Véase la [prueba manual](proyecto-limpio-prueba-manual.md).

@@ -269,3 +269,13 @@ Herramientas internas del servidor (solo para depurar):
 | `node bin/agent-task.js verify --contract c.json --expect <sha256> --source <raíz> --handoff <raíz> --phase before` | Compara las huellas de los archivos listados. |
 
 Más detalle: [instalación, consumo y recuperación](consolidacion.md), [herramientas de Gemini](herramientas-gemini.md) y [primeros pasos](primeros-pasos.md).
+
+### Proyecto limpio
+
+`npx nexakit` ofrece el modo «Proyecto limpio» la primera vez. Selecciona las partes, revisa las órdenes y los
+requisitos, y confirma la creación antes del flujo habitual de skills y memoria. Cada parte es opcional. Una
+carpeta con archivos obliga a elegir una subcarpeta nueva. Las órdenes y los fallos quedan en
+`.agent-toolkit/creacion.log`; no se borran los archivos creados cuando falla una orden. Git es opcional y no se
+inicializa dentro de un repositorio existente. No hay una bandera no interactiva para crear proyectos.
+
+Detalles y verificación: [uso](uso.md#crear-un-proyecto-limpio) y [prueba manual](proyecto-limpio-prueba-manual.md).

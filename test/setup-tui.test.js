@@ -186,6 +186,8 @@ test('a full run with the suggested answers ends in «Listo», and a second run 
   const w = await world(t);
   const tty = createFakeTty({ columns: 80 });
   const running = runSetupTui({ input: tty.input, output: tty.output, options: w.options });
+  await tty.waitFor(/¿Proyecto limpio o ya empezado\?/u);
+  tty.sendKey('\r');
   await tty.waitFor(/¿Qué skills quieres\?/u);
   for (const wait of [/¿Crear la memoria/u, /¿Con qué IA trabajas/u, /¿Lo preparo/u]) {
     tty.sendKey('\r');
@@ -210,6 +212,8 @@ test('redraws in place on the alternate screen and leaves only the last frame in
   const w = await world(t);
   const tty = createFakeTty({ columns: 80 });
   const running = runSetupTui({ input: tty.input, output: tty.output, options: w.options });
+  await tty.waitFor(/¿Proyecto limpio o ya empezado\?/u);
+  tty.sendKey('\r');
   await tty.waitFor(/¿Qué skills quieres\?/u);
   for (const key of ['\x1b[B', '\x1b[B', '\x1b[A']) tty.sendKey(key);
   await new Promise(resolve => setTimeout(resolve, 20));
@@ -230,7 +234,9 @@ test('Ctrl+C at any question, or "No" at the confirmation, writes nothing', asyn
   for (let answered = 0; answered <= 4; answered++) {
     const tty = createFakeTty({ columns: 80 });
     const running = runSetupTui({ input: tty.input, output: tty.output, options: w.options });
-    await tty.waitFor(/¿Qué skills quieres\?/u);
+    await tty.waitFor(/¿Proyecto limpio o ya empezado\?/u);
+  tty.sendKey('\r');
+  await tty.waitFor(/¿Qué skills quieres\?/u);
     for (let i = 0; i < Math.min(answered, 3); i++) tty.sendKey('\r');
     if (answered === 4) {
       await tty.waitFor(/¿Lo preparo/u);
@@ -283,4 +289,79 @@ test('the skills step says which technologies have no skill and how to ask for o
   for (const columns of [40, 68]) {
     for (const line of stripVTControlCharacters(frame(model, columns)).split('\n')) assert.ok(cellWidth(line) <= columns, `@${columns}: «${line}»`);
   }
+});
+
+const generators = await (await import('../src/generators-catalog.js')).loadGeneratorsCatalog();
+const cleanState = overrides => state({folder:{empty:true,insideGit:false,entries:[]},generators,cleanProject:null,...overrides});
+test('an empty folder starts at mode with limpio marked',()=>{
+ const m=createSetupModel(cleanState());assert.equal(m.step,'mode');assert.equal(m.cursor,0);assert.match(frame(m),/¿Proyecto limpio o ya empezado/);
+});
+test('ya empezado goes to skills as today',()=>{
+ assert.equal(press(createSetupModel(cleanState()),'\x1b[B','\r').step,'skills');
+});
+test('choosing only react skips to git then confirm',()=>{
+ const git=press(createSetupModel(cleanState()),'\r','\r','\r','\r','\r');assert.equal(git.step,'git');
+ const result=handleSetupKey(git,'\r');assert.equal(result.model.step,'clean-confirm');assert.equal(result.effect,'prepare-clean');
+});
+test('database without backend offers only supabase',()=>{
+ const m=press(createSetupModel(cleanState()),'\r','\r','\r');assert.equal(m.step,'tech-database');
+ assert.match(frame(m),/Supabase/);assert.doesNotMatch(frame(m),/SQLite|PostgreSQL/);
+});
+test('a missing requirement blocks the confirmation',()=>{
+ const m={...createSetupModel(cleanState()),step:'clean-confirm',requirements:[{program:'python',minVersion:'3.12',ok:false,found:null}]};
+ assert.equal(handleSetupKey(m,'\r').effect,undefined);assert.match(frame(m),/python/);
+});
+test('q in the selector exits without effects',()=>{
+ const m=press(createSetupModel(cleanState()),'\r');assert.equal(handleSetupKey(m,'q').effect,'exit');
+});
+test('no question repeats when cleanProject was saved',()=>{
+ const m=createSetupModel(cleanState({cleanProject:{choice:{frontend:'react-vite',backend:null,database:null,mobile:null},git:true,status:'creado'}}));
+ assert.equal(m.step,'skills');
+});
+test('every clean screen fits in 40 and 68 columns',()=>{
+ const m=createSetupModel(cleanState());
+ for(const step of ['mode','tech-frontend','tech-backend','tech-database','tech-mobile','git','clean-folder','clean-confirm'])
+  for(const columns of [40,68]) for(const line of stripVTControlCharacters(frame({...m,step},columns)).split('\n')) assert.ok(cellWidth(line)<=columns,`${step}: ${line}`);
+});
+test('the clean terminal loop creates React then offers its skills without repeating mode',async t=>{
+ const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'clean-terminal-')));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ const {fakeGenerators}=await import('../test-support/fake-generators.js');
+ const {readCleanProjectAnswers}=await import('../src/skill-recommendations.js');
+ const {detectSignals}=await import('../src/project-signals.js');
+ let gathered=0;
+ const gather=async()=>{gathered++;return cleanState({creationRoot:root,homeDirectory:root,project:{root,git:false,fromSubfolder:false,id:'prueba',displayName:'Prueba'},
+  signals:(await detectSignals(root,{git:false})).signals,cleanProject:await readCleanProjectAnswers(root)});};
+ const tty=createFakeTty();
+ const running=runSetupTui({input:tty.input,output:tty.output,gather,options:{start:root,homeDirectory:root,runCommand:fakeGenerators()}});
+ await tty.waitFor(/¿Proyecto limpio/);tty.sendKey('\r');
+ for(const screen of [/Elige frontend/,/Elige backend/,/Elige base de datos/,/Elige app móvil/]){await tty.waitFor(screen);tty.sendKey('\r');}
+ await tty.waitFor(/¿Inicio Git/);tty.sendKey('\x1b[C');tty.sendKey('\r');
+ await tty.waitFor(/¿Creo la base/);tty.sendKey('\r');
+ await tty.waitFor(/¿Qué skills quieres/);assert.match(tty.getFrame(),/frontend-design/);
+ tty.sendKey('q');assert.equal(await running,0);
+ assert.equal((await readCleanProjectAnswers(root)).status,'creado');assert.equal(gathered,2);
+});
+test('continuing after a failed child creation prepares the child instead of its parent',async t=>{
+ const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'clean-child-')));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ await fs.writeFile(path.join(root,'README.md'),'Padre');
+ const {fakeGenerators}=await import('../test-support/fake-generators.js');
+ const {readCleanProjectAnswers}=await import('../src/skill-recommendations.js');
+ const gather=async({start})=>cleanState({creationRoot:start,homeDirectory:root,folder:{empty:(await fs.readdir(start)).length===0,insideGit:false},
+   project:{root:start,git:false,fromSubfolder:false,id:'prueba',displayName:path.basename(start)},cleanProject:await readCleanProjectAnswers(start)});
+ const tty=createFakeTty(),running=runSetupTui({input:tty.input,output:tty.output,gather,options:{start:root,homeDirectory:root,
+   runCommand:fakeGenerators({fail:(_c,args)=>args.includes('vite@latest')})}});
+ await tty.waitFor(/¿Proyecto limpio/);tty.sendKey('\x1b[A');tty.sendKey('\r');
+ await tty.waitFor(/Nombre de la subcarpeta/);tty.sendKey('nueva');tty.sendKey('\r');
+ for(const screen of [/Elige frontend/,/Elige backend/,/Elige base de datos/,/Elige app móvil/]){await tty.waitFor(screen);tty.sendKey('\r');}
+ await tty.waitFor(/¿Inicio Git/);tty.sendKey('\x1b[C');tty.sendKey('\r');
+ await tty.waitFor(/¿Creo la base/);tty.sendKey('\r');
+ await tty.waitFor(/La creación no terminó/);tty.sendKey('\r');
+ await tty.waitFor(/¿Qué skills quieres/);const shown=tty.getFrame();tty.sendKey('q');await running;
+ assert.match(shown,/Proyecto: nueva/);assert.equal(await fs.readFile(path.join(root,'README.md'),'utf8'),'Padre');
+});
+test('clean confirmation includes implicit venv and optional Git commands before creation',async()=>{
+ const {planCleanProject}=await import('../src/clean-project.js');
+ const choice={frontend:null,backend:'django',database:null,mobile:null};
+ const model={...createSetupModel(cleanState()),step:'clean-confirm',cleanChoice:choice,requirements:[],cleanPlan:planCleanProject({catalog:generators,choice,name:'demo',platform:'linux'})};
+ const text=frame(model,100);assert.match(text,/(?:python3|py).*venv/);assert.match(text,/git.*init/);assert.match(text,/git.*commit/);
 });

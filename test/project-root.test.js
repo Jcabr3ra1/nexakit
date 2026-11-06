@@ -65,3 +65,9 @@ test('project ids follow the memory rules', () => {
   assert.equal(projectIdentity('/x/__').id, 'proyecto');
   assert.equal(projectIdentity('/x/' + 'a'.repeat(70)).id, 'proyecto');
 });
+test('a clean project without Git is also found from its frontend folder',async t=>{
+ const {root,home}=await temp(t);await fs.mkdir(path.join(root,'frontend'));await fs.mkdir(path.join(root,'.agent-toolkit'));
+ await fs.writeFile(path.join(root,'.agent-toolkit/manifest.json'),JSON.stringify({managedBy:'nexakit',entries:[],answers:{cleanProject:{status:'creado'}}}));
+ const r=await resolveProjectRoot(path.join(root,'frontend'),{homeDirectory:home,runGit:()=>{throw Error('Git ausente');}});
+ assert.equal(r.root,root);assert.equal(r.git,false);
+});

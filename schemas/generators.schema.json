@@ -1,0 +1,299 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0.0"
+    },
+    "generators": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]+$"
+          },
+          "part": {
+            "enum": [
+              "frontend",
+              "backend",
+              "database",
+              "mobile"
+            ]
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1
+          },
+          "signals": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "requires": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "program": {
+                  "enum": [
+                    "node",
+                    "python"
+                  ]
+                },
+                "minVersion": {
+                  "type": "string",
+                  "pattern": "^\\d+\\.\\d+$"
+                }
+              },
+              "required": [
+                "program",
+                "minVersion"
+              ]
+            }
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "kind": {
+                      "const": "run"
+                    },
+                    "argv": {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "cwd": {
+                      "enum": [
+                        "parent",
+                        "dir"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "argv",
+                    "cwd"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "kind": {
+                      "const": "write"
+                    },
+                    "path": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "content": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "path",
+                    "content"
+                  ]
+                }
+              ]
+            }
+          },
+          "install": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "kind": {
+                      "const": "run"
+                    },
+                    "argv": {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "cwd": {
+                      "enum": [
+                        "parent",
+                        "dir"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "argv",
+                    "cwd"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "kind": {
+                      "const": "write"
+                    },
+                    "path": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "content": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "path",
+                    "content"
+                  ]
+                }
+              ]
+            }
+          },
+          "check": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "argv": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "cwd": {
+                "const": "dir"
+              }
+            },
+            "required": [
+              "argv",
+              "cwd"
+            ]
+          },
+          "database": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "backends": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "install": {
+                      "type": "array",
+                      "items": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "kind": {
+                                "const": "run"
+                              },
+                              "argv": {
+                                "type": "array",
+                                "minItems": 1,
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "cwd": {
+                                "enum": [
+                                  "parent",
+                                  "dir"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "argv",
+                              "cwd"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "kind": {
+                                "const": "write"
+                              },
+                              "path": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "content": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "path",
+                              "content"
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    "envExample": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "install"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "backends"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "id",
+          "part",
+          "label",
+          "signals",
+          "requires",
+          "steps",
+          "install",
+          "check"
+        ]
+      }
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "generators"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}
