@@ -1,3 +1,4 @@
+import { createCleanProject } from './clean-project-flow.js';
 // `npx nexakit`: three questions with the answer already suggested (skills, memory, agents) and one confirmation,
 // in the style of `npm create vite`. Answered questions fold into one ◇ line; the active one uses ◆. The model,
 // the drawing and the keys are pure, so every screen is tested as text; runSetupTui is the only part with I/O.
@@ -111,7 +112,7 @@ const previousOf = (model, step) => {
 };
 
 export function handleSetupKey(model, key) {
-  if (key === '\x03') return { model, effect: 'exit' };
+  if (key === '\x03') return ['creating','applying'].includes(model.step) ? {model} : { model, effect: 'exit' };
   const { step } = model;
 
   if (step === 'clean-folder') {
@@ -303,9 +304,9 @@ function question(model) {
     case 'clean-folder': return {title:'Nombre de la subcarpeta nueva',body:[{text:model.folderInput+'▌'}],info:model.message?[model.message]:[],keys:'Enter comprobar · Esc volver'};
     case 'git': return {title:'¿Inicio Git con un primer commit?',body:[{text:model.cleanGit?'● Sí / ○ No':'○ Sí / ● No'}],info:[],keys:'←/→ cambiar · Enter continuar · q salir'};
     case 'clean-confirm': return {title:'¿Creo la base del proyecto?',body:(model.cleanPlan?.parts ?? []).flatMap(p=>[
-      {text:`${p.part}: ${p.id} → ${p.dir}`},...p.commands.map(c=>({text:`${c.cwd}: ${c.argv.map(a=>JSON.stringify(a)).join(' ')}`})),
+      {text:`${p.part}: ${p.id} → ${p.dir}`},...(p.commands.some(c=>/\.venv[\\/]/.test(c.argv[0]))?[{text:`${p.dir}: ${process.platform==='win32'?'py':'python3'} -m venv .venv`}]:[]),...p.commands.map(c=>({text:`${c.cwd}: ${c.argv.map(a=>JSON.stringify(a)).join(' ')}`})),
       ...p.writes.map(w=>({text:`Crear ${w.path}: ${w.content}`})),{text:`Comprobar ${p.check.cwd}: ${p.check.argv.map(a=>JSON.stringify(a)).join(' ')}`}]),
-      info:model.requirements===null?['Comprobando requisitos…']:[...model.requirements.filter(r=>!r.ok).map(r=>`! Falta ${r.program} ${r.minVersion} o superior (${r.found ?? 'no encontrado'}).`),...(model.message?[model.message]:[])],keys:'Enter crear · retroceso volver · q salir'};
+      info:model.requirements===null?['Comprobando requisitos…']:[...(model.state.folder?.insideGit?['El commit queda a tu cargo en el repositorio existente.']:model.cleanGit?['git init','git add -A','git commit -m \"chore: crear la base del proyecto con nexakit\"']:[]),...model.requirements.filter(r=>!r.ok).map(r=>`! Falta ${r.program} ${r.minVersion} o superior (${r.found ?? 'no encontrado'}).`),...(model.message?[model.message]:[])],keys:'Enter crear · retroceso volver · q salir'};
     case 'creating': return {title:'Creando el proyecto…',body:(model.cleanProgress ?? []).map(text=>({text})),info:[],keys:'Espera a que termine la orden'};
     case 'clean-failed': return {title:'La creación no terminó',body:[{text:model.cleanFailure ?? `Revisa el registro en .agent-toolkit/creacion.log.`}],info:['Se conserva lo creado. Enter prepara lo existente.'],keys:'Enter continuar · q salir'};
     case 'skills': {
@@ -322,7 +323,7 @@ function question(model) {
       const missing = state.uncoveredTech?.length
         ? ['', ...wrapText(`Sin skill en el catálogo: ${joinNames(state.uncoveredTech.map(item => item.label))}. Para buscar una, pide a tu IA «busca una skill para ${state.uncoveredTech[0].label}».`, 60)]
         : [];
-      const info = [...(model.info && current ? ['', ...wrapText(current.summary, 60), ...skillTrust(current)] : []), ...external, ...missing];
+      const info = [...(model.message?[model.message]:[]), ...(model.info && current ? ['', ...wrapText(current.summary, 60), ...skillTrust(current)] : []), ...external, ...missing];
       return { title: '¿Qué skills quieres?', body, info, keys: 'espacio marcar · i qué hace · Enter seguir · q salir' };
     }
     case 'memory': {
@@ -536,12 +537,13 @@ export function renderSetupFrame(model, { columns = 80, rows, color = true } = {
   return `${header.join('\n')}\n${body}`;
 }
 
-export async function runSetupTui({ input = process.stdin, output = process.stdout, options = {}, applyOptions = {} } = {}) {
+export async function runSetupTui({ input = process.stdin, output = process.stdout, options = {}, applyOptions = {}, gather = gatherSetupState } = {}) {
   const level = colorLevel(output);
   const home = options.homeDirectory ?? os.homedir();
   output.write('Revisando el proyecto…\n');
-  let model = createSetupModel(await gatherSetupState(options));
+  let model = createSetupModel(await gather(options));
   let exitCode = 0;
+  let creationController;
   // The questions live on the alternate screen, where moving home and erasing redraws in place: clearing the
   // normal screen pushes a copy of every frame into the scrollback in most terminals. On exit the last frame is
   // printed once on the normal screen, so the result stays readable.
@@ -581,6 +583,13 @@ export async function runSetupTui({ input = process.stdin, output = process.stdo
           const requirements=await checkRequirements(cleanPlan,model.state.generators,{runCommand:options.runCommand ?? runCleanCommand});
           model={...model,cleanPlan,requirements};
         } catch(e) { model={...model,cleanPlan:null,requirements:[],message:e.message}; }
+      } else if (effect === 'create-project') {
+        model={...model,step:'creating',cleanProgress:[]}; creationController=new AbortController(); render();
+        const result=await createCleanProject({...extra,insideGit:model.state.folder.insideGit},{options,gather,signal:creationController.signal,runCommand:options.runCommand ?? runCleanCommand,
+          onProgress:(part,argv)=>{model={...model,cleanProgress:[`${part}: ${argv.join(' ')}`]};render();}});
+        if(result.state){options={...options,start:result.state.project.root};model=createSetupModel(result.state);}
+        if(result.ok){model={...model,step:'skills',flow:'full',message:result.gitResult==='sin-git'?'Git no está instalado; seguimos sin él.':null};}
+        else{exitCode=1;model={...model,step:'clean-failed',cleanFailure:`${result.failed.part}: ${result.failed.argv.join(' ')}\n${result.failed.output}\nRegistro: .agent-toolkit/creacion.log`};}
       } else if (effect === 'apply') {
         const labels = Object.fromEntries(buildConfirmation(model.state, model.answers).blocks.map(block => [block.id, block.label]));
         model = { ...model, step: 'applying', progress: [] };
@@ -615,7 +624,8 @@ export async function runSetupTui({ input = process.stdin, output = process.stdo
     };
     const onData = chunk => {
       const key = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
-      if (key === '\x03' && model.step !== 'applying') return cleanup(exitCode);
+      if(key === '\x03' && model.step==='creating'){creationController?.abort();return;}
+      if (key === '\x03' && !['applying','creating'].includes(model.step)) return cleanup(exitCode);
       chain = chain.then(() => handle(key)).catch(error => {
         model = { ...model, step: 'done', result: { ok: false, failed: { message: error instanceof Error ? error.message : String(error) } } };
         exitCode = 1;

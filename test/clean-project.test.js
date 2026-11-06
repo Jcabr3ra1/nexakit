@@ -183,3 +183,28 @@ test('does not duplicate gitignore lines',async t=>{
  await initializeGit(root,{insideGit:false,gitignore:['.env','.venv/'],runCommand:()=>({status:0})});
  const text=await fs.readFile(path.join(root,'.gitignore'),'utf8');assert.equal(text.split('\n').filter(l=>l==='.env').length,1);assert.match(text,/node_modules/);
 });
+test('cancellation aborts an active generator and records the stopped creation',async t=>{
+ const root=await folder(t),controller=new AbortController();let aborted=false;
+ const running=executePlan(await planner({choice:{frontend:'react-vite'}}),{projectRoot:root,timeoutMs:30,signal:controller.signal,runCommand:async(_c,_a,{signal})=>{
+   signal.addEventListener('abort',()=>{aborted=true;});controller.abort();return new Promise(()=>{});
+ }});
+ const r=await running;assert.equal(r.ok,false);assert.equal(aborted,true);assert.match(r.failed.output,/cancelad/i);
+});
+test('the current Node 24.14 satisfies React generators without requiring an unrelated upgrade',async()=>{
+ const result=await requirements({frontend:'react-vite'},()=>'v24.14.1');assert.equal(result[0].ok,true);
+});
+test('Supabase root configuration survives promotion with multiple parts',async t=>{
+ const root=await folder(t),{fakeGenerators}=await import('../test-support/fake-generators.js'),base=fakeGenerators();
+ const r=await executePlan(await planner({choice:{frontend:'react-vite',backend:'express',database:'supabase'}}),{projectRoot:root,runCommand:async(cmd,args,opts)=>{
+   if(args.includes('supabase@latest')){await fs.mkdir(path.join(opts.cwd,'supabase'));await fs.writeFile(path.join(opts.cwd,'supabase/config.toml'),'project_id="prueba"');return {status:0};}
+   return base(cmd,args,opts);
+ }});
+ assert.equal(r.ok,true);assert.match(await fs.readFile(path.join(root,'supabase/config.toml'),'utf8'),/prueba/);
+});
+test('requirements probes that never finish are bounded and aborted',async()=>{
+ let aborted=false;
+ const plan=await planner({choice:{frontend:'react-vite'}});
+ const {checkRequirements}=await import('../src/clean-project.js');
+ const result=await checkRequirements(plan,catalog,{timeoutMs:15,runCommand:(_c,_a,{signal})=>{signal.addEventListener('abort',()=>{aborted=true;});return new Promise(()=>{});}});
+ assert.equal(result[0].ok,false);assert.equal(aborted,true);
+});

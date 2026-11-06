@@ -63,7 +63,7 @@ export function planCleanProject({ choice, catalog, name, platform = process.pla
   return { parts, databaseId: database?.id ?? null, gitignore: [...(pythonUsed ? ['.venv/'] : []), '.env'] };
 }
 
-export async function checkRequirements(plan, catalog, { runCommand, platform = process.platform }) {
+export async function checkRequirements(plan, catalog, { runCommand, platform = process.platform, timeoutMs = 10000, signal } = {}) {
   const required = new Map();
   for (const id of [...plan.parts.map(p => p.id), plan.databaseId].filter(Boolean)) {
     for (const requirement of catalog.generators.find(g => g.id === id).requires) {
@@ -73,12 +73,14 @@ export async function checkRequirements(plan, catalog, { runCommand, platform = 
   }
   const results = [];
   for (const [program, minVersion] of required) {
-    let found = null;
+    let found = null, timer, cancel; const controller=new AbortController();
     try {
-      const result = await runCommand(program === 'python' ? platform === 'win32' ? 'py' : 'python3' : 'node', ['--version']);
+      const result = await Promise.race([Promise.resolve().then(()=>{if(controller.signal.aborted)throw Error('Cancelado');return runCommand(program === 'python' ? platform === 'win32' ? 'py' : 'python3' : 'node', ['--version'],{signal:controller.signal,timeoutMs});}),
+        new Promise((_,reject)=>{cancel=()=>{controller.abort();reject(Error('Cancelado'));};signal?.addEventListener('abort',cancel,{once:true});if(signal?.aborted)cancel();timer=setTimeout(cancel,timeoutMs);})]);
       const output = typeof result === 'string' ? result : result?.status === 0 || result?.code === 0 ? result.stdout : '';
       found = String(output ?? '').match(/\b(?:v|Python\s+)?(\d+\.\d+(?:\.\d+)?)\b/)?.[1] ?? null;
-    } catch { /* Missing programs are a blocking result, not an exception. */ }
+    } catch { /* Missing or timed-out programs are a blocking result. */ }
+    finally {clearTimeout(timer);signal?.removeEventListener('abort',cancel);}
     results.push({ program, minVersion, found, ok: found !== null && compareVersions(found, minVersion) >= 0 });
   }
   return results;
@@ -101,8 +103,9 @@ function confined(root, relative) {
   if (full !== root && !full.startsWith(root + path.sep)) throw Error('Ruta fuera del proyecto.');
   return full;
 }
-async function copyExclusive(source, destination, sourceRoot, destinationRoot) {
+async function copyExclusive(source, destination, sourceRoot, destinationRoot, ignored = new Set()) {
   for (const entry of await fs.readdir(source, {withFileTypes:true})) {
+    if (ignored.has(entry.name)) continue;
     if (entry.name === '.git') throw Error('El generador intentó crear un repositorio Git propio.');
     const from = path.join(source, entry.name), to = path.join(destination, entry.name);
     if (entry.isDirectory()) { await fs.mkdir(to); await copyExclusive(from,to,sourceRoot,destinationRoot); }
@@ -115,24 +118,27 @@ async function copyExclusive(source, destination, sourceRoot, destinationRoot) {
   }
 }
 export async function runCleanProject(plan, { projectRoot, runCommand = runCleanCommand, onProgress = () => {}, now = Date.now,
-  timeoutMs = 600000, platform = process.platform } = {}) {
+  timeoutMs = 600000, platform = process.platform, onCreated = async () => {}, signal } = {}) {
   const root = await fs.realpath(projectRoot), done = [], log = []; let workspace, current = plan.parts[0]?.part ?? 'proyecto', argv = [];
   const toolkit = path.join(root,'.agent-toolkit');
   const record = text => log.push(`${new Date(now()).toISOString()} ${sinSecretos(text)}`);
   const command = async (values,cwd) => {
     argv = values; onProgress(current,values); record(values.join(' '));
-    const controller = new AbortController(); let timer;
+    const controller = new AbortController(); let timer, cancel;
     try {
       const result = await Promise.race([
         Promise.resolve().then(()=>runCommand(values[0],values.slice(1),{cwd,signal:controller.signal,timeoutMs,
-          env:{...process.env,CI:'1',npm_config_cache:path.join(workspace,'npm-cache')}})),
-        new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(Error('La orden superó el tiempo límite.'));},timeoutMs);})
+          env:{...process.env,CI:'1',npm_config_cache:path.join(workspace,'npm-cache'),PIP_CACHE_DIR:path.join(workspace,'pip-cache'),PIP_NO_INPUT:'1'}})),
+        new Promise((_,reject)=>{
+          cancel=()=>{controller.abort();reject(Error('Creación cancelada.'));};
+          signal?.addEventListener('abort',cancel,{once:true});if(signal?.aborted)cancel();
+          timer=setTimeout(()=>{controller.abort();reject(Error('La orden superó el tiempo límite.'));},timeoutMs);})
       ]);
       const status = result?.status ?? result?.code;
       const output = typeof result === 'string' ? result : `${result?.stdout ?? ''}\n${result?.stderr ?? ''}`;
       record(`salida ${status ?? 0}: ${output}`);
       if (typeof result !== 'string' && status !== 0) throw Error(output || 'La orden falló.');
-    } finally { clearTimeout(timer); }
+    } finally { clearTimeout(timer); signal?.removeEventListener('abort',cancel); }
   };
   try {
     if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw Error('Tiempo límite inválido.');
@@ -147,6 +153,7 @@ export async function runCleanProject(plan, { projectRoot, runCommand = runClean
     await fs.writeFile(path.join(git,'HEAD'),'ref: refs/heads/main\n',{flag:'wx'});
     await fs.writeFile(path.join(git,'config'),'[core]\nrepositoryformatversion = 0\nbare = false\n',{flag:'wx'});
     const stage = path.join(workspace,projectName(root)); await fs.mkdir(stage);
+    const promotedShared = new Set(plan.parts.map(p=>p.dir));
     for (const part of plan.parts) {
       current = part.part; const dir = confined(stage,part.dir);
       const pythonUsed = part.commands.some(c=>/\.venv[\\/]/.test(c.argv[0]));
@@ -160,6 +167,12 @@ export async function runCleanProject(plan, { projectRoot, runCommand = runClean
       }
       for (const c of part.commands) await command(finalArgv(c.argv),confined(stage,c.cwd));
       await copyExclusive(dir,destination,stage,root);
+      if(part.dir!=='.') {
+        const shared=(await fs.readdir(stage)).filter(name=>!promotedShared.has(name));
+        await copyExclusive(stage,root,stage,root,promotedShared);
+        shared.forEach(name=>promotedShared.add(name));
+      }
+      await onCreated(part.part);
       await command(finalArgv(part.check.argv),destination); done.push(part.part);
     }
     record('Creación comprobada.');
@@ -181,20 +194,33 @@ export async function runCleanProject(plan, { projectRoot, runCommand = runClean
   }
 }
 
-export async function initGit(projectRoot, {runCommand = runCleanCommand, insideGit, gitignore = []} = {}) {
-  if (insideGit) return 'omitido-repo-existente';
-  const root = await fs.realpath(projectRoot);
-  const run = async args => {
-    const result = await runCommand('git',args,{cwd:root,signal:AbortSignal.timeout(30000)});
-    if (typeof result !== 'string' && (result?.status ?? result?.code) !== 0) throw Error('Git no completó la orden.');
-  };
-  try { await run(['--version']); } catch { return 'sin-git'; }
-  const file=path.join(root,'.gitignore'), stat=await lstatOrNull(file);
+export async function ensureCleanIgnore(projectRoot, gitignore = []) {
+  const root=await fs.realpath(projectRoot), file=path.join(root,'.gitignore'),stat=await lstatOrNull(file);
   if(stat && (!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1||stat.size>1024*1024)) throw Error('.gitignore no es un archivo seguro.');
-  const text=stat ? await fs.readFile(file,'utf8') : '';
-  const lines = new Set(text.split(/\r?\n/));
-  const missing = [...new Set([...gitignore,'.agent-toolkit/'])].filter(line=>!lines.has(line));
+  const text=stat ? await fs.readFile(file,'utf8') : '',lines=new Set(text.split(/\r?\n/));
+  const missing=[...new Set([...gitignore,'.agent-toolkit/'])].filter(line=>!lines.has(line));
   if(missing.length) await fs.appendFile(file,`${text && !text.endsWith('\n')?'\n':''}${missing.join('\n')}\n`);
-  await run(['init']); await run(['add','-A']); await run(['commit','-m','chore: crear la base del proyecto con nexakit']);
+}
+export async function appendCleanLog(root, text) {
+  const dir=path.join(root,'.agent-toolkit'); await physicalDirectory(dir);
+  const file=path.join(dir,'creacion.log'),stat=await lstatOrNull(file);
+  if(stat && (!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1)) throw Error('Registro inseguro.');
+  await fs.appendFile(file,`${new Date().toISOString()} ${sinSecretos(text)}\n`,{mode:0o600});
+}
+export async function initGit(projectRoot, {runCommand = runCleanCommand, insideGit, gitignore = [], onCommand=async()=>{}} = {}) {
+  if (insideGit) return 'omitido-repo-existente';
+  const root=await fs.realpath(projectRoot);
+  const run=async args=>{
+    let result;
+    try { result=await runCommand('git',args,{cwd:root,signal:AbortSignal.timeout(30000)}); }
+    catch(error) { await onCommand(['git',...args],error.message); throw Object.assign(error,{argv:['git',...args]}); }
+    const status=typeof result==='string'?0:(result?.status ?? result?.code);
+    const output=typeof result==='string'?result:`${result?.stdout ?? ''}\n${result?.stderr ?? ''}`;
+    await onCommand(['git',...args],`salida ${status}: ${output}`);
+    if(status!==0) throw Object.assign(Error(sinSecretos(output || 'Git no completó la orden.')),{argv:['git',...args]});
+  };
+  try{await run(['--version']);}catch{return 'sin-git';}
+  await ensureCleanIgnore(root,gitignore);
+  await run(['init']);await run(['add','-A']);await run(['commit','-m','chore: crear la base del proyecto con nexakit']);
   return 'hecho';
 }

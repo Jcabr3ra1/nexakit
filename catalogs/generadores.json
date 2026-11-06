@@ -11,7 +11,7 @@
       "requires": [
         {
           "program": "node",
-          "minVersion": "24.15"
+          "minVersion": "24.0"
         }
       ],
       "steps": [
@@ -61,7 +61,7 @@
       "requires": [
         {
           "program": "node",
-          "minVersion": "24.15"
+          "minVersion": "24.0"
         }
       ],
       "steps": [
@@ -111,7 +111,7 @@
       "requires": [
         {
           "program": "node",
-          "minVersion": "24.15"
+          "minVersion": "24.0"
         }
       ],
       "steps": [
@@ -163,7 +163,7 @@
       "requires": [
         {
           "program": "node",
-          "minVersion": "24.15"
+          "minVersion": "24.0"
         }
       ],
       "steps": [
@@ -215,7 +215,7 @@
       "requires": [
         {
           "program": "node",
-          "minVersion": "24.15"
+          "minVersion": "24.0"
         }
       ],
       "steps": [
@@ -419,7 +419,7 @@
       "requires": [
         {
           "program": "node",
-          "minVersion": "24.15"
+          "minVersion": "24.0"
         }
       ],
       "steps": [
@@ -522,7 +522,7 @@
       "requires": [
         {
           "program": "node",
-          "minVersion": "24.15"
+          "minVersion": "24.0"
         }
       ],
       "steps": [
@@ -703,7 +703,7 @@
       "requires": [
         {
           "program": "node",
-          "minVersion": "24.15"
+          "minVersion": "24.0"
         }
       ],
       "steps": [
@@ -890,7 +890,7 @@
       "requires": [
         {
           "program": "node",
-          "minVersion": "24.15"
+          "minVersion": "24.0"
         }
       ],
       "steps": [

@@ -323,3 +323,45 @@ test('every clean screen fits in 40 and 68 columns',()=>{
  for(const step of ['mode','tech-frontend','tech-backend','tech-database','tech-mobile','git','clean-folder','clean-confirm'])
   for(const columns of [40,68]) for(const line of stripVTControlCharacters(frame({...m,step},columns)).split('\n')) assert.ok(cellWidth(line)<=columns,`${step}: ${line}`);
 });
+test('the clean terminal loop creates React then offers its skills without repeating mode',async t=>{
+ const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'clean-terminal-')));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ const {fakeGenerators}=await import('../test-support/fake-generators.js');
+ const {readCleanProjectAnswers}=await import('../src/skill-recommendations.js');
+ const {detectSignals}=await import('../src/project-signals.js');
+ let gathered=0;
+ const gather=async()=>{gathered++;return cleanState({creationRoot:root,homeDirectory:root,project:{root,git:false,fromSubfolder:false,id:'prueba',displayName:'Prueba'},
+  signals:(await detectSignals(root,{git:false})).signals,cleanProject:await readCleanProjectAnswers(root)});};
+ const tty=createFakeTty();
+ const running=runSetupTui({input:tty.input,output:tty.output,gather,options:{start:root,homeDirectory:root,runCommand:fakeGenerators()}});
+ await tty.waitFor(/¿Proyecto limpio/);tty.sendKey('\r');
+ for(const screen of [/Elige frontend/,/Elige backend/,/Elige base de datos/,/Elige app móvil/]){await tty.waitFor(screen);tty.sendKey('\r');}
+ await tty.waitFor(/¿Inicio Git/);tty.sendKey('\x1b[C');tty.sendKey('\r');
+ await tty.waitFor(/¿Creo la base/);tty.sendKey('\r');
+ await tty.waitFor(/¿Qué skills quieres/);assert.match(tty.getFrame(),/frontend-design/);
+ tty.sendKey('q');assert.equal(await running,0);
+ assert.equal((await readCleanProjectAnswers(root)).status,'creado');assert.equal(gathered,2);
+});
+test('continuing after a failed child creation prepares the child instead of its parent',async t=>{
+ const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'clean-child-')));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ await fs.writeFile(path.join(root,'README.md'),'Padre');
+ const {fakeGenerators}=await import('../test-support/fake-generators.js');
+ const {readCleanProjectAnswers}=await import('../src/skill-recommendations.js');
+ const gather=async({start})=>cleanState({creationRoot:start,homeDirectory:root,folder:{empty:(await fs.readdir(start)).length===0,insideGit:false},
+   project:{root:start,git:false,fromSubfolder:false,id:'prueba',displayName:path.basename(start)},cleanProject:await readCleanProjectAnswers(start)});
+ const tty=createFakeTty(),running=runSetupTui({input:tty.input,output:tty.output,gather,options:{start:root,homeDirectory:root,
+   runCommand:fakeGenerators({fail:(_c,args)=>args.includes('vite@latest')})}});
+ await tty.waitFor(/¿Proyecto limpio/);tty.sendKey('\x1b[A');tty.sendKey('\r');
+ await tty.waitFor(/Nombre de la subcarpeta/);tty.sendKey('nueva');tty.sendKey('\r');
+ for(const screen of [/Elige frontend/,/Elige backend/,/Elige base de datos/,/Elige app móvil/]){await tty.waitFor(screen);tty.sendKey('\r');}
+ await tty.waitFor(/¿Inicio Git/);tty.sendKey('\x1b[C');tty.sendKey('\r');
+ await tty.waitFor(/¿Creo la base/);tty.sendKey('\r');
+ await tty.waitFor(/La creación no terminó/);tty.sendKey('\r');
+ await tty.waitFor(/¿Qué skills quieres/);const shown=tty.getFrame();tty.sendKey('q');await running;
+ assert.match(shown,/Proyecto: nueva/);assert.equal(await fs.readFile(path.join(root,'README.md'),'utf8'),'Padre');
+});
+test('clean confirmation includes implicit venv and optional Git commands before creation',async()=>{
+ const {planCleanProject}=await import('../src/clean-project.js');
+ const choice={frontend:null,backend:'django',database:null,mobile:null};
+ const model={...createSetupModel(cleanState()),step:'clean-confirm',cleanChoice:choice,requirements:[],cleanPlan:planCleanProject({catalog:generators,choice,name:'demo',platform:'linux'})};
+ const text=frame(model,100);assert.match(text,/(?:python3|py).*venv/);assert.match(text,/git.*init/);assert.match(text,/git.*commit/);
+});

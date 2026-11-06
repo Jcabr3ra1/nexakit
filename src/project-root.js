@@ -30,12 +30,31 @@ export async function gitTopLevel(startedIn, run) {
   }
 }
 
+async function cleanBoundary(start, topLevel) {
+  let current = start;
+  while (true) {
+    try {
+      const dir=await fs.lstat(path.join(current,'.agent-toolkit'));
+      if(dir.isDirectory() && !dir.isSymbolicLink()) {
+        const file=path.join(current,'.agent-toolkit/manifest.json'),stat=await fs.lstat(file);
+        if(stat.isFile() && !stat.isSymbolicLink() && stat.nlink===1 && stat.size<=128000) {
+          const data=JSON.parse(await fs.readFile(file,'utf8'));
+          if(data.managedBy==='nexakit' && ['confirmado','creado','fallido'].includes(data.answers?.cleanProject?.status)) return current;
+        }
+      }
+    } catch { /* Only an owned readable marker establishes a boundary. */ }
+    if(!topLevel || current===topLevel || path.dirname(current)===current) return null;
+    current=path.dirname(current);
+  }
+}
+
 export async function resolveProjectRoot(start, { homeDirectory = os.homedir(), runGit: run = runGit } = {}) {
   const startedIn = await fs.realpath(start);
   const topLevel = await gitTopLevel(startedIn, run);
   // A repository at the home folder (dotfiles) is not the project: climbing there would scan and install into ~.
   const home = await realpathOrNull(homeDirectory);
   const git = Boolean(topLevel) && topLevel !== home;
-  const root = git ? topLevel : startedIn;
+  const boundary = await cleanBoundary(startedIn, git ? topLevel : null);
+  const root = boundary ?? (git ? topLevel : startedIn);
   return { root, startedIn, git, fromSubfolder: root !== startedIn, ...projectIdentity(root) };
 }

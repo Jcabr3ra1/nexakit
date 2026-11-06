@@ -3,7 +3,7 @@ import path from 'node:path';
 
 // Only filesystem fixtures: never starts npm, Python, pip, Git or a generator.
 export function fakeGenerators({ fail = () => false, calls = [] } = {}) {
-  return async (command, args, {cwd}) => {
+  return async (command, args, {cwd} = {}) => {
     calls.push({command,args,cwd});
     if (fail(command,args)) return {status:1,stderr:'Fallo simulado del generador.'};
     if (args.includes('--version')) return 'v24.20.0';
