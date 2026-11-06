@@ -180,3 +180,21 @@ export async function runCleanProject(plan, { projectRoot, runCommand = runClean
     }
   }
 }
+
+export async function initGit(projectRoot, {runCommand = runCleanCommand, insideGit, gitignore = []} = {}) {
+  if (insideGit) return 'omitido-repo-existente';
+  const root = await fs.realpath(projectRoot);
+  const run = async args => {
+    const result = await runCommand('git',args,{cwd:root,signal:AbortSignal.timeout(30000)});
+    if (typeof result !== 'string' && (result?.status ?? result?.code) !== 0) throw Error('Git no completó la orden.');
+  };
+  try { await run(['--version']); } catch { return 'sin-git'; }
+  const file=path.join(root,'.gitignore'), stat=await lstatOrNull(file);
+  if(stat && (!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1||stat.size>1024*1024)) throw Error('.gitignore no es un archivo seguro.');
+  const text=stat ? await fs.readFile(file,'utf8') : '';
+  const lines = new Set(text.split(/\r?\n/));
+  const missing = [...new Set([...gitignore,'.agent-toolkit/'])].filter(line=>!lines.has(line));
+  if(missing.length) await fs.appendFile(file,`${text && !text.endsWith('\n')?'\n':''}${missing.join('\n')}\n`);
+  await run(['init']); await run(['add','-A']); await run(['commit','-m','chore: crear la base del proyecto con nexakit']);
+  return 'hecho';
+}

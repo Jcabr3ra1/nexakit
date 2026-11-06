@@ -162,3 +162,24 @@ test('Python venv stays at its final path and the check runs after promotion', a
   }});
   assert.equal(r.ok,true);assert.equal(seen.length,3);
 });
+
+const initializeGit = async(root,options)=>(await import('../src/clean-project.js')).initGit(root,options);
+test('git initialization creates the first commit after adding missing ignore lines',async t=>{
+ const root=await folder(t),calls=[];
+ assert.equal(await initializeGit(root,{insideGit:false,gitignore:['.venv/','.env'],runCommand:async(cmd,args)=>{calls.push([cmd,...args]);return {status:0};}}),'hecho');
+ assert.deepEqual(calls.map(c=>c.slice(0,2)),[['git','--version'],['git','init'],['git','add'],['git','commit']]);
+ assert.match(await fs.readFile(path.join(root,'.gitignore'),'utf8'),/\.venv\//);
+});
+test('insideGit skips initialization without changing any files',async t=>{
+ const root=await folder(t);
+ assert.equal(await initializeGit(root,{insideGit:true,gitignore:[],runCommand:()=>{throw Error('must not run');}}),'omitido-repo-existente');
+ assert.deepEqual(await fs.readdir(root),[]);
+});
+test('missing Git is reported without attempting a commit',async t=>{
+ assert.equal(await initializeGit(await folder(t),{insideGit:false,gitignore:[],runCommand:()=>{throw Error('not found');}}),'sin-git');
+});
+test('does not duplicate gitignore lines',async t=>{
+ const root=await folder(t);await fs.writeFile(path.join(root,'.gitignore'),'.env\nnode_modules/\n');
+ await initializeGit(root,{insideGit:false,gitignore:['.env','.venv/'],runCommand:()=>({status:0})});
+ const text=await fs.readFile(path.join(root,'.gitignore'),'utf8');assert.equal(text.split('\n').filter(l=>l==='.env').length,1);assert.match(text,/node_modules/);
+});
