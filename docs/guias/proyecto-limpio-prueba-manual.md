@@ -37,20 +37,20 @@ memoria o agentes. El flujo de preguntas se comprueba por separado con terminal 
 
 | Caso real en macOS | Resultado | Duración |
 | --- | --- | --- |
-| React sola | Build y primer commit correctos | 14 s |
-| React y Django | Build, `manage.py check` y primer commit correctos | 16 s |
+| React sola | Build y primer commit correctos | 16 s |
+| React y Django | Build, `manage.py check` y primer commit correctos | 17 s |
 | Next.js, Express y PostgreSQL | Build, comprobación de sintaxis, `pg`, `.env.example` y primer commit correctos | 54 s |
 
 Se inspeccionaron los archivos de cada primer commit: no incluyen `node_modules`, `.venv`, `.agent-toolkit` ni
 `.env`. Todos usan el mensaje `chore: crear la base del proyecto con nexakit`. La suite final de esta sesión:
-5134 pruebas, 5123 aprobadas, 11 omitidas y 0 fallos. La cancelación, el fallo de un generador, el registro de Git,
+5140 pruebas, 5129 aprobadas, 11 omitidas y 0 fallos. La cancelación, el fallo de un generador, el registro de Git,
 la promoción de Supabase y la continuación en una subcarpeta se verifican con comandos simulados.
 
 - Windows: pendiente de ejecución manual en un equipo Windows; no se afirma comprobado.
 
 ## Decisiones de implementación y límites
 
-- Se conserva el checkout y la rama pedidos por el usuario. No se ha subido ni fusionado la rama.
+- Se conserva el checkout y la rama pedidos por el usuario. La entrega se prepara mediante PR, sin fusionar ni publicar.
 - Las rutas del plan son relativas al proyecto; el ejecutor controla la promoción exclusiva. Django genera dentro
   de la parte con destino `.`. Los ejecutables del `.venv` se resuelven a su ubicación final.
 - Supabase necesita frontend o backend donde instalar el cliente; se rechaza una selección de solo base de datos.
@@ -68,9 +68,14 @@ la promoción de Supabase y la continuación en una subcarpeta se verifican con 
 - No se afirma ejecución real de todos los generadores remotos ni de Windows/Linux. Esa verificación adicional
   sigue siendo necesaria antes de declarar todas las plataformas comprobadas.
 
-Mejoras menores pendientes de la revisión:
+Ajustes verificados antes del PR:
 
-- Al interrumpir una orden se registra el motivo, pero puede faltar su última salida parcial.
-- Ejecutar desde `frontend/` antes de completar las respuestas normales puede repetir el selector de modo;
-  ejecutar desde la raíz carga la respuesta del proyecto limpio. La raíz del proyecto continúa bien delimitada.
-- El validador aún no verifica los marcadores de `envExample`; los valores distribuidos no usan marcadores.
+- Se conserva la salida parcial de las órdenes interrumpidas, con secretos tachados.
+- Las respuestas se buscan en la raíz también al ejecutar desde `frontend/`, con o sin Git.
+- El catálogo valida los marcadores de `envExample`, incluidos los desconocidos.
+- La redacción tiene su fuente común en `src/redact.js`; el plugin distribuye una copia sincronizada para
+  funcionar de forma independiente.
+
+La repetición previa al PR del 2026-11-06 cubre React sola (16 s) y React con Django (17 s) mediante la
+orquestación real, incluidas sus comprobaciones y el primer commit. El caso de Next.js conserva la evidencia
+anterior de 54 s; no se repitió en esta ronda. Windows: **pendiente de prueba manual**.
