@@ -1,0 +1,936 @@
+{
+  "schemaVersion": "1.0.0",
+  "generators": [
+    {
+      "id": "react-vite",
+      "part": "frontend",
+      "label": "React + Vite",
+      "signals": [
+        "react"
+      ],
+      "requires": [
+        {
+          "program": "node",
+          "minVersion": "24.15"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "run",
+          "argv": [
+            "npm",
+            "create",
+            "--yes",
+            "vite@latest",
+            "{dir}",
+            "--",
+            "--template",
+            "react-ts",
+            "--no-interactive"
+          ],
+          "cwd": "parent"
+        }
+      ],
+      "install": [
+        {
+          "kind": "run",
+          "argv": [
+            "npm",
+            "install"
+          ],
+          "cwd": "dir"
+        }
+      ],
+      "check": {
+        "argv": [
+          "npm",
+          "run",
+          "build"
+        ],
+        "cwd": "dir"
+      },
+      "source": "https://vite.dev/guide/"
+    },
+    {
+      "id": "vue-vite",
+      "part": "frontend",
+      "label": "Vue + Vite",
+      "signals": [
+        "vue"
+      ],
+      "requires": [
+        {
+          "program": "node",
+          "minVersion": "24.15"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "run",
+          "argv": [
+            "npm",
+            "create",
+            "--yes",
+            "vite@latest",
+            "{dir}",
+            "--",
+            "--template",
+            "vue-ts",
+            "--no-interactive"
+          ],
+          "cwd": "parent"
+        }
+      ],
+      "install": [
+        {
+          "kind": "run",
+          "argv": [
+            "npm",
+            "install"
+          ],
+          "cwd": "dir"
+        }
+      ],
+      "check": {
+        "argv": [
+          "npm",
+          "run",
+          "build"
+        ],
+        "cwd": "dir"
+      },
+      "source": "https://vite.dev/guide/"
+    },
+    {
+      "id": "nextjs",
+      "part": "frontend",
+      "label": "Next.js",
+      "signals": [
+        "nextjs"
+      ],
+      "requires": [
+        {
+          "program": "node",
+          "minVersion": "24.15"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "run",
+          "argv": [
+            "npx",
+            "--yes",
+            "create-next-app@latest",
+            "{dir}",
+            "--ts",
+            "--eslint",
+            "--app",
+            "--use-npm",
+            "--yes",
+            "--disable-git",
+            "--skip-install"
+          ],
+          "cwd": "parent"
+        }
+      ],
+      "install": [
+        {
+          "kind": "run",
+          "argv": [
+            "npm",
+            "install"
+          ],
+          "cwd": "dir"
+        }
+      ],
+      "check": {
+        "argv": [
+          "npm",
+          "run",
+          "build"
+        ],
+        "cwd": "dir"
+      },
+      "source": "https://nextjs.org/docs/app/api-reference/cli/create-next-app"
+    },
+    {
+      "id": "sveltekit",
+      "part": "frontend",
+      "label": "SvelteKit",
+      "signals": [
+        "svelte"
+      ],
+      "requires": [
+        {
+          "program": "node",
+          "minVersion": "24.15"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "run",
+          "argv": [
+            "npx",
+            "--yes",
+            "sv@latest",
+            "create",
+            "{dir}",
+            "--template",
+            "minimal",
+            "--types",
+            "ts",
+            "--no-add-ons",
+            "--no-install"
+          ],
+          "cwd": "parent"
+        }
+      ],
+      "install": [
+        {
+          "kind": "run",
+          "argv": [
+            "npm",
+            "install"
+          ],
+          "cwd": "dir"
+        }
+      ],
+      "check": {
+        "argv": [
+          "npm",
+          "run",
+          "build"
+        ],
+        "cwd": "dir"
+      },
+      "source": "https://svelte.dev/docs/cli/sv-create"
+    },
+    {
+      "id": "astro",
+      "part": "frontend",
+      "label": "Astro",
+      "signals": [
+        "astro"
+      ],
+      "requires": [
+        {
+          "program": "node",
+          "minVersion": "24.15"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "run",
+          "argv": [
+            "npm",
+            "create",
+            "--yes",
+            "astro@latest",
+            "{dir}",
+            "--",
+            "--template",
+            "minimal",
+            "--yes",
+            "--no-git",
+            "--no-install"
+          ],
+          "cwd": "parent"
+        }
+      ],
+      "install": [
+        {
+          "kind": "run",
+          "argv": [
+            "npm",
+            "install"
+          ],
+          "cwd": "dir"
+        }
+      ],
+      "check": {
+        "argv": [
+          "npm",
+          "run",
+          "build"
+        ],
+        "cwd": "dir"
+      },
+      "source": "https://github.com/withastro/astro/tree/main/packages/create-astro"
+    },
+    {
+      "id": "angular",
+      "part": "frontend",
+      "label": "Angular",
+      "signals": [
+        "angular"
+      ],
+      "requires": [
+        {
+          "program": "node",
+          "minVersion": "24.15"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "run",
+          "argv": [
+            "npx",
+            "--yes",
+            "--package=@angular/cli@latest",
+            "ng",
+            "new",
+            "{name}",
+            "--directory",
+            "{dir}",
+            "--defaults",
+            "--interactive=false",
+            "--skip-git",
+            "--skip-install",
+            "--package-manager",
+            "npm"
+          ],
+          "cwd": "parent"
+        }
+      ],
+      "install": [
+        {
+          "kind": "run",
+          "argv": [
+            "npm",
+            "install"
+          ],
+          "cwd": "dir"
+        }
+      ],
+      "check": {
+        "argv": [
+          "npm",
+          "run",
+          "build"
+        ],
+        "cwd": "dir"
+      },
+      "source": "https://angular.dev/cli/new"
+    },
+    {
+      "id": "django",
+      "part": "backend",
+      "label": "Django",
+      "signals": [
+        "django"
+      ],
+      "requires": [
+        {
+          "program": "python",
+          "minVersion": "3.12"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "run",
+          "argv": [
+            "{python}",
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            "django"
+          ],
+          "cwd": "dir"
+        },
+        {
+          "kind": "run",
+          "argv": [
+            "{venvBin}/django-admin",
+            "startproject",
+            "config",
+            "."
+          ],
+          "cwd": "dir"
+        }
+      ],
+      "install": [],
+      "check": {
+        "argv": [
+          "{python}",
+          "manage.py",
+          "check"
+        ],
+        "cwd": "dir"
+      },
+      "source": "https://docs.djangoproject.com/en/stable/ref/django-admin/#startproject"
+    },
+    {
+      "id": "fastapi",
+      "part": "backend",
+      "label": "FastAPI",
+      "signals": [
+        "fastapi"
+      ],
+      "requires": [
+        {
+          "program": "python",
+          "minVersion": "3.12"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "write",
+          "path": "main.py",
+          "content": "from fastapi import FastAPI\n\napp = FastAPI()\n\n\n@app.get(\"/\")\nasync def root():\n    return {\"message\": \"Hello World\"}\n"
+        },
+        {
+          "kind": "write",
+          "path": "requirements.txt",
+          "content": "fastapi[standard]\n"
+        }
+      ],
+      "install": [
+        {
+          "kind": "run",
+          "argv": [
+            "{python}",
+            "-m",
+            "pip",
+            "install",
+            "-r",
+            "requirements.txt"
+          ],
+          "cwd": "dir"
+        }
+      ],
+      "check": {
+        "argv": [
+          "{python}",
+          "-c",
+          "import main"
+        ],
+        "cwd": "dir"
+      },
+      "source": "https://fastapi.tiangolo.com/tutorial/first-steps/"
+    },
+    {
+      "id": "express",
+      "part": "backend",
+      "label": "Express",
+      "signals": [
+        "express"
+      ],
+      "requires": [
+        {
+          "program": "node",
+          "minVersion": "24.15"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "run",
+          "argv": [
+            "npx",
+            "--yes",
+            "express-generator@latest",
+            "{dir}",
+            "--no-view",
+            "--force",
+            "--git"
+          ],
+          "cwd": "parent"
+        }
+      ],
+      "install": [
+        {
+          "kind": "run",
+          "argv": [
+            "npm",
+            "install"
+          ],
+          "cwd": "dir"
+        }
+      ],
+      "check": {
+        "argv": [
+          "node",
+          "--check",
+          "app.js"
+        ],
+        "cwd": "dir"
+      },
+      "source": "https://expressjs.com/en/starter/generator/"
+    },
+    {
+      "id": "nestjs",
+      "part": "backend",
+      "label": "NestJS",
+      "signals": [
+        "nestjs"
+      ],
+      "requires": [
+        {
+          "program": "node",
+          "minVersion": "24.15"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "run",
+          "argv": [
+            "npx",
+            "--yes",
+            "@nestjs/cli@latest",
+            "new",
+            "{name}",
+            "--directory",
+            "{dir}",
+            "--package-manager",
+            "npm",
+            "--language",
+            "ts",
+            "--skip-git",
+            "--skip-install",
+            "--no-observe"
+          ],
+          "cwd": "parent"
+        }
+      ],
+      "install": [
+        {
+          "kind": "run",
+          "argv": [
+            "npm",
+            "install"
+          ],
+          "cwd": "dir"
+        }
+      ],
+      "check": {
+        "argv": [
+          "npm",
+          "run",
+          "build"
+        ],
+        "cwd": "dir"
+      },
+      "source": "https://docs.nestjs.com/cli/usages"
+    },
+    {
+      "id": "hono",
+      "part": "backend",
+      "label": "Hono",
+      "signals": [
+        "hono"
+      ],
+      "requires": [
+        {
+          "program": "node",
+          "minVersion": "24.15"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "run",
+          "argv": [
+            "npm",
+            "create",
+            "--yes",
+            "hono@latest",
+            "{dir}",
+            "--",
+            "--template",
+            "nodejs",
+            "--pm",
+            "npm",
+            "--install"
+          ],
+          "cwd": "parent"
+        }
+      ],
+      "install": [
+        {
+          "kind": "run",
+          "argv": [
+            "npm",
+            "install"
+          ],
+          "cwd": "dir"
+        }
+      ],
+      "check": {
+        "argv": [
+          "npm",
+          "run",
+          "build"
+        ],
+        "cwd": "dir"
+      },
+      "source": "https://hono.dev/docs/guides/create-hono"
+    },
+    {
+      "id": "sqlite",
+      "part": "database",
+      "label": "SQLite",
+      "signals": [],
+      "requires": [],
+      "steps": [],
+      "install": [],
+      "check": {
+        "argv": [
+          "node",
+          "--version"
+        ],
+        "cwd": "dir"
+      },
+      "source": "https://docs.djangoproject.com/en/stable/ref/databases/#sqlite-notes",
+      "database": {
+        "backends": {
+          "django": {
+            "install": []
+          },
+          "fastapi": {
+            "install": []
+          },
+          "express": {
+            "install": []
+          },
+          "nestjs": {
+            "install": []
+          },
+          "hono": {
+            "install": []
+          }
+        }
+      }
+    },
+    {
+      "id": "postgresql",
+      "part": "database",
+      "label": "PostgreSQL",
+      "signals": [],
+      "requires": [],
+      "steps": [],
+      "install": [],
+      "check": {
+        "argv": [
+          "node",
+          "--version"
+        ],
+        "cwd": "dir"
+      },
+      "source": "https://www.psycopg.org/psycopg3/docs/basic/install.html",
+      "database": {
+        "backends": {
+          "django": {
+            "install": [
+              {
+                "kind": "run",
+                "argv": [
+                  "{python}",
+                  "-m",
+                  "pip",
+                  "install",
+                  "psycopg[binary]"
+                ],
+                "cwd": "dir"
+              }
+            ],
+            "envExample": "DATABASE_URL=postgresql://usuario:clave@localhost:5432/nombre\n"
+          },
+          "fastapi": {
+            "install": [
+              {
+                "kind": "run",
+                "argv": [
+                  "{python}",
+                  "-m",
+                  "pip",
+                  "install",
+                  "psycopg[binary]"
+                ],
+                "cwd": "dir"
+              }
+            ],
+            "envExample": "DATABASE_URL=postgresql://usuario:clave@localhost:5432/nombre\n"
+          },
+          "express": {
+            "install": [
+              {
+                "kind": "run",
+                "argv": [
+                  "npm",
+                  "install",
+                  "pg"
+                ],
+                "cwd": "dir"
+              }
+            ],
+            "envExample": "DATABASE_URL=postgresql://usuario:clave@localhost:5432/nombre\n"
+          },
+          "nestjs": {
+            "install": [
+              {
+                "kind": "run",
+                "argv": [
+                  "npm",
+                  "install",
+                  "pg"
+                ],
+                "cwd": "dir"
+              }
+            ],
+            "envExample": "DATABASE_URL=postgresql://usuario:clave@localhost:5432/nombre\n"
+          },
+          "hono": {
+            "install": [
+              {
+                "kind": "run",
+                "argv": [
+                  "npm",
+                  "install",
+                  "pg"
+                ],
+                "cwd": "dir"
+              }
+            ],
+            "envExample": "DATABASE_URL=postgresql://usuario:clave@localhost:5432/nombre\n"
+          }
+        }
+      }
+    },
+    {
+      "id": "supabase",
+      "part": "database",
+      "label": "Supabase",
+      "signals": [],
+      "requires": [
+        {
+          "program": "node",
+          "minVersion": "24.15"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "run",
+          "argv": [
+            "npx",
+            "--yes",
+            "supabase@latest",
+            "init"
+          ],
+          "cwd": "dir"
+        }
+      ],
+      "install": [],
+      "check": {
+        "argv": [
+          "node",
+          "--version"
+        ],
+        "cwd": "dir"
+      },
+      "source": "https://supabase.com/docs/reference/cli/supabase-init",
+      "database": {
+        "backends": {
+          "django": {
+            "install": [
+              {
+                "kind": "run",
+                "argv": [
+                  "{python}",
+                  "-m",
+                  "pip",
+                  "install",
+                  "supabase"
+                ],
+                "cwd": "dir"
+              }
+            ]
+          },
+          "fastapi": {
+            "install": [
+              {
+                "kind": "run",
+                "argv": [
+                  "{python}",
+                  "-m",
+                  "pip",
+                  "install",
+                  "supabase"
+                ],
+                "cwd": "dir"
+              }
+            ]
+          },
+          "express": {
+            "install": [
+              {
+                "kind": "run",
+                "argv": [
+                  "npm",
+                  "install",
+                  "@supabase/supabase-js"
+                ],
+                "cwd": "dir"
+              }
+            ]
+          },
+          "nestjs": {
+            "install": [
+              {
+                "kind": "run",
+                "argv": [
+                  "npm",
+                  "install",
+                  "@supabase/supabase-js"
+                ],
+                "cwd": "dir"
+              }
+            ]
+          },
+          "hono": {
+            "install": [
+              {
+                "kind": "run",
+                "argv": [
+                  "npm",
+                  "install",
+                  "@supabase/supabase-js"
+                ],
+                "cwd": "dir"
+              }
+            ]
+          },
+          "react-vite": {
+            "install": [
+              {
+                "kind": "run",
+                "argv": [
+                  "npm",
+                  "install",
+                  "@supabase/supabase-js"
+                ],
+                "cwd": "dir"
+              }
+            ]
+          },
+          "nextjs": {
+            "install": [
+              {
+                "kind": "run",
+                "argv": [
+                  "npm",
+                  "install",
+                  "@supabase/supabase-js"
+                ],
+                "cwd": "dir"
+              }
+            ]
+          },
+          "vue-vite": {
+            "install": [
+              {
+                "kind": "run",
+                "argv": [
+                  "npm",
+                  "install",
+                  "@supabase/supabase-js"
+                ],
+                "cwd": "dir"
+              }
+            ]
+          },
+          "sveltekit": {
+            "install": [
+              {
+                "kind": "run",
+                "argv": [
+                  "npm",
+                  "install",
+                  "@supabase/supabase-js"
+                ],
+                "cwd": "dir"
+              }
+            ]
+          },
+          "astro": {
+            "install": [
+              {
+                "kind": "run",
+                "argv": [
+                  "npm",
+                  "install",
+                  "@supabase/supabase-js"
+                ],
+                "cwd": "dir"
+              }
+            ]
+          },
+          "angular": {
+            "install": [
+              {
+                "kind": "run",
+                "argv": [
+                  "npm",
+                  "install",
+                  "@supabase/supabase-js"
+                ],
+                "cwd": "dir"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "expo",
+      "part": "mobile",
+      "label": "Expo (React Native)",
+      "signals": [
+        "expo",
+        "react"
+      ],
+      "requires": [
+        {
+          "program": "node",
+          "minVersion": "24.15"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "run",
+          "argv": [
+            "npx",
+            "--yes",
+            "create-expo-app@latest",
+            "{dir}",
+            "--template",
+            "blank-typescript",
+            "--yes",
+            "--no-install"
+          ],
+          "cwd": "parent"
+        }
+      ],
+      "install": [
+        {
+          "kind": "run",
+          "argv": [
+            "npm",
+            "install"
+          ],
+          "cwd": "dir"
+        }
+      ],
+      "check": {
+        "argv": [
+          "npx",
+          "--no-install",
+          "expo",
+          "export",
+          "--platform",
+          "android"
+        ],
+        "cwd": "dir"
+      },
+      "source": "https://docs.expo.dev/more/create-expo/"
+    }
+  ]
+}
