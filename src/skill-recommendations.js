@@ -1,3 +1,4 @@
+import generatorsData from '../catalogs/generadores.json' with { type: 'json' };
 import { ownedReviewInstructions, removeReviewInstructions } from './review-instructions.js';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
@@ -1143,11 +1144,33 @@ export async function applyProjectSkillLinks(plan) {
 // so a second run knows what was decided and does not ask again.
 const isNameList = value => Array.isArray(value) && value.every(item => typeof item === 'string' && SKILL_NAME_RE.test(item));
 function validSetupAnswers(answers) {
-  return Boolean(answers && answers.version === 1 &&
+  return Boolean(answers && (answers.cleanProject === undefined || validCleanProject(answers.cleanProject)) && answers.version === 1 &&
     isNameList(answers.skills?.chosen) && isNameList(answers.skills?.discarded) &&
     Array.isArray(answers.agents) && answers.agents.every(agent => ['claude', 'codex', 'antigravity'].includes(agent)) &&
     (answers.memory?.decision === 'later' ||
       (answers.memory?.decision === 'path' && typeof answers.memory.path === 'string' && path.isAbsolute(answers.memory.path))));
+}
+
+function validCleanProject(value) {
+  if (!value || typeof value.git !== 'boolean' || !['confirmado','creado','fallido'].includes(value.status) || !value.choice) return false;
+  const parts = ['frontend','backend','database','mobile'];
+  if (Object.keys(value.choice).some(p=>!parts.includes(p))) return false;
+  return parts.every(part => value.choice[part] === null || generatorsData.generators.some(g=>g.id===value.choice[part] && g.part===part))
+    && (value.failedPart === undefined || ['frontend','backend','mobile','proyecto'].includes(value.failedPart));
+}
+export async function readCleanProjectAnswers(projectRoot) {
+  const value = (await readProjectToolkitManifest(projectRoot))?.answers?.cleanProject;
+  return validCleanProject(value) ? value : null;
+}
+export async function writeCleanProjectAnswers(projectRoot, cleanProject, lock) {
+  if (!validCleanProject(cleanProject)) throw new Error('Respuestas del proyecto limpio no válidas.');
+  await lock.assertHeld();
+  const previous = await readProjectToolkitManifest(projectRoot);
+  const result = await writeProjectManifestAndIgnore({projectRoot,mode:previous?.mode ?? 'symlink',
+    gitIgnore:previous?.gitIgnoreStrategy ?? 'gitignore',prevManifest:previous,
+    coupledEntriesMap:new Map((previous?.entries ?? []).map(e=>[e.relativePath,e])),lock,
+    answers:{version:1,...previous?.answers,cleanProject}});
+  if (!result.manifestWritten) throw new Error('No se guardaron las respuestas del proyecto limpio.');
 }
 
 export async function readSetupAnswers(projectRoot) {
@@ -1166,7 +1189,7 @@ export async function writeSetupAnswers(projectRoot, answers, lock) {
     prevManifest,
     coupledEntriesMap: new Map((prevManifest?.entries ?? []).map(entry => [entry.relativePath, entry])),
     lock,
-    answers
+    answers: { ...answers, ...(prevManifest?.answers?.cleanProject && !answers.cleanProject && {cleanProject:prevManifest.answers.cleanProject}) }
   });
   if (!result.manifestWritten) throw new Error(`${PROJECT_TOOLKIT_DIR} no es una carpeta normal; no se guardaron las respuestas.`);
 }

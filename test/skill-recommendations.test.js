@@ -875,3 +875,22 @@ test('lists the detected technologies no catalog skill covers, leaving out the g
   assert.deepEqual(uncoveredSignals({ signals, catalog }), [{ id: 'svelte', label: 'Svelte' }, { id: 'rust', label: 'Rust' }]);
   assert.deepEqual(uncoveredSignals({ signals: [], catalog }), []);
 });
+
+const CLEAN_ANSWERS = {choice:{frontend:'react-vite',backend:null,database:null,mobile:null},git:true,status:'confirmado'};
+test('clean project answers round-trip',async t=>{
+ const api=await import('../src/skill-recommendations.js'),s=await projectSetup(t);
+ await withLock(s.home,lock=>api.writeCleanProjectAnswers(s.project,CLEAN_ANSWERS,lock));
+ assert.deepEqual(await api.readCleanProjectAnswers(s.project),CLEAN_ANSWERS);
+ assert.equal(await api.readSetupAnswers(s.project),null);
+ await withLock(s.home,lock=>api.writeSetupAnswers(s.project,ANSWERS,lock));
+ assert.deepEqual(await api.readCleanProjectAnswers(s.project),CLEAN_ANSWERS);
+});
+test('an invalid clean choice id is rejected',async t=>{
+ const api=await import('../src/skill-recommendations.js'),s=await projectSetup(t);
+ await assert.rejects(withLock(s.home,lock=>api.writeCleanProjectAnswers(s.project,{...CLEAN_ANSWERS,choice:{...CLEAN_ANSWERS.choice,frontend:'no-existe'}},lock)),/válid/i);
+});
+test('normal answers keep working without cleanProject',async t=>{
+ const api=await import('../src/skill-recommendations.js'),s=await projectSetup(t);
+ await withLock(s.home,lock=>api.writeSetupAnswers(s.project,ANSWERS,lock));
+ assert.deepEqual(await api.readSetupAnswers(s.project),ANSWERS);assert.equal(await api.readCleanProjectAnswers(s.project),null);
+});
