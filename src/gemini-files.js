@@ -9,16 +9,16 @@ export async function readRegular(file, limit = 20 * 1024 * 1024) {
   const handle = await fs.open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
   try {
     const opened = await handle.stat();
-    if (!opened.isFile() || opened.nlink !== 1 || opened.ino !== before.ino || opened.dev !== before.dev || opened.size !== before.size) throw new Error('El archivo cambió.');
+    if (!opened.isFile() || opened.nlink !== 1 || opened.ino !== before.ino || opened.dev !== before.dev || opened.size !== before.size) throw Object.assign(new Error('El archivo cambió.'), { code: 'EFILECHANGED' });
     const bytes = Buffer.alloc(opened.size); let offset = 0;
     while (offset < bytes.length) {
       const { bytesRead } = await handle.read(bytes, offset, Math.min(65536, bytes.length-offset), offset);
-      if (!bytesRead) throw new Error('Lectura incompleta.'); offset += bytesRead;
+      if (!bytesRead) throw Object.assign(new Error('Lectura incompleta.'), { code: 'EFILECHANGED' }); offset += bytesRead;
     }
     const after = await handle.stat();
     const named = await fs.lstat(file);
     if (!named.isFile() || named.isSymbolicLink() || named.nlink !== 1 || named.ino !== opened.ino || named.dev !== opened.dev ||
-        after.nlink !== 1 || after.size !== opened.size || after.mtimeMs !== opened.mtimeMs || after.ctimeMs !== opened.ctimeMs) throw new Error('El archivo cambió.');
+        after.nlink !== 1 || after.size !== opened.size || after.mtimeMs !== opened.mtimeMs || after.ctimeMs !== opened.ctimeMs) throw Object.assign(new Error('El archivo cambió.'), { code: 'EFILECHANGED' });
     return bytes;
   } finally { await handle.close(); }
 }

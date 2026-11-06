@@ -252,3 +252,19 @@ test('recovering partial analysis retains its status, evidence and CLI exit code
   const code=await runGeminiCli(['recuperar','--directorio',result.directory],{tools:{recuperar:options=>api.recuperar({...options,outRoot:f.outRoot})},out:()=>{},err:()=>{}});
   assert.equal(code,3);assert.equal(f.calls.length,1);
 });
+
+test('image collection retries a file still being written without repeating inference', async t => {
+  const f = await fixture(), artifacts = path.join(f.brainDirectory, CONVERSATION);
+  await fs.mkdir(artifacts, { recursive:true });
+  const image = path.join(artifacts, 'partial.png'); await fs.writeFile(image, 'P');
+  const original = fs.lstat; let grew = false;
+  t.mock.method(fs, 'lstat', async (...args) => {
+    const stat = await original(...args);
+    if (args[0] === image && !grew) { grew = true; await fs.writeFile(image, 'PNG completo'); }
+    return stat;
+  });
+  const result = await imagen({ prompt:'Logo', outRoot:f.outRoot, brainDirectory:f.brainDirectory,
+    pollMs:1, waitMs:1000, run:f.run(f.ok()) });
+  assert.equal(await fs.readFile(result.files[0], 'utf8'), 'PNG completo');
+  assert.equal(f.calls.length, 1);
+});
