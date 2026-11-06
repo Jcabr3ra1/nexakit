@@ -113,3 +113,52 @@ test('uses py on windows', async () => {
   }, 'win32');
   assert.equal(result[0].ok,true);
 });
+const executePlan = async (plan, opts) => (await import('../src/clean-project.js')).runCleanProject(plan, opts);
+test('runs parts in order and writes the log', async t => {
+  const root = await folder(t), calls=[];
+  const runCommand = async (cmd,args,{cwd}) => {
+    calls.push([cmd,...args]);
+    if (args.includes('vite@latest')) await fs.writeFile(path.join(cwd,'package.json'), '{"dependencies":{"react":"*"}}');
+    return {status:0,stdout:'ok'};
+  };
+  const result = await executePlan(await planner({choice:{frontend:'react-vite'}}), {projectRoot:root,runCommand});
+  assert.deepEqual(result.done,['frontend']); assert.equal(result.ok,true);
+  assert.ok(calls[0].includes('vite@latest')); assert.equal(calls.at(-1).join(' '),'npm run build');
+  assert.match(await fs.readFile(path.join(root,'.agent-toolkit/creacion.log'),'utf8'), /vite@latest/);
+  assert.ok(await fs.stat(path.join(root,'package.json')));
+});
+test('stops at the first failure and keeps what was created', async t => {
+  const root=await folder(t); let calls=0;
+  const result=await executePlan(await planner({choice:{frontend:'react-vite',backend:'django'}}),{
+    projectRoot:root,runCommand:async()=>{calls++;return {status:1,stderr:'falló'};}
+  });
+  assert.equal(result.ok,false); assert.equal(result.failed.part,'frontend'); assert.equal(calls,1);
+});
+test('never overwrites an existing file', async t => {
+  const root=await folder(t);await fs.writeFile(path.join(root,'README.md'),'ajeno');let calls=0;
+  const result=await executePlan(await planner({choice:{frontend:'react-vite'}}),{projectRoot:root,runCommand:async()=>{calls++;return {status:0};}});
+  assert.equal(result.ok,false); assert.equal(calls,0); assert.equal(await fs.readFile(path.join(root,'README.md'),'utf8'),'ajeno');
+});
+test('a command that exceeds the timeout fails and is logged', async t => {
+  const root=await folder(t);
+  const r=await executePlan(await planner({choice:{frontend:'react-vite'}}),{projectRoot:root,timeoutMs:10,runCommand:()=>new Promise(()=>{})});
+  assert.equal(r.ok,false);assert.match(r.failed.output,/tiempo/i);
+  assert.match(await fs.readFile(path.join(root,'.agent-toolkit/creacion.log'),'utf8'),/tiempo/i);
+});
+test('secrets in the output are redacted in the log', async t => {
+  const root=await folder(t);
+  const r=await executePlan(await planner({choice:{frontend:'react-vite'}}),{projectRoot:root,runCommand:()=>({status:1,stderr:'postgresql://u:secreto@h API_TOKEN=privado'})});
+  const log=await fs.readFile(path.join(root,'.agent-toolkit/creacion.log'),'utf8');
+  assert.doesNotMatch(log+r.failed.output,/secreto|privado/);assert.match(log,/\*\*\*/);
+});
+test('Python venv stays at its final path and the check runs after promotion', async t => {
+  const root=await folder(t), seen=[];
+  const r=await executePlan(await planner({choice:{backend:'fastapi'},platform:'linux'}),{projectRoot:root,platform:'linux',runCommand:async(cmd,args,{cwd})=>{
+    seen.push({cmd,args,cwd});
+    if(args.includes('venv')) { assert.equal(cwd,root); await fs.mkdir(path.join(root,'.venv')); }
+    if(args.includes('pip')) assert.equal(cmd,path.join(root,'.venv/bin/python'));
+    if(args.includes('import main')) { assert.equal(cwd,root); assert.ok(await fs.stat(path.join(root,'main.py'))); }
+    return {status:0};
+  }});
+  assert.equal(r.ok,true);assert.equal(seen.length,3);
+});

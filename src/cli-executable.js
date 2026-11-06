@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { IS_WINDOWS } from "./platform.js";
 
-const PACKAGES = { codex: "@openai/codex", claude: "@anthropic-ai/claude-code" };
+const PACKAGES = { npm: "npm", npx: "npm", codex: "@openai/codex", claude: "@anthropic-ai/claude-code" };
 const NODE_EXTENSIONS = new Set([".js", ".cjs", ".mjs"]);
 const unavailable = () => { throw Object.assign(new Error("CLI executable unavailable"), { code: "ENOENT" }); };
 const invalidBin = () => { throw Object.assign(new Error("El bin npm debe ser un archivo .js, .cjs o .mjs existente."), { code: "EINVAL" }); };
