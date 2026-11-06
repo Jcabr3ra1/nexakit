@@ -93,3 +93,23 @@ test('unknown choices and mismatched parts are rejected', async () => {
     await assert.rejects(planner({choice}), /elección|parte|frontend|backend/i);
   }
 });
+
+const requirements = async (choice, runCommand, platform = 'linux', suppliedCatalog = catalog) => {
+  const plan = await planner({ choice });
+  return (await import('../src/clean-project.js')).checkRequirements(plan, suppliedCatalog, { runCommand, platform });
+};
+test('missing python blocks django', async () => {
+  const result = await requirements({ backend:'django' }, () => { throw Error('missing'); });
+  assert.deepEqual(result, [{program:'python', minVersion:'3.12', found:null, ok:false}]);
+});
+test('old node is reported with the version found', async () => {
+  const copy = structuredClone(catalog); copy.generators.find(g=>g.id==='react-vite').requires[0].minVersion='20.19';
+  assert.deepEqual(await requirements({frontend:'react-vite'}, ()=>'v18.0.0', 'linux', copy),
+    [{program:'node', minVersion:'20.19', found:'18.0.0', ok:false}]);
+});
+test('uses py on windows', async () => {
+  const result = await requirements({backend:'django'}, (cmd,args)=>{
+    assert.equal(cmd,'py'); assert.deepEqual(args,['--version']); return 'Python 3.13.2';
+  }, 'win32');
+  assert.equal(result[0].ok,true);
+});

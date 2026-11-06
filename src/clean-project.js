@@ -57,5 +57,31 @@ export function planCleanProject({ choice, catalog, name, platform = process.pla
     return { part, id: g.id, dir, commands, writes, check: { argv: g.check.argv.map(expand), cwd: dir } };
   });
   const pythonUsed = Object.values(selected).some(g => g.requires.some(r => r.program === 'python'));
-  return { parts, gitignore: [...(pythonUsed ? ['.venv/'] : []), '.env'] };
+  return { parts, databaseId: database?.id ?? null, gitignore: [...(pythonUsed ? ['.venv/'] : []), '.env'] };
+}
+
+export async function checkRequirements(plan, catalog, { runCommand, platform = process.platform }) {
+  const required = new Map();
+  for (const id of [...plan.parts.map(p => p.id), plan.databaseId].filter(Boolean)) {
+    for (const requirement of catalog.generators.find(g => g.id === id).requires) {
+      const previous = required.get(requirement.program);
+      if (!previous || compareVersions(requirement.minVersion, previous) > 0) required.set(requirement.program, requirement.minVersion);
+    }
+  }
+  const results = [];
+  for (const [program, minVersion] of required) {
+    let found = null;
+    try {
+      const result = await runCommand(program === 'python' ? platform === 'win32' ? 'py' : 'python3' : 'node', ['--version']);
+      const output = typeof result === 'string' ? result : result?.status === 0 || result?.code === 0 ? result.stdout : '';
+      found = String(output ?? '').match(/\b(?:v|Python\s+)?(\d+\.\d+(?:\.\d+)?)\b/)?.[1] ?? null;
+    } catch { /* Missing programs are a blocking result, not an exception. */ }
+    results.push({ program, minVersion, found, ok: found !== null && compareVersions(found, minVersion) >= 0 });
+  }
+  return results;
+}
+function compareVersions(a, b) {
+  const aa = a.split('.').map(Number), bb = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) if ((aa[i] ?? 0) !== (bb[i] ?? 0)) return (aa[i] ?? 0) - (bb[i] ?? 0);
+  return 0;
 }
