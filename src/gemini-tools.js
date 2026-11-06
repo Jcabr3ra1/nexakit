@@ -129,17 +129,32 @@ async function collectImages(cwd, conversationId, { brainDirectory = brain(), wa
     } catch (error) { if (error.code !== "ENOENT") throw error; }
     if (names.length) {
       if (names.length > 16) throw new GeminiError("Demasiados artefactos de imagen.");
-      const files = [];
+      // Read the complete batch before publishing any file. A producer can still
+      // be writing when readdir first exposes an image; retry only transient reads.
+      const images = [];
+      let pending = false;
       for (const name of names) {
-        const bytes = await readRegular(path.join(artifacts, name));
-        const destination = path.join(cwd, name);
-        try { await fs.writeFile(destination, bytes, { flag: "wx", mode: 0o600 }); }
-        catch (error) {
-          if (error.code !== "EEXIST" || !(await readRegular(destination)).equals(bytes)) throw new GeminiError("No se pudo guardar la imagen sin sobrescribir.");
+        try {
+          const bytes = await readRegular(path.join(artifacts, name));
+          if (!bytes.length) { pending = true; break; }
+          images.push({ name, bytes });
+        } catch (error) {
+          if (!['EFILECHANGED', 'ENOENT'].includes(error.code)) throw error;
+          pending = true; break;
         }
-        files.push(destination);
       }
-      return files;
+      if (!pending) {
+        const files = [];
+        for (const { name, bytes } of images) {
+          const destination = path.join(cwd, name);
+          try { await fs.writeFile(destination, bytes, { flag: "wx", mode: 0o600 }); }
+          catch (error) {
+            if (error.code !== "EEXIST" || !(await readRegular(destination)).equals(bytes)) throw new GeminiError("No se pudo guardar la imagen sin sobrescribir.");
+          }
+          files.push(destination);
+        }
+        return files;
+      }
     }
     if (now() >= deadline) throw new GeminiError(`La generación no terminó; conversación ${conversationId}. Recupera sin repetir la consulta: agent-toolkit-gemini recuperar --directorio "${cwd}".`);
     await sleep(Math.min(pollMs, Math.max(1, deadline-now())));
