@@ -78,3 +78,14 @@ Para contribuir: [desarrollo local, pruebas y empaquetado](docs/guias/desarrollo
 ## Licencia
 
 [MIT](LICENSE). Las skills incorporadas conservan sus licencias originales.
+
+### Empezar desde una carpeta vacía
+
+Ejecuta `npx nexakit` y elige **Proyecto limpio**. Selecciona frontend, backend, base de datos o app móvil; las
+partes son opcionales. NexaKit muestra las órdenes y requisitos antes de descargar los generadores oficiales,
+instalar las dependencias y comprobar lo creado. Después continúa con skills, memoria y agentes.
+
+Una sola parte ocupa la raíz; varias usan `frontend/`, `backend/` y `movil/`. Si ya hay archivos, exige una
+subcarpeta nueva. Git es opcional. Ante un fallo conserva lo creado y el registro `.agent-toolkit/creacion.log`.
+Lee la [guía de uso](docs/guias/uso.md#crear-un-proyecto-limpio) y la
+[comprobación manual](docs/guias/proyecto-limpio-prueba-manual.md).
