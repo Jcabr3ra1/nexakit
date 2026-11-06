@@ -60,9 +60,10 @@ export function formatRecommendationReport(report) {
   }
 
   if (report.addons.length > 0) {
-    lines.push('', 'Añadidos opcionales:');
+    lines.push('', 'Añadidos:');
     for (const addon of report.addons) {
-      lines.push(`  - ${addon.name} (${addon.versionReviewed}, ${addon.license}): ${addon.summary}`);
+      const kind = addon.optional ? 'opcional' : 'obligatorio';
+      lines.push(`  - ${addon.name} (${addon.versionReviewed}, ${addon.license}, ${kind}): ${addon.summary}`);
     }
   }
 

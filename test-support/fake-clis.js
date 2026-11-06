@@ -21,9 +21,13 @@ const missing = () => ({ status: 1, stdout: '', stderr: 'No MCP server found' })
 
 export function createFakeClis(
   home,
-  { fail = {}, installed = ['claude', 'codex', 'agy'], reviewOutputs = {}, versions = {} } = {},
+  { fail = {}, installed = ['claude', 'codex', 'agy'], reviewOutputs = {}, versions = {}, superpowers = {} } = {},
 ) {
   const calls = [];
+  // Superpowers plugin per CLI: 'activo', 'desactivado' or 'falta' (the default). Kept on disk like the real
+  // plugin managers, so a new fake over the same HOME sees what an earlier one installed.
+  const pluginsFile = path.join(home, '.fake-plugins.json');
+  const plugins = { claude: 'falta', codex: 'falta', agy: 'falta', ...readJson(pluginsFile, {}), ...superpowers };
   const claudeFile = path.join(home, '.claude.json');
   const codexFile = path.join(home, '.codex', 'config.toml');
   const agyFile = path.join(home, '.gemini', 'config', 'mcp_config.json');
@@ -50,6 +54,7 @@ export function createFakeClis(
     )
       return { status: 0, stderr: '', ...reviewOutputs[cli] };
     const [, verb] = args;
+    if (args[0] === 'plugin') return pluginCommand(cli, verb);
     if (fail[`${cli} ${verb}`]) return { status: 1, stdout: '', stderr: `${cli} ${verb} falló` };
     const dash = args.indexOf('--');
 
@@ -115,6 +120,26 @@ export function createFakeClis(
     throw new Error(`Orden inesperada: ${command} ${args.join(' ')}`);
   }
 
+  function pluginCommand(cli, verb) {
+    if (fail[`${cli} plugin ${verb}`]) return { status: 1, stdout: '', stderr: `${cli} plugin ${verb} falló` };
+    const state = plugins[cli];
+    if (verb === 'list') {
+      if (cli === 'claude')
+        return ok(JSON.stringify(state === 'falta' ? [] : [{ id: 'superpowers@claude-plugins-official', enabled: state === 'activo' }]));
+      if (cli === 'codex') {
+        const status = { falta: 'not installed', activo: 'installed, enabled', desactivado: 'installed, disabled' }[state];
+        return ok(`superpowers@openai-curated-remote   ${status}   7.0.1   id\n`);
+      }
+      return state === 'falta' ? ok('No plugins installed.\n') : ok(JSON.stringify([{ name: 'superpowers', enabled: state === 'activo' }]));
+    }
+    if (['install', 'add', 'enable'].includes(verb)) {
+      plugins[cli] = 'activo';
+      writeJson(pluginsFile, plugins);
+      return ok();
+    }
+    throw new Error(`Orden inesperada: ${cli} plugin ${verb}`);
+  }
+
   // Executables on the PATH so nexakit finds the agents installed; they are never run (runCommand is used).
   function installBin(bin) {
     fs.mkdirSync(bin, { recursive: true });
@@ -126,7 +151,7 @@ export function createFakeClis(
     }
   }
 
-  return { runCommand, calls, installBin, files: { claudeFile, codexFile, agyFile } };
+  return { runCommand, calls, installBin, plugins, files: { claudeFile, codexFile, agyFile } };
 }
 
 // A real child process for review integration tests; no model or user configuration is accessed.

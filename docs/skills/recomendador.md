@@ -22,7 +22,7 @@ npx nexakit detach --project /ruta/al/proyecto --apply
 ## Flujo del asistente en 3 pasos (`agent-toolkit`)
 
 1. **Skills para tu proyecto:** muestra las skills que encajan con las tecnologías observadas en `package.json` / `tsconfig.json`, con el motivo y la utilidad prevista de cada sugerencia. Solo se premarcan las recomendaciones con escenario validado para todos los agentes destino, cuando requieren instalación; las compatibles sin prueba quedan desmarcadas. Usa `Espacio` para marcar o desmarcar y `Enter` para avanzar.
-2. **Skills opcionales:** muestra las demás skills verificadas del catálogo, desmarcadas por defecto, y los complementos externos independientes como [obra/superpowers](superpowers-integration.md) (`7.0.1`, MIT).
+2. **Skills opcionales:** muestra las demás skills verificadas del catálogo, desmarcadas por defecto, y los complementos externos. [obra/superpowers](superpowers-integration.md) (`7.0.1`, MIT) no es opcional: `npx nexakit` lo instala en cada IA.
 3. **Revisar e instalar:** muestra las skills elegidas y su configuración, comprueba los hashes SHA-256 contra [`catalogs/skills.json`](../../catalogs/skills.json) y lista enlaces, copias, registros y reglas de ignore antes de escribir. `Enter` / `s` confirma; `Esc` / `n` cancela sin escribir; `Bksp` / `←` vuelve a opcionales conservando las marcas.
 
 ### Configuración de instalación

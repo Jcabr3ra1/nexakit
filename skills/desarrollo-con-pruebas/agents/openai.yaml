@@ -1,7 +1,0 @@
-interface:
-  display_name: "Desarrollo con pruebas"
-  short_description: "Implementa con ciclo rojo, verde y refactor verificable"
-  default_prompt: "Usa $desarrollo-con-pruebas para guiar o implementar este cambio mediante una prueba que falle primero por el requisito esperado."
-
-policy:
-  allow_implicit_invocation: true

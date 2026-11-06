@@ -71,13 +71,14 @@ test('setup skips occupied targets, reports them and rejects symlink parents wit
   await fs.symlink(f.root, path.join(f.homeDirectory, '.claude'), directoryLinkType);
   await assert.rejects(setupToolkit({ ...f, agent: 'claude', apply: true }));
 });
-test('doctor reports missing dependencies and optional Superpowers without creating configuration', async t => {
+test('doctor reports missing dependencies and required Superpowers without creating configuration', async t => {
   const f = await fixture(t);
   assert.equal(await fs.access(moduleUrl).then(() => true, () => false), true);
   const { doctorToolkit } = await import(moduleUrl);
   const result = await doctorToolkit({ ...f, agent: 'codex', environment: { PATH: '' } });
   assert.equal(result.clients.codex.available, false);
-  assert.equal(result.superpowers.required, false);
+  assert.equal(result.superpowers.required, true);
+  assert.deepEqual(result.superpowers.states, {}, 'no agent found, nothing inspected');
   assert.equal(result.mcp.codex.state, 'falta');
   assert.equal(result.nativeConnectionVerified, false);
   assert.deepEqual(await fs.readdir(f.homeDirectory), []);
@@ -415,4 +416,48 @@ test('retired skills are removed only when registered and unchanged', async t =>
  assert.equal(preview.conflicts,1);
  await setupToolkit({...f,agent:'codex',apply:true,environment:{PATH:''}});
  await assert.rejects(fs.lstat(target));assert.ok((await fs.stat(path.join(f.homeDirectory,'.agents','skills','estado'))).isDirectory());
+});
+
+test('doctor reads Superpowers from each agent found, through the given runner', async t => {
+  const f = await fixture(t), { doctorToolkit } = await import(moduleUrl);
+  const bin = path.join(f.root, 'bin');
+  await fs.mkdir(bin);
+  await fs.writeFile(path.join(bin, process.platform === 'win32' ? 'codex.cmd' : 'codex'), '', { mode: 0o755 });
+  const calls = [];
+  const runCommand = (command, args) => {
+    calls.push([command, ...args].join(' '));
+    return { status: 0, stdout: 'superpowers@openai-curated-remote   not installed   7.0.1   id\n', stderr: '' };
+  };
+  const result = await doctorToolkit({ ...f, agent: 'codex', environment: { PATH: bin, PATHEXT: '.EXE;.CMD' }, runCommand });
+  assert.deepEqual(result.superpowers.states, { codex: 'falta' });
+  assert.deepEqual(calls, ['codex plugin list']);
+});
+test('the skills now covered by Superpowers are retired like the old commands', async t => {
+  const f = await fixture(t); const { setupToolkit, RETIRED_SKILLS } = await import(moduleUrl);
+  assert.deepEqual(RETIRED_SKILLS.slice(2), ['spec-driven-development', 'depurar', 'desarrollo-con-pruebas']);
+  const target = path.join(f.homeDirectory, '.claude', 'skills', 'depurar'); await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.symlink(path.join(f.toolkitRoot, 'skills', 'depurar'), target, directoryLinkType);
+  const { acquireLock } = await import(lockUrl); const { recordEntries } = await import(registryUrl);
+  const lock = await acquireLock(path.join(f.homeDirectory, '.nexakit'));
+  try { await recordEntries(path.join(f.homeDirectory, '.nexakit'), [{ destino: target, apunta: await fs.readlink(target), raiz: f.toolkitRoot }], lock); } finally { await lock.release(); }
+  const preview = await setupToolkit({ ...f, agent: 'claude', environment: { PATH: '' } });
+  assert.equal(preview.retiredSkills.find(s => s.name === 'depurar').owned, true);
+  await setupToolkit({ ...f, agent: 'claude', apply: true, environment: { PATH: '' } });
+  await assert.rejects(fs.lstat(target));
+});
+test('a retired skill linked into a nexakit copy before the registry existed is still nexakit\'s', async t => {
+  const f = await fixture(t); const { setupToolkit } = await import(moduleUrl);
+  await fs.writeFile(path.join(f.toolkitRoot, 'package.json'), JSON.stringify({ name: 'nexakit', version: '0.1.0' }));
+  const old = path.join(f.homeDirectory, '.claude', 'skills', 'desarrollo-con-pruebas'); await fs.mkdir(path.dirname(old), { recursive: true });
+  await fs.symlink(path.join(f.toolkitRoot, 'skills', 'desarrollo-con-pruebas'), old, directoryLinkType);
+  const foreignRoot = path.join(f.root, 'otro'); await fs.mkdir(path.join(foreignRoot, 'skills'), { recursive: true });
+  await fs.writeFile(path.join(foreignRoot, 'package.json'), JSON.stringify({ name: 'otro-paquete' }));
+  const foreign = path.join(f.homeDirectory, '.claude', 'skills', 'depurar');
+  await fs.symlink(path.join(foreignRoot, 'skills', 'depurar'), foreign, directoryLinkType);
+  const preview = await setupToolkit({ ...f, agent: 'claude', environment: { PATH: '' } });
+  assert.equal(preview.retiredSkills.find(s => s.name === 'desarrollo-con-pruebas').owned, true, 'unregistered, but inside a nexakit copy');
+  assert.equal(preview.retiredSkills.find(s => s.name === 'depurar').owned, false, 'a link into another package is not ours');
+  await setupToolkit({ ...f, agent: 'claude', apply: true, environment: { PATH: '' } });
+  await assert.rejects(fs.lstat(old));
+  assert.equal((await fs.lstat(foreign)).isSymbolicLink(), true, 'the foreign link is left alone');
 });

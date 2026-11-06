@@ -222,7 +222,7 @@
         "versionReviewed": { "type": "string", "minLength": 1, "maxLength": 32 },
         "license": { "type": "string", "minLength": 2, "maxLength": 64 },
         "optional": { "type": "boolean" },
-        "autoInstall": { "const": false },
+        "autoInstall": { "type": "boolean" },
         "repository": { "type": "string", "pattern": "^https://github\\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$" },
         "summary": { "type": "string", "minLength": 5, "maxLength": 280 },
         "adaptedSkills": {

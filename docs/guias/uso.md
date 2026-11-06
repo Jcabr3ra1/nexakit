@@ -367,12 +367,11 @@ La arquitectura inicial del sistema de memoria está en [`docs/memoria/project-m
 - `web-design-guidelines`: revisión de interfaces con las Web Interface Guidelines de Vercel Labs, fijadas en la skill con su licencia MIT.
 - `frontend-design`: guía de diseño frontend de Claude Code Templates, con fuente y licencia registradas en [Fuentes de las skills](../skills/fuentes-de-skills.md).
 - `ordenar-proyecto`: organiza archivos y carpetas y ayuda a ubicar archivos nuevos conservando sus referencias.
-- `spec-driven-development`: alinea intención, alternativas, especificación verificable y plan de tareas ejecutables antes de implementar.
-- `depurar`: investiga y reproduce la causa raíz de fallos o regresiones con evidencia antes de proponer correcciones.
-- `desarrollo-con-pruebas`: guía o ejecuta el ciclo rojo, verde y refactorización respetando el modo `tutor` o `autonomous` y el trabajo existente.
 - `decision-records`: documenta decisiones confirmadas con contexto y consecuencias.
 - `project-handoff`: prepara traspasos breves y verificables entre sesiones o agentes.
-- `quality-gate`: verifica entregas contra requisitos, riesgos y evidencia fresca antes de afirmar cierre o aprobación.
+- `quality-gate`: puerta antes de un PR o de la revisión cruzada; revisa requisitos, riesgos y diff sobre la evidencia fresca de Superpowers.
+
+El proceso de trabajo (diseñar, planificar, depurar, TDD y verificar) lo pone [Superpowers](../skills/superpowers-integration.md), obligatorio: `npx nexakit` lo instala en cada IA.
 - `elegir-modelo`: recomienda y comprueba el modelo y el esfuerzo de Claude Code, Codex y Antigravity con el criterio de Anthropic: el esfuerzo es el por defecto de cada modelo salvo para iterar, verificar o trabajo crítico desatendido, y el modelo sube cuando hace falta saber más.
 
 Las equivalencias de proceso y reglas de convivencia con el plugin opcional Superpowers están en [Integración y adaptación de Superpowers](../skills/superpowers-integration.md).

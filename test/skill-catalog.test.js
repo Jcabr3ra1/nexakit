@@ -61,9 +61,10 @@ test('loadSkillCatalog loads all bundled skills matching real disk hashes withou
   assert.equal(globalSkillNames.includes('supabase-postgres-best-practices'), false);
 
   const superpowers = catalog.addons.find(a => a.id === 'superpowers');
-  assert.ok(superpowers, 'includes superpowers optional addon');
-  assert.equal(superpowers.optional, true);
-  assert.equal(superpowers.autoInstall, false);
+  assert.ok(superpowers, 'includes the required superpowers addon');
+  assert.equal(superpowers.optional, false);
+  assert.equal(superpowers.autoInstall, true);
+  assert.deepEqual(superpowers.adaptedSkills, ['quality-gate']);
   assert.equal(superpowers.license, 'MIT');
 
   const pkg = JSON.parse(await fs.readFile(path.join(ROOT, 'package.json'), 'utf8'));
