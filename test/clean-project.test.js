@@ -37,3 +37,59 @@ test('projectName normalizes accents, spaces and capitals', () => {
   assert.equal(projectName('/tmp/!!!'), 'proyecto');
 });
 
+// Every operation below plans argv only: no generator or package manager is started.
+const catalog = await (await import('../src/generators-catalog.js')).loadGeneratorsCatalog();
+const planner = async options => (await import('../src/clean-project.js')).planCleanProject({ catalog, name: 'Punto Motos', ...options });
+test('only frontend goes to the root', async () => {
+  const plan = await planner({ choice: { frontend: 'react-vite' } });
+  assert.equal(plan.parts.length, 1); assert.equal(plan.parts[0].dir, '.');
+  assert.deepEqual(plan.parts[0].commands[0], { argv: ['npm','create','--yes','vite@latest','.','--','--template','react-ts','--no-interactive'], cwd: '.' });
+  assert.deepEqual(plan.gitignore, ['.env']);
+});
+test('frontend and backend go to folders', async () => {
+  const plan = await planner({ choice: { frontend: 'react-vite', backend: 'django' }, platform: 'linux' });
+  assert.deepEqual(plan.parts.map(p => [p.part,p.dir]), [['frontend','frontend'],['backend','backend']]);
+  assert.deepEqual(plan.parts[1].commands[1], { argv: ['.venv/bin/django-admin','startproject','config','.'], cwd: 'backend' });
+  assert.deepEqual(plan.gitignore, ['.venv/', '.env']);
+});
+test('postgresql adds the driver to the backend', async () => {
+  const plan = await planner({ choice: { backend: 'django', database: 'postgresql' } });
+  assert.ok(plan.parts[0].commands.some(c => c.argv.includes('psycopg[binary]')));
+  assert.deepEqual(plan.parts[0].writes, [{ path: '.env.example', content: 'DATABASE_URL=postgresql://usuario:clave@localhost:5432/nombre\n' }]);
+});
+test('supabase goes to the frontend when both exist', async () => {
+  const plan = await planner({ choice: { frontend: 'react-vite', backend: 'django', database: 'supabase' } });
+  assert.ok(plan.parts[0].commands.some(c => c.argv.includes('@supabase/supabase-js')));
+  assert.ok(!plan.parts[1].commands.some(c => c.argv.includes('supabase')));
+  assert.deepEqual(plan.parts[0].commands.find(c => c.argv.includes('supabase@latest')), { argv: ['npx','--yes','supabase@latest','init'], cwd: '.' });
+});
+test('database without backend only allows supabase', async () => {
+  for (const database of ['postgresql','sqlite']) await assert.rejects(planner({ choice: { frontend: 'react-vite', database } }), /backend/i);
+  assert.equal((await planner({ choice: { frontend: 'react-vite', database: 'supabase' } })).parts.length, 1);
+});
+test('python commands use the venv', async () => {
+  for (const [platform,python] of [['win32','.venv\\Scripts\\python.exe'],['linux','.venv/bin/python']]) {
+    const plan = await planner({ choice: { backend: 'fastapi' }, platform });
+    assert.equal(plan.parts[0].commands[0].argv[0], python); assert.equal(plan.parts[0].check.argv[0], python);
+  }
+});
+test('the name is normalized', async () => {
+  const plan = await planner({ choice: { frontend: 'angular' }, name: 'Éxito_2' });
+  assert.ok(plan.parts[0].commands[0].argv.includes('exito-2'));
+});
+test('mobile participates in folder counting and follows the backend', async () => {
+  const plan = await planner({ choice: { frontend:'nextjs', backend:'express', mobile:'expo' } });
+  assert.deepEqual(plan.parts.map(p=>p.dir), ['frontend','backend','movil']);
+});
+test('fastapi writes stay inside its part and planning is deterministic', async () => {
+  const options = { choice: { frontend: 'react-vite', backend: 'fastapi', database: 'supabase' } };
+  const before = JSON.stringify(catalog), plan = await planner(options);
+  assert.deepEqual(plan.parts[1].writes.map(w => w.path), ['backend/main.py','backend/requirements.txt']);
+  assert.deepEqual(await planner(options), plan); assert.equal(JSON.stringify(catalog), before);
+  assert.doesNotMatch(JSON.stringify(plan), /\{(?:dir|name|python|venvBin)\}/);
+});
+test('unknown choices and mismatched parts are rejected', async () => {
+  for (const choice of [{ frontend:'unknown' },{ frontend:'django' },{ database:'supabase' },{ wrong:'react-vite' }]) {
+    await assert.rejects(planner({choice}), /elección|parte|frontend|backend/i);
+  }
+});
