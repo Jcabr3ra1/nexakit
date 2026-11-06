@@ -41,3 +41,10 @@ test('supabase declares the Node requirement of its root CLI even with a Python 
   const supabase = (await loadGeneratorsCatalog()).generators.find(g => g.id === 'supabase');
   assert.ok(supabase.requires.some(r => r.program === 'node'));
 });
+test('unknown placeholders in envExample are rejected and supported ones are accepted',async()=>{
+ const value=await raw(),database=value.generators.find(g=>g.id==='postgresql');
+ database.database.backends.django.envExample='DATABASE_URL={unknown}';
+ assert.throws(()=>validateGeneratorsCatalog(value),/marcador.*unknown/i);
+ database.database.backends.django.envExample='PROJECT={name}\nDIRECTORY={dir}';
+ assert.doesNotThrow(()=>validateGeneratorsCatalog(value));
+});

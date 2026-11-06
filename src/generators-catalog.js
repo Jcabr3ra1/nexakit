@@ -43,6 +43,9 @@ export function validateGeneratorsCatalog(value) {
         markers(step.path); markers(step.content);
       } else step.argv.forEach(markers);
     }
+    for (const backend of Object.values(g.database?.backends ?? {})) {
+      if (backend.envExample !== undefined) markers(backend.envExample);
+    }
     g.check.argv.forEach(markers);
   }
   for (const g of copy.generators) for (const id of Object.keys(g.database?.backends ?? {})) {
