@@ -21,6 +21,7 @@ import {
   planProjectSkillInstall,
   readSetupAnswers,
   recommendSkills,
+  uncoveredSignals,
 } from './skill-recommendations.js';
 import { planStableCommand } from './stable-command.js';
 import { inspectSuperpowers } from './superpowers.js';
@@ -251,6 +252,8 @@ export async function gatherSetupState({
     skills,
     // Suggested but installed outside NexaKit (for example as a Claude plugin): listed, never selectable.
     externalSkills: recommendation.externalCandidates.map(ref => ({ name: ref.name, reason: ref.reasons[0] ?? null })),
+    // Found in the project but covered by no catalog skill: reported only, never searched for automatically.
+    uncoveredTech: uncoveredSignals({ signals: inspection.signals, catalog }),
     agentsFound,
     globalSkills,
     stableCopy,

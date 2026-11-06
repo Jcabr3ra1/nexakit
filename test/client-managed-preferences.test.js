@@ -155,17 +155,20 @@ test("NP decoder/accumulator have no IO, spawn, network, current clock or random
 
 const nativeSource = fileURLToPath(new URL("../src/native/managed-preferences.c", import.meta.url));
 const fakeBackend = fileURLToPath(new URL("../testing/managed-preferences/backend.c", import.meta.url));
-const nativeTest = (name, fn) => test(name, { skip: !supported ? "This compiler/transport fixture requires POSIX; Windows has no Core Foundation backend." : false, timeout: 20000 }, fn);
-const syntheticTest = (name, fn) => test(name, { skip: supported ? false : "Requires the POSIX C compiler/transport fixture; it does not emulate Windows or grant native-client admission.", timeout: 20000 }, fn);
+const nativeTest = (name, fn) => test(name, { skip: !supported ? "This compiler/transport fixture requires POSIX; Windows has no Core Foundation backend." : false, timeout: 120000 }, fn);
+const syntheticTest = (name, fn) => test(name, { skip: supported ? false : "Requires the POSIX C compiler/transport fixture; it does not emulate Windows or grant native-client admission.", timeout: 120000 }, fn);
 async function temp(t) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "agent-preferences-test-"))); await fs.chmod(root, 0o700); const owned = await fs.lstat(root);
   t.after(async () => { const s = await fs.lstat(root).catch(() => null); if (s?.isDirectory() && !s.isSymbolicLink() && s.dev === owned.dev && s.ino === owned.ino) await fs.rm(root, { recursive: true }); });
   return root;
 }
+// Full-suite CI runs many compiler/process fixtures concurrently. Allow bounded
+// scheduling headroom; retain exit status, output and protocol assertions.
 async function execute(file, args, cwd, maxBuffer = 32768) {
   return new Promise(resolve => {
-    const child = childProcess.execFile(file, args, { cwd, env: { PATH: "/usr/bin:/bin", HOME: process.env.HOME, TMPDIR: cwd }, timeout: 10000, maxBuffer, encoding: "buffer" },
-      (error, stdout, stderr) => resolve({ code: error ? (Number.isInteger(error.code) ? error.code : null) : 0, stdout, stderr }));
+    const child = childProcess.execFile(file, args, { cwd, env: { PATH: "/usr/bin:/bin", HOME: process.env.HOME, TMPDIR: cwd }, timeout: 30000, maxBuffer, encoding: "buffer" },
+      (error, stdout, stderr) => resolve({ code: error ? (Number.isInteger(error.code) ? error.code : null) : 0, stdout, stderr,
+        termination: error ? `code=${error.code}; signal=${error.signal}; killed=${error.killed}` : "completed" }));
     child.stdin.end();
   });
 }
@@ -188,7 +191,7 @@ nativeTest("NP production backend links Core Foundation on macOS and rejects non
     return;
   }
   const artifact = await compile(root, null);
-  const symbols = await execute("/usr/bin/nm", ["-u", artifact], root); assert.equal(symbols.code, 0);
+  const symbols = await execute("/usr/bin/nm", ["-u", artifact], root); assert.equal(symbols.code, 0, symbols.termination);
   const s = symbols.stdout.toString("utf8"); assert.match(s, /CFPreferencesCopyAppValue/); assert.match(s, /CFPreferencesAppValueIsForced/); assert.match(s, /CFRelease/);
   assert.doesNotMatch(s, /CFPreferences(?:Set|Synchronize|CopyMultiple|CopyKeyList)/);
   // Deliberately no execute(artifact): compilation is not permission to query preferences.
@@ -202,8 +205,8 @@ syntheticTest("NP production backend rejects a non-Apple target instead of subst
 });
 for (const scenario of [0, 1, 4, 5, 6, 8]) syntheticTest(`NP compiled synthetic backend ${scenario}, six keys with ownership/order enforced`, async t => {
   const root = await temp(t), artifact = await compile(root, scenario), symbols = await execute("/usr/bin/nm", ["-u", artifact], root);
-  assert.equal(symbols.code, 0); assert.doesNotMatch(symbols.stdout.toString("utf8"), /CFPreferences|CFGetTypeID|CFRelease/);
-  const r = await execute(artifact, [], root); assert.equal(r.code, 0); assert.equal(r.stderr.length, 0); assert.doesNotMatch(r.stdout.toString("utf8"), /synthetic-private/);
+  assert.equal(symbols.code, 0, symbols.termination); assert.doesNotMatch(symbols.stdout.toString("utf8"), /CFPreferences|CFGetTypeID|CFRelease/);
+  const r = await execute(artifact, [], root); assert.equal(r.code, 0, r.termination); assert.equal(r.stderr.length, 0); assert.doesNotMatch(r.stdout.toString("utf8"), /synthetic-private/);
   const projection = safe(read(r.stdout, r.code)); assert.equal(projection.state, "partial-observation"); assert.equal(projection.sourceClaim, "synthetic");
   if (scenario === 0) assert.deepEqual(projection.fields.map(f => f.type), ["dictionary", "string", "string", "dictionary", "array", "boolean"]);
   if (scenario === 1) assert.ok(projection.fields.every(f => f.type === "not-found-by-api"));

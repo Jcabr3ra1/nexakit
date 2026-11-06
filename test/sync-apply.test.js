@@ -8,7 +8,7 @@ import { runCli } from "../src/cli.js";
 import { diagnoseMemory } from "../src/doctor.js";
 import { applyMemorySync, applyErrorReport } from "../src/sync-apply.js";
 import { recordMemorySync } from "../src/sync-record.js";
-import { hashBytes, syncWriteLockPath, SYNC_LEDGER } from "../src/sync-files.js";
+import { hashBytes, syncWriteLockPath, SYNC_LEDGER, assertOwnedArtifact } from "../src/sync-files.js";
 import { APPLY_LIMITS, parseProposal } from "../src/sync-proposal.js";
 import { collectMemoryNotes, validateNoteText, validateVirtualMemory } from "../src/sync-markdown.js";
 import { fileSymlinkSkipReason } from "../testing/symlink-capability.js";
@@ -443,6 +443,24 @@ for (const operation of ["fchmodSync", "fsyncSync"]) {
 test("apply verifica permisos del temporal y no confía en una preparación defectuosa", posixPermissions, async (t) => {
   const f = fixture(t), before = snapshot(f.root), r = await f.apply({}, { fileOperations: { fchmodSync() {} } });
   assert.equal(r.status, "conflict"); assert.equal(r.wrote, false); assert.deepEqual(snapshot(f.root), before);
+});
+test("la propiedad de un artefacto distingue inodos grandes que redondean al mismo número", (t) => {
+  const f = fixture(t), full = path.join(f.vault, NOTE);
+  const stat = fs.lstatSync(full), own = 2n ** 60n, foreign = own + 1n;
+  assert.equal(Number(own), Number(foreign));
+  let current = own;
+  const original = fs.lstatSync;
+  t.mock.method(fs, "lstatSync", (file, options) => {
+    if (file !== full) return original(file, options);
+    const result = Object.create(stat);
+    result.dev = options?.bigint ? BigInt(stat.dev) : stat.dev;
+    result.ino = options?.bigint ? current : Number(current);
+    return result;
+  });
+  const expected = { dev: BigInt(stat.dev), ino: own };
+  assert.doesNotThrow(() => assertOwnedArtifact(full, expected));
+  current = foreign;
+  assert.throws(() => assertOwnedArtifact(full, expected), (e) => e.code === "artifact-conflict");
 });
 test("apply conserva un temporal sustituido por una nota ajena sin hacer rename", async (t) => {
   const f = fixture(t); let replaced;

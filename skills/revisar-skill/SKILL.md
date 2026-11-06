@@ -1,7 +1,7 @@
 ---
 name: revisar-skill
 license: MIT
-description: Revisa una skill externa y, con la aprobación del usuario, la añade o actualiza en el catálogo de NexaKit. Úsala cuando se invoque /revisarskill, /revisar-skill o $revisar-skill, o cuando se pida incorporar, revisar o actualizar una skill del catálogo; no la uses para instalar skills en un proyecto.
+description: Busca candidatas, revisa una skill externa y, con la aprobación del usuario, la añade o actualiza en el catálogo de NexaKit. Úsala cuando se invoque /revisarskill, /revisar-skill o $revisar-skill, cuando se pida buscar una skill para una tecnología o tarea («busca una skill para Svelte»), o incorporar, revisar o actualizar una skill del catálogo; no la uses para instalar skills en un proyecto.
 ---
 
 # Revisar e incorporar una skill al catálogo
@@ -23,6 +23,30 @@ registra. Se ejecuta en el repositorio de NexaKit.
 - Nunca digas que una skill es «segura»: di «sin bloqueos; N avisos».
 - Toda skill nueva o actualizada queda **no probada** hasta que tenga un
   escenario funcional pasado.
+- **Nunca instales** una skill al buscarla: ni `npx skills add`, ni `-g`, ni
+  `-y`. Buscar solo propone; lo que entra al catálogo sigue los pasos de abajo.
+- Sin **licencia declarada** (archivo `LICENSE`, sección de licencia del README
+  o campo `license` del `SKILL.md`) una skill no entra: no se puede redistribuir.
+
+## Buscar candidatas
+
+Cuando te pidan buscar una skill y no haya un origen concreto:
+
+1. **Buscar.** Mira primero el ranking de [skills.sh](https://skills.sh/) para
+   el tema y, si no basta, ejecuta `npx skills find <tema>` (con
+   `--owner <dueño>` para acotar a un autor). Es solo lectura.
+2. **Filtrar.** Quédate con las que cumplen todo: autor oficial o conocido
+   (la empresa de la tecnología, `anthropics`, `vercel-labs`, `trailofbits`…),
+   más de 1 000 instalaciones, repositorio de origen con estrellas y actividad
+   reciente, y licencia declarada. Desconfía de las estrellas o instalaciones
+   desproporcionadas para la edad del repositorio, y dilo.
+3. **Proponer.** Presenta 2–3 candidatas, cada una con qué hace, autor,
+   instalaciones, licencia, repositorio y ruta. Si ninguna cumple, dilo y no
+   rebajes el filtro sin preguntar.
+4. **Elegir.** Si el usuario elige una, su repositorio y su ruta son el origen
+   del paso 1 de abajo. Los directorios que copian skills (por ejemplo
+   agenticskills.io) sirven para encontrar; el origen es siempre el repositorio
+   original.
 
 ## Pasos
 
@@ -31,6 +55,9 @@ registra. Se ejecuta en el repositorio de NexaKit.
 2. **Obtener.** Clona en una carpeta nueva y vacía de la zona temporal:
    `git clone --filter=blob:none <repositorio> <carpeta>`. Anota la revisión con
    `git -C <carpeta> rev-parse HEAD` (40 caracteres) y la licencia original.
+   Si no hay licencia declarada, informa y termina. Si la licencia está solo en
+   el README o en el `SKILL.md`, la entrada debe incluir un `LICENSE.txt` con su
+   texto y una nota de origen.
    La carpeta de la skill es `<carpeta>/<ruta>` y debe contener `SKILL.md`.
 3. **Escanear.** `node bin/nexakit.js scan <carpeta de la skill>`. Si sale
    `BLOQUEADA`, informa de cada bloqueo con archivo y línea y termina.
@@ -62,3 +89,6 @@ registra. Se ejecuta en el repositorio de NexaKit.
 
 Para actualizar una skill que ya está en el catálogo, repite los mismos pasos
 con su mismo `name`; la vista previa muestra los archivos cambiados.
+
+La búsqueda de candidatas adapta la idea y los criterios de calidad de
+find-skills de Vercel (MIT; aviso en [LICENSE-find-skills.txt](LICENSE-find-skills.txt)).

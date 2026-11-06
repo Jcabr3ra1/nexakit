@@ -161,7 +161,7 @@ function writeNotes({ vault, notes, before, capture, report }, context) {
   try {
     check();
     const fd = io.openSync(lockPath, "wx", 0o600);
-    try { lock = fs.fstatSync(fd); } finally { fs.closeSync(fd); }
+    try { lock = fs.fstatSync(fd, { bigint: true }); } finally { fs.closeSync(fd); }
     artifacts.push({ path: lockPath, stat: lock }); ignored.push(relativeGitPath(vault, lockPath));
     check();
     const pending = notes.filter((n) => !n.satisfied), temps = new Map();
@@ -171,7 +171,7 @@ function writeNotes({ vault, notes, before, capture, report }, context) {
       const temp = path.join(path.dirname(note.file.path), `.project-memory-sync-apply-${randomUUID()}.tmp`);
       const fd = io.openSync(temp, "wx", 0o600); let stat;
       try {
-        stat = fs.fstatSync(fd); artifacts.push({ path: temp, stat }); ignored.push(relativeGitPath(vault, temp));
+        stat = fs.fstatSync(fd, { bigint: true }); artifacts.push({ path: temp, stat }); ignored.push(relativeGitPath(vault, temp));
         io.writeFileSync(fd, note.bytes); io.fchmodSync(fd, note.file.mode); io.fsyncSync(fd);
       } finally { fs.closeSync(fd); }
       assertOwnedArtifact(temp, stat);
@@ -186,9 +186,12 @@ function writeNotes({ vault, notes, before, capture, report }, context) {
       if (prepared.hash !== note.afterHash || prepared.mode !== note.file.mode) rejectFile("temporary-content", "Un temporal cambió antes de reemplazar.");
       let renameError;
       try { io.renameSync(temp.path, note.file.path); } catch (error) { renameError = error; }
-      let result;
-      try { result = readSyncFile(note.file.path, APPLY_LIMITS.note); } catch { /* An unconfirmable outcome is conservative, never rolled back. */ }
-      const installed = result && result.identity[0] === temp.stat.dev && result.identity[1] === temp.stat.ino && result.hash === note.afterHash && result.mode === note.file.mode;
+      let result, installedIdentity;
+      try {
+        installedIdentity = fs.lstatSync(note.file.path, { bigint: true });
+        result = readSyncFile(note.file.path, APPLY_LIMITS.note);
+      } catch { /* An unconfirmable outcome is conservative, never rolled back. */ }
+      const installed = result && installedIdentity.dev === temp.stat.dev && installedIdentity.ino === temp.stat.ino && result.hash === note.afterHash && result.mode === note.file.mode;
       if (installed) {
         applied.push(note.path);
         expected.files[expected.files.findIndex((f) => f.path === note.file.path)] = fileState(result);

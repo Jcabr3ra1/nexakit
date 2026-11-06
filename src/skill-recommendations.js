@@ -1656,3 +1656,18 @@ export function formatDetachReport(report) {
   if (report.reviewInstructions?.length) lines.push(`  - Quitar solo el bloque de revisión de ${report.reviewInstructions.join(', ')}`);
   return lines.join('\n') + '\n';
 }
+
+// Generic signals: almost every project has them, and the useful skill is the framework's.
+const GENERIC_SIGNALS = new Set(['nodejs', 'typescript']);
+
+// The technologies found in the project that no catalog skill (nor external reference) covers. Only reported:
+// finding a skill for one is a request the person makes to revisar-skill, never a search nexakit starts alone.
+export function uncoveredSignals({ signals = [], catalog }) {
+  const covered = new Set([
+    ...(catalog?.skills ?? []).flatMap((skill) => skill.matching?.anySignals ?? []),
+    ...(catalog?.externalReferences ?? []).flatMap((ref) => ref.anySignals ?? []),
+  ]);
+  return signals
+    .filter((signal) => !GENERIC_SIGNALS.has(signal.id) && !covered.has(signal.id))
+    .map((signal) => ({ id: signal.id, label: signal.label }));
+}
