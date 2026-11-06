@@ -7,11 +7,11 @@ adaptamos para Agent Toolkit. Se amplía conforme incorporemos nuevas fuentes.
 
 | Skill o biblioteca | Origen | Relación con Agent Toolkit | Fecha de consulta |
 | --- | --- | --- | --- |
-| Superpowers | [Repositorio original: obra/superpowers](https://github.com/obra/superpowers) | El plugin original puede seguir instalado. Se adaptaron prácticas seleccionadas (`7.0.1`, MIT) en `spec-driven-development`, `depurar`, `desarrollo-con-pruebas` y `quality-gate`; ver [guía de integración](superpowers-integration.md). | 2026-10-31 |
+| Superpowers | [Repositorio original: obra/superpowers](https://github.com/obra/superpowers) | Obligatorio: `npx nexakit` lo instala con el gestor de plugins de cada IA. `quality-gate` conserva una adaptación parcial (`7.0.1`, MIT); ver [Superpowers en nexakit](superpowers-integration.md). | 2026-11-05 |
 | ordenar-proyecto | [Fuente local de Agent Toolkit](../../skills/ordenar-proyecto/SKILL.md) | Skill propia para organizar archivos y mantener referencias. Incorporada a la biblioteca; sin URL publicada independiente. | 2026-10-28 |
 | Impeccable | [Repositorio original: pbakaus/impeccable](https://github.com/pbakaus/impeccable) | Disponible en el entorno local; no distribuida por Toolkit. | 2026-10-28 |
 | frontend-design | [Claude Code Templates: creative-design/frontend-design](https://github.com/davila7/claude-code-templates/tree/main/cli-tool/components/skills/creative-design/frontend-design) | Incorporada sin modificar a skills/frontend-design y enlazada para Claude y Codex en este proyecto. | 2026-10-28 |
-| web-design-guidelines | [Vercel: Web Design Guidelines](https://github.com/vercel-labs/agent-skills/tree/main/skills/web-design-guidelines) | Incorporada sin modificar y enlazada para Claude y Codex en este proyecto. | 2026-10-28 |
+| web-design-guidelines | [Vercel Labs: Web Interface Guidelines](https://github.com/vercel-labs/web-interface-guidelines/tree/434b7f91364665f2f733b310ec54809bf8f37937) | Reglas copiadas sin modificar en `AGENTS.md` con su `LICENSE.txt` MIT; instrucciones propias de nexakit. Se instala por proyecto. | 2026-11-05 |
 | mcp-builder | [Anthropic](https://github.com/anthropics/skills/tree/b9e19e6f44773509fbdd7001d77ff41a49a486c1/skills/mcp-builder) | Incorporada con recursos originales y licencia Apache-2.0; enlazada para ambos clientes. | 2026-10-28 |
 | differential-review | [Trail of Bits](https://github.com/trailofbits/skills/tree/123037ec8aed26f0d86327cc39137ee5043e5deb/plugins/differential-review/skills/differential-review) | Incorporada con referencias originales y licencia CC BY-SA 4.0; enlazada para ambos clientes. | 2026-10-28 |
 | ui-ux-pro-max | [Next Level Builder (`713eef51b04efc98d6fa565323b495f7c9c89fd4`)](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill/tree/713eef51b04efc98d6fa565323b495f7c9c89fd4/.claude/skills/ui-ux-pro-max) | Referencia externa en `externalReferences` (MIT): se sugiere en proyectos de frontend y se instala como plugin de Claude. No se copia porque `google-fonts.csv` supera 512 KiB y sus órdenes dependen de `CLAUDE_PLUGIN_ROOT`. Escaneo sin bloqueos; no probada. | 2026-11-02 |
@@ -34,30 +34,17 @@ referencias de Differential Review mencionan herramientas y agentes del plugin
 completo que no se incorporan al instalar solo esta skill. La evaluación local
 se delimitó expresamente y no ejecutó esos componentes externos.
 
-## Web Design Guidelines — Vercel
+## Web Design Guidelines — Vercel Labs
 
-- [Fuente exacta revisada](https://github.com/vercel-labs/agent-skills/tree/ba46938889d4e58635362fb8f618e1178ac3ec46/skills/web-design-guidelines).
+- [Reglas fijadas: `AGENTS.md` en el commit `434b7f9`](https://github.com/vercel-labs/web-interface-guidelines/blob/434b7f91364665f2f733b310ec54809bf8f37937/AGENTS.md).
+- [Licencia MIT de origen](https://github.com/vercel-labs/web-interface-guidelines/blob/434b7f91364665f2f733b310ec54809bf8f37937/LICENSE) (`Copyright (c) 2025 Vercel Labs`), copiada en `LICENSE.txt`.
 - [Skill incorporada](../../skills/web-design-guidelines/SKILL.md).
-- [Guía de interfaz que consulta durante sus revisiones](https://github.com/vercel-labs/web-interface-guidelines/blob/main/command.md).
 
-Instalada el 2026-10-28 con skill-installer desde vercel-labs/agent-skills,
-ruta skills/web-design-guidelines, revisión
-`ba46938889d4e58635362fb8f618e1178ac3ec46`. Declara versión 1.0.0.
-
-La copia canónica vive en skills/web-design-guidelines. Los enlaces relativos
-.claude/skills/web-design-guidelines y .agents/skills/web-design-guidelines
-apuntan a esa carpeta para este proyecto. La comprobación acredita archivos y
-enlaces, no la carga de la skill en una sesión abierta.
-
-La skill se conserva sin cambios y su SHA-256 es
-`f4647ca866a3accf763777f83e7682954f0187cd6bea7eea0399796652414e8f`.
-El [README de la revisión fuente declara MIT](https://github.com/vercel-labs/agent-skills/blob/ba46938889d4e58635362fb8f618e1178ac3ec46/README.md#license);
-la carpeta de la skill consultada contiene únicamente SKILL.md y no incluye
-un archivo de licencia independiente.
-
-La revisión fijada corresponde a la skill. Sus instrucciones consultan las
-reglas de interfaz vigentes por internet antes de cada revisión; esas reglas
-externas pueden cambiar y no quedan fijadas por el hash de SKILL.md.
+Hasta el 2026-11-05 la carpeta traía solo el `SKILL.md` de
+[vercel-labs/agent-skills](https://github.com/vercel-labs/agent-skills/tree/ba46938889d4e58635362fb8f618e1178ac3ec46/skills/web-design-guidelines)
+(MIT según su README, sin archivo de licencia), que descargaba las reglas por internet antes de cada revisión.
+Ahora las reglas están fijadas en la carpeta junto a su licencia, y el `SKILL.md` es propio de nexakit: no hay
+descargas en cada uso y el hash del catálogo cubre todo lo que lee el agente.
 
 ## Frontend Design — Claude Code Templates
 
@@ -122,16 +109,11 @@ La instalación local consultada corresponde a Superpowers **7.0.1** (`Copyright
 identifica la copia revisada; los enlaces a `main` muestran el contenido vigente
 del repositorio y pueden cambiar.
 
-La [guía de integración y adaptación](superpowers-integration.md) relaciona cada
-práctica revisada (`using-superpowers`, `brainstorming`, `writing-plans`,
-`systematic-debugging`, `test-driven-development` y `verification-before-completion`)
-con las skills [`spec-driven-development`](../../skills/spec-driven-development/SKILL.md),
-[`depurar`](../../skills/depurar/SKILL.md),
-[`desarrollo-con-pruebas`](../../skills/desarrollo-con-pruebas/SKILL.md) y
-[`quality-gate`](../../skills/quality-gate/SKILL.md), cada una con su copia de
-`LICENSE.txt` original. El diseño de adaptación (en la memoria de Obsidian de NexaKit (`03-IMPLEMENTACION/Planes/2026-10-28-integracion-superpowers-design.md`)
-conserva las decisiones de alcance. El plugin original y las adaptaciones de
-Toolkit mantienen mantenimiento separado.
+[Superpowers en nexakit](superpowers-integration.md) explica cómo se instala en cada IA, qué reglas mandan
+sobre sus skills y qué skills propias se retiraron (`spec-driven-development`, `depurar` y
+`desarrollo-con-pruebas`). [`quality-gate`](../../skills/quality-gate/SKILL.md) conserva su `LICENSE.txt` original.
+El diseño de la primera adaptación está en la memoria de Obsidian de NexaKit
+(`03-IMPLEMENTACION/Planes/2026-10-28-integracion-superpowers-design.md`).
 
 ## Cómo ampliar el registro
 

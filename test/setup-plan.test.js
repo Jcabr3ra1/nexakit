@@ -184,3 +184,37 @@ test('confirmation explicitly announces global work rules for the selected IAs',
   assert.ok(marks(confirmation).includes('+ Reglas de trabajo en tus instrucciones de Claude Code y Codex'));
   assert.ok(blockIds(confirmation).includes('review-instructions'));
 });
+
+test('Superpowers is required: installs it where it is missing, enables it where it is off, after the base skills', () => {
+  const state = puntoMotos({
+    agentsFound: { claude: true, codex: true, antigravity: true },
+    superpowers: { claude: 'falta', codex: 'activo', antigravity: 'desactivado' },
+  });
+  const answers = { ...suggestedAnswers(state), agents: ['claude', 'codex', 'antigravity'] };
+  const confirmation = buildConfirmation(state, answers);
+  assert.ok(marks(confirmation).includes('+ Superpowers en Claude Code'));
+  assert.ok(marks(confirmation).includes('↻ Activar Superpowers en Antigravity'));
+  assert.ok(marks(confirmation).includes('✓ Superpowers activo en Codex'));
+  const ids = blockIds(confirmation);
+  assert.deepEqual(ids.filter(id => id.startsWith('superpowers:')), ['superpowers:claude', 'superpowers:antigravity']);
+  assert.ok(ids.indexOf('superpowers:claude') > ids.indexOf('global-skills:antigravity'));
+});
+
+test('Superpowers: nothing to do when it is active everywhere; Codex off or unknown is a warning, not a block', () => {
+  const active = puntoMotos({ superpowers: { claude: 'activo', codex: 'activo' }, globalSkills: { claude: ready, codex: ready, antigravity: ready } });
+  const done = buildConfirmation(active, suggestedAnswers(active));
+  assert.ok(marks(done).includes('✓ Superpowers activo en Claude Code y Codex'));
+  assert.equal(blockIds(done).some(id => id.startsWith('superpowers:')), false);
+
+  const off = puntoMotos({ superpowers: { claude: 'desconocido', codex: 'desactivado' } });
+  const warned = buildConfirmation(off, suggestedAnswers(off));
+  assert.ok(marks(warned).includes('! No pude comprobar Superpowers en Claude Code; revisa /plugin'));
+  assert.ok(marks(warned).includes('! Superpowers está desactivado en Codex; actívalo desde /plugins'));
+  assert.equal(blockIds(warned).some(id => id.startsWith('superpowers:')), false);
+});
+
+test('Superpowers: an agent not chosen or not found is left alone', () => {
+  const state = puntoMotos({ superpowers: { claude: 'falta', codex: 'falta' } });
+  const confirmation = buildConfirmation(state, { ...suggestedAnswers(state), agents: ['claude'] });
+  assert.deepEqual(blockIds(confirmation).filter(id => id.startsWith('superpowers:')), ['superpowers:claude']);
+});

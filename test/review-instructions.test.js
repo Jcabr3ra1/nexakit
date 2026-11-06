@@ -162,7 +162,8 @@ test('global block stays brief, includes project-handoff trigger, new session li
     assert.ok(match, rel.join('/'));
     const block = match[0];
     assert.ok(block.split('\n').length <= 40, `block has too many lines: ${block.split('\n').length}`);
-    assert.ok(block.length <= 2200, `block is too long: ${block.length}`);
+    // 2600: room for the rules that govern the required Superpowers process; still loaded in every session.
+    assert.ok(block.length <= 2600, `block is too long: ${block.length}`);
     assert.match(
       block,
       /si una tarea larga queda a medias —pausa, cambio de IA, bloqueo o cierre— escribe o actualiza la nota de seguimiento con project-handoff/iu,

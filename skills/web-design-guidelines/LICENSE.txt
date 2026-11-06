@@ -1,11 +1,6 @@
-Adaptación parcial en español para Agent Toolkit a partir de prácticas de
-Superpowers 7.0.1 (https://github.com/obra/superpowers, skills `brainstorming`
-y `writing-plans`). Se conserva íntegro el aviso de copyright y licencia MIT
-del origen:
-
 MIT License
 
-Copyright (c) 2025 Jesse Vincent
+Copyright (c) 2025 Vercel Labs
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

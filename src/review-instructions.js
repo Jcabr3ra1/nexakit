@@ -7,9 +7,13 @@ const START = '<!-- nexakit:review:start -->',
 const BODY = `${START}
 # Método de trabajo de nexakit
 
-Para programar, aplica normalmente: contexto y memoria, plan proporcional,
-rama, pruebas, implementación, comprobación y cierre con memoria. No hace falta
-un comando para empezar a programar.
+Para programar sigue el proceso de Superpowers (obligatorio): contexto y
+memoria, diseño y plan proporcionales, rama, pruebas, implementación,
+verificación y cierre con memoria. No hace falta un comando para empezar.
+Sobre sus skills mandan: modo tutor (la persona escribe el código, un paso
+verificable cada vez); no borrar código existente sin acuerdo aunque el TDD lo
+pida; commit, push, PR y memoria solo con autorización. Reutiliza un diseño o
+plan ya aprobado. Antes de un PR o de la revisión cruzada, quality-gate.
 
 Al terminar una tarea con cambios de código, pide automáticamente UNA revisión
 a otra IA, corrige los hallazgos verificables y resume el resultado. Máximo dos

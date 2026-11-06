@@ -1,7 +1,0 @@
-interface:
-  display_name: "Depurar"
-  short_description: "Investiga la causa raíz con evidencia antes de corregir"
-  default_prompt: "Usa $depurar para reproducir este fallo, reunir evidencia y confirmar la causa raíz antes de proponer una corrección."
-
-policy:
-  allow_implicit_invocation: true

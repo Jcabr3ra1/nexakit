@@ -20,6 +20,7 @@ import {
 import { planStableCommand, writeStableCommand } from './stable-command.js';
 import { ensureStableInstall, nexakitDir } from './stable-install.js';
 import { packageVersion, setupToolkit } from './toolkit-setup.js';
+import { applySuperpowers } from './superpowers.js';
 
 const RETRY = 'Vuelve a ejecutar `npx nexakit` para reintentar.';
 
@@ -189,6 +190,9 @@ export async function applySetup(
         ...(packageSpec && { packageSpec }),
         acquire,
       });
+    }
+    if (kind === 'superpowers') {
+      return applySuperpowers(agent, state.superpowers?.[agent], { environment, ...(runCommand && { runCommand }) });
     }
     if (kind === 'memory-connect') {
       await withLock(homeDirectory, acquire, (lock) =>

@@ -17,9 +17,11 @@ import {
   classifyReference,
   isEphemeralPath,
   legacyGroups,
+  recognizedRoot,
   relinkIfUnchanged,
 } from './link-states.js';
 import { actualRoot, ensureStableInstall, nexakitDir } from './stable-install.js';
+import { inspectSuperpowers } from './superpowers.js';
 
 import packageJson from '../package.json' with { type: 'json' };
 
@@ -36,6 +38,10 @@ const SKILL_HOMES = {
 };
 // Only Claude and Codex run the coordination MCP; Antigravity does not have one in this phase.
 const MCP_CLIENTS = ['codex', 'claude'];
+// Skills nexakit no longer ships. Links it created are removed; anything else with the name is reported, never
+// touched. The last three are now covered by Superpowers (brainstorming/writing-plans, systematic-debugging and
+// test-driven-development), which is required.
+export const RETIRED_SKILLS = Object.freeze(['programar', 'estado', 'spec-driven-development', 'depurar', 'desarrollo-con-pruebas']);
 const MCP_SUFFIX = 'bin/agent-toolkit-mcp.js';
 const COMMANDS = { codex: 'codex', claude: 'claude', antigravity: 'agy' };
 export const globalSkillTarget = (home, client, name) => path.join(home, ...SKILL_HOMES[client], name);
@@ -151,19 +157,20 @@ export async function setupToolkit({
   const activeRoots = [linkRoot, sourceRoot, actualRoot(home)];
   const retiredSkills = [];
   for (const client of clients)
-    for (const name of ['programar', 'estado']) {
+    for (const name of RETIRED_SKILLS) {
       const target = globalSkillTarget(home, client, name);
       await parents(home, target);
       const info = await stat(target);
       if (!info) continue;
       const literal = info.isSymbolicLink() ? await fs.readlink(target) : null;
-      retiredSkills.push({
-        client,
-        name,
-        target,
-        literal,
-        owned: Boolean(literal && isOwned(target, literal)),
-      });
+      // Registered, or pointing at `<nexakit copy>/skills/<name>`: links made before the registry existed
+      // are nexakit's too. A link into anything else is reported, never removed.
+      const owned = Boolean(
+        literal &&
+          (isOwned(target, literal) ||
+            (await recognizedRoot(path.resolve(path.dirname(target), literal), path.join('skills', name)))),
+      );
+      retiredSkills.push({ client, name, target, literal, owned });
     }
 
   const skills = [];
@@ -327,7 +334,8 @@ export async function setupToolkit({
     },
     restartRequired: created > 0,
     ...(clients.includes('codex') && { codexSandbox: await codexSandbox(home, codexHome, codexProfile) }),
-    superpowers: { included: false, required: false },
+    // Required, installed through each agent's plugin manager; `doctor` and `npx nexakit` check it.
+    superpowers: { included: false, required: true },
     codexHome,
   };
 }
@@ -546,6 +554,7 @@ export async function doctorToolkit({
   environment = process.env,
   codexHome = environment.CODEX_HOME ?? path.join(homeDirectory, '.codex'),
   codexProfile,
+  runCommand,
 } = {}) {
   const setup = await setupToolkit({
     agent,
@@ -590,7 +599,16 @@ export async function doctorToolkit({
     ...(setup.otherCopy && { otherCopy: setup.otherCopy }),
     ...(setup.codexSandbox && { codexSandbox: setup.codexSandbox }),
     gemini: { available: await executable('agy', environment), provider: 'antigravity', apiFallback: false },
-    superpowers: { included: false, required: false, detection: 'check-client-plugin-manager' },
+    superpowers: {
+      included: false,
+      required: true,
+      detection: 'client-plugin-cli',
+      states: await inspectSuperpowers({
+        agentsFound: Object.fromEntries(Object.entries(clients).map(([name, c]) => [name, c.available])),
+        environment,
+        ...(runCommand && { runCommand }),
+      }),
+    },
     nativeConnectionVerified: false,
   };
 }

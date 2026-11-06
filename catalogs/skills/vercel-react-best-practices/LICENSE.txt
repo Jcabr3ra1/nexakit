@@ -1,12 +1,12 @@
-Adaptación en español para Agent Toolkit a partir de prácticas de
-Superpowers 7.0.1 (https://github.com/obra/superpowers, skill
-`systematic-debugging` y sus técnicas de apoyo `root-cause-tracing`,
-`defense-in-depth` y `condition-based-waiting`). Se conserva íntegro el aviso
-de copyright y licencia MIT del origen:
+Esta skill procede de https://github.com/vercel-labs/agent-skills (commit
+1a2c79d4e6c4a2283dc2c614b6538cbe1ed5ca62), cuyo SKILL.md declara "license: MIT" y
+"author: vercel". El repositorio de origen no incluye un archivo de licencia; nexakit
+reproduce aquí el texto de la licencia MIT declarada para cumplir su condición de
+incluir el aviso con las copias.
 
 MIT License
 
-Copyright (c) 2025 Jesse Vincent
+Copyright (c) Vercel
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
