@@ -43,7 +43,7 @@ async function cleanBoundary(start, topLevel) {
         }
       }
     } catch { /* Only an owned readable marker establishes a boundary. */ }
-    if(!topLevel || current===topLevel || path.dirname(current)===current) return null;
+    if(current===topLevel || path.dirname(current)===current) return null;
     current=path.dirname(current);
   }
 }
@@ -54,7 +54,7 @@ export async function resolveProjectRoot(start, { homeDirectory = os.homedir(), 
   // A repository at the home folder (dotfiles) is not the project: climbing there would scan and install into ~.
   const home = await realpathOrNull(homeDirectory);
   const git = Boolean(topLevel) && topLevel !== home;
-  const boundary = await cleanBoundary(startedIn, git ? topLevel : null);
+  const boundary = await cleanBoundary(startedIn, git ? topLevel : home);
   const root = boundary ?? (git ? topLevel : startedIn);
   return { root, startedIn, git, fromSubfolder: root !== startedIn, ...projectIdentity(root) };
 }

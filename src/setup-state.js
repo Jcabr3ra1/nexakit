@@ -249,7 +249,7 @@ export async function gatherSetupState({
     folder:await inspectFolder(start),
     creationRoot:await fs.realpath(start),
     generators:await loadGeneratorsCatalog(),
-    cleanProject:await readCleanProjectAnswers(start),
+    cleanProject:await readCleanProjectAnswers(project.root),
     reviewInstructions,
     superpowers,
     homeDirectory,
