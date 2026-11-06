@@ -208,3 +208,9 @@ test('requirements probes that never finish are bounded and aborted',async()=>{
  const result=await checkRequirements(plan,catalog,{timeoutMs:15,runCommand:(_c,_a,{signal})=>{signal.addEventListener('abort',()=>{aborted=true;});return new Promise(()=>{});}});
  assert.equal(result[0].ok,false);assert.equal(aborted,true);
 });
+for(const interruption of ['timeout','cancel']) test(`partial output is logged on ${interruption}`,async t=>{
+ const root=await folder(t),controller=new AbortController();
+ const r=await executePlan(await planner({choice:{frontend:'react-vite'}}),{projectRoot:root,signal:controller.signal,timeoutMs:20,
+ runCommand:async(_cmd,_args,{onOutput})=>{onOutput?.('Última salida API_TOKEN=privado\n');if(interruption==='cancel')controller.abort();return new Promise(()=>{});}});
+ assert.equal(r.ok,false);const log=await fs.readFile(path.join(root,'.agent-toolkit/creacion.log'),'utf8');assert.match(log,/Última salida/);assert.doesNotMatch(log,/privado/);
+});

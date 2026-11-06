@@ -2,7 +2,7 @@ import { spawn, execFile } from 'node:child_process';
 import { resolveCliInvocation } from './cli-executable.js';
 
 // No shell, bounded output, stdin closed. The abort signal ends the process tree.
-export async function runCleanCommand(command, args, { cwd, signal, env = process.env } = {}) {
+export async function runCleanCommand(command, args, { cwd, signal, env = process.env, onOutput = () => {} } = {}) {
   if (process.platform === 'win32' && ['npm','npx'].includes(command)) {
     const invocation = await resolveCliInvocation({ name: command, environment: env });
     command = invocation.executable; args = [...invocation.argsPrefix, ...args];
@@ -18,6 +18,7 @@ export async function runCleanCommand(command, args, { cwd, signal, env = proces
     const collect = key => chunk => {
       size += chunk.length;
       if (size > 16 * 1024 * 1024) { stop(); return; }
+      onOutput(String(chunk), key === 'out' ? 'stdout' : 'stderr');
       if (key === 'out') stdout += chunk; else stderr += chunk;
     };
     child.stdout.on('data', collect('out')); child.stderr.on('data', collect('err'));

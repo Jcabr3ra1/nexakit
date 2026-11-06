@@ -124,20 +124,28 @@ export async function runCleanProject(plan, { projectRoot, runCommand = runClean
   const record = text => log.push(`${new Date(now()).toISOString()} ${sinSecretos(text)}`);
   const command = async (values,cwd) => {
     argv = values; onProgress(current,values); record(values.join(' '));
-    const controller = new AbortController(); let timer, cancel;
+    const controller = new AbortController(); let timer, cancel, running, interrupted = false, partial = '';
     try {
       const result = await Promise.race([
-        Promise.resolve().then(()=>runCommand(values[0],values.slice(1),{cwd,signal:controller.signal,timeoutMs,
+        running = Promise.resolve().then(()=>runCommand(values[0],values.slice(1),{cwd,signal:controller.signal,timeoutMs,onOutput:chunk=>{if(partial.length<16*1024*1024)partial+=chunk;},
           env:{...process.env,CI:'1',npm_config_cache:path.join(workspace,'npm-cache'),PIP_CACHE_DIR:path.join(workspace,'pip-cache'),PIP_NO_INPUT:'1'}})),
         new Promise((_,reject)=>{
-          cancel=()=>{controller.abort();reject(Error('Creación cancelada.'));};
+          cancel=()=>{interrupted=true;controller.abort();reject(Error('Creación cancelada.'));};
           signal?.addEventListener('abort',cancel,{once:true});if(signal?.aborted)cancel();
-          timer=setTimeout(()=>{controller.abort();reject(Error('La orden superó el tiempo límite.'));},timeoutMs);})
+          timer=setTimeout(()=>{interrupted=true;controller.abort();reject(Error('La orden superó el tiempo límite.'));},timeoutMs);})
       ]);
       const status = result?.status ?? result?.code;
       const output = typeof result === 'string' ? result : `${result?.stdout ?? ''}\n${result?.stderr ?? ''}`;
       record(`salida ${status ?? 0}: ${output}`);
       if (typeof result !== 'string' && status !== 0) throw Error(output || 'La orden falló.');
+    } catch(error) {
+      if(interrupted) {
+        let closeTimer;
+        const stopped=await Promise.race([running.catch(()=>null),new Promise(resolve=>{closeTimer=setTimeout(()=>resolve(null),1000);})]);
+        clearTimeout(closeTimer);
+        record(`salida parcial: ${stopped ? `${stopped.stdout ?? ''}\n${stopped.stderr ?? ''}` : partial}`);
+      }
+      throw error;
     } finally { clearTimeout(timer); signal?.removeEventListener('abort',cancel); }
   };
   try {
