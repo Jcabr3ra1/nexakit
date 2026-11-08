@@ -95,14 +95,28 @@ grep -q "^\[sandbox_workspace_write\]" ~/.codex/config.toml 2>/dev/null && echo 
 
 Codex ejecuta sus comandos en un sandbox que solo deja escribir en el proyecto, y `$revisar` guarda el id de su sesión en `~/.agent-toolkit`. `doctor` te dice si falta este permiso e imprime el comando con tus rutas.
 
-### 7. Instala el plugin de niveles (solo Claude Code)
+### 7. Instala los plugins y mods (solo Claude Code)
 
 ```text
 /plugin marketplace add Jcabr3ra1/nexakit
 /plugin install niveles@agent-toolkit
+/plugin install nexakit-modelo@agent-toolkit
+/plugin install nexakit-sesion@agent-toolkit
+/plugin install nexakit-ahorro@agent-toolkit
+/plugin install nexakit-lecciones@agent-toolkit
 ```
 
-Se escribe *dentro* de Claude Code, no en la terminal. Añade cuatro agentes con modelo y esfuerzo fijos para delegar trabajo sin cambiar `/model`.
+Se escribe *dentro* de Claude Code, no en la terminal, y se aplica al abrir una sesión nueva.
+
+| Plugin | Qué hace |
+| --- | --- |
+| `niveles` | Cuatro subagentes con modelo y esfuerzo fijos (ligero, normal, exigente y alto) para delegar sin cambiar `/model`. |
+| `nexakit-modelo` | Barra sobre el prompt: modelo, esfuerzo, recomendación por mensaje, contexto, límites y subagentes delegados. |
+| `nexakit-sesion` | Avisos al 60 % y al 80 % de contexto, delegar en serie con la cuota alta y qué conservar al compactar. |
+| `nexakit-ahorro` | Recorta la salida larga de los comandos y guarda la completa en `~/.nexakit/salidas/`. |
+| `nexakit-lecciones` | Frena comandos que repiten un fallo y convierte tus correcciones en lecciones guardadas. |
+
+Para actualizarlos después: `/plugin marketplace update agent-toolkit` y reinicia la sesión.
 
 ### 8. Crea los agentes de nivel de Codex
 

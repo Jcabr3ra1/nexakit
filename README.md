@@ -62,6 +62,9 @@ El catálogo incluido contiene **10 skills** con revisión de origen y hashes SH
 
 ## Más herramientas
 
+Los mods de Claude Code se instalan *dentro* de Claude Code: `/plugin marketplace add Jcabr3ra1/nexakit` y luego `/plugin install <nombre>@agent-toolkit` para `niveles`, `nexakit-modelo`, `nexakit-sesion`, `nexakit-ahorro` y `nexakit-lecciones` ([paso 7 de la guía](docs/guias/guia-de-comandos.md#7-instala-los-plugins-y-mods-solo-claude-code)).
+
+
 - **Revisión entre IA en solo lectura.** Aislamiento certificado y procedencia verificada entre Claude Code, Codex y Antigravity. [Flujo de revisión](docs/agentes/coordinacion/revision-entre-ia.md).
 - **Memoria por proyecto.** Contexto separado del código y conectado en solo lectura mediante MCP, con seguimiento de tareas largas y cierre con `/cerrar-memoria`. [Crear una memoria](docs/memoria/project-memory-init.md).
 - **Barra de modelo y uso.** El mod `nexakit-modelo` dibuja sobre el prompt el modelo y el esfuerzo, la recomendación para cada mensaje (sin cambiar nada) y el contexto y los límites con colores.
