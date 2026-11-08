@@ -4,14 +4,14 @@
   "description": "Asistente por pasos de skills verificadas por SHA-256, coordinación entre agentes y memoria por proyecto para Claude Code y Codex.",
   "type": "module",
   "bin": {
-    "nexakit": "./bin/nexakit.js",
-    "agent-toolkit": "./bin/agent-toolkit.js",
-    "project-memory": "./bin/project-memory.js",
-    "agent-task": "./bin/agent-task.js",
-    "agent-toolkit-mcp": "./bin/agent-toolkit-mcp.js",
-    "agent-toolkit-inbox": "./bin/agent-toolkit-inbox.js",
-    "project-memory-mcp": "./bin/project-memory-mcp.js",
-    "agent-toolkit-gemini": "./bin/agent-toolkit-gemini.js"
+    "nexakit": "bin/nexakit.js",
+    "agent-toolkit": "bin/agent-toolkit.js",
+    "project-memory": "bin/project-memory.js",
+    "agent-task": "bin/agent-task.js",
+    "agent-toolkit-mcp": "bin/agent-toolkit-mcp.js",
+    "agent-toolkit-inbox": "bin/agent-toolkit-inbox.js",
+    "project-memory-mcp": "bin/project-memory-mcp.js",
+    "agent-toolkit-gemini": "bin/agent-toolkit-gemini.js"
   },
   "scripts": {
     "test": "node --test --import ./test-support/git-quiet.js \"test/*.test.js\"",
@@ -19,7 +19,8 @@
     "catalog:files": "node scripts/validate-skill-catalog.js --files",
     "catalog:add": "node scripts/add-catalog-skill.js",
     "prepack": "node scripts/prepare-package.js",
-    "test:mod": "claude plugin test plugins/nexakit-modelo"
+    "test:mod": "claude plugin test plugins/nexakit-modelo",
+    "plugins:huellas": "node scripts/plugin-huellas.js"
   },
   "engines": {
     "node": ">=24"

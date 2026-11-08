@@ -186,11 +186,11 @@ localTest("TP real local bin uses only fictitious inputs and preserves memory CL
   const f = await fixture(t);
   const result = await new Promise((resolve, reject) => execFile(process.execPath, [bin, ...f.argv, "--json"], { timeout: 10000, env: { ...process.env, AGENT_TOOLKIT_QUIET_PLATFORM_WARNINGS: "1" } }, (e, stdout, stderr) => e ? reject(e) : resolve({ stdout, stderr })));
   assert.equal(JSON.parse(result.stdout).state, "prepared-draft"); assert.equal(result.stderr, "");
-  const pkg = read("../package.json"), lock = read("../package-lock.json"); assert.equal(pkg.bin["project-memory"], "./bin/project-memory.js"); assert.equal(pkg.bin["agent-task"], "./bin/agent-task.js");
-  assert.equal(lock.packages[""].bin["agent-task"], "./bin/agent-task.js");
-  assert.equal(pkg.bin["agent-toolkit-mcp"], "./bin/agent-toolkit-mcp.js");
-  assert.equal(pkg.bin["project-memory-mcp"], "./bin/project-memory-mcp.js");
-  assert.equal(lock.packages[""].bin["project-memory-mcp"], "./bin/project-memory-mcp.js");
+  const pkg = read("../package.json"), lock = read("../package-lock.json"); assert.equal(pkg.bin["project-memory"], "bin/project-memory.js"); assert.equal(pkg.bin["agent-task"], "bin/agent-task.js");
+  assert.equal(lock.packages[""].bin["agent-task"], "bin/agent-task.js");
+  assert.equal(pkg.bin["agent-toolkit-mcp"], "bin/agent-toolkit-mcp.js");
+  assert.equal(pkg.bin["project-memory-mcp"], "bin/project-memory-mcp.js");
+  assert.equal(lock.packages[""].bin["project-memory-mcp"], "bin/project-memory-mcp.js");
   assert.deepEqual(pkg.dependencies, {
     "@modelcontextprotocol/sdk": "1.30.0",
     "@modelcontextprotocol/server": "^2.4.0",

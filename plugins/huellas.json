@@ -1,0 +1,22 @@
+{
+  "nexakit-ahorro": {
+    "version": "0.1.0",
+    "huella": "ea83cbf9791ac6ae"
+  },
+  "nexakit-lecciones": {
+    "version": "0.1.0",
+    "huella": "8fdcc17d53cf60aa"
+  },
+  "nexakit-modelo": {
+    "version": "0.2.0",
+    "huella": "14dbb66a46b8e96b"
+  },
+  "nexakit-sesion": {
+    "version": "0.2.0",
+    "huella": "ff0e6127be88f471"
+  },
+  "niveles": {
+    "version": "0.2.0",
+    "huella": "7514c1fb92432358"
+  }
+}
