@@ -15,6 +15,11 @@
       "description": "Barra sobre el prompt con modelo, esfuerzo, recomendación por mensaje y uso, sin cambiar nada."
     },
     {
+      "name": "nexakit-ahorro",
+      "source": "./plugins/nexakit-ahorro",
+      "description": "Recorta la salida larga de los comandos antes de que entre al contexto; guarda la completa aparte."
+    },
+    {
       "name": "nexakit-sesion",
       "source": "./plugins/nexakit-sesion",
       "description": "Avisa al 60 % y al 80 % de contexto que conviene abrir una sesión nueva."

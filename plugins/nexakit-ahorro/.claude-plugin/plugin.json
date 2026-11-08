@@ -1,0 +1,1 @@
+{"name": "nexakit-ahorro", "version": "0.1.0", "description": "Recorta la salida larga de los comandos antes de que entre al contexto y guarda la completa en ~/.nexakit/salidas.", "license": "MIT"}
