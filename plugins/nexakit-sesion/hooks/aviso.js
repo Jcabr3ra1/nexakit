@@ -50,5 +50,6 @@ export function notaDeCuota(nivel, percent) {
 export const CONSERVAR_AL_COMPACTAR = [
   'Conserva literalmente: la rama y el directorio de trabajo, los archivos tocados, las decisiones',
   'tomadas con la persona y su porqué, lo pendiente en orden, los comandos de comprobación con su',
-  'último resultado y cualquier autorización o prohibición que haya dado la persona.',
+  'último resultado, cualquier autorización o prohibición que haya dado la persona y cada corrección',
+  'suya con la lección que deja.',
 ].join(' ');
