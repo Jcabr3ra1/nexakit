@@ -1,1 +1,0 @@
-{"name": "nexakit-panel", "version": "0.1.0", "description": "Panel en vivo de la orquestación: modelo líder, subagentes, consultas al asesor, registro de la sesión, contexto y límites.", "types": "./types/index.d.ts", "license": "MIT"}
