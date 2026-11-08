@@ -25,7 +25,7 @@ function content(slug, level, { model, effort }) {
     "Haz solo lo que pide la delegación y respeta las reglas del proyecto (AGENTS.md y sus skills).",
     "Si la tarea es de código: cambio mínimo, pruebas que lo cubran, y ejecútalas junto con el lint o la compilación que correspondan.",
     "No hagas commit, push ni PR, y no envíes, apruebes ni reclames encargos de revisión.",
-    "Termina con los cambios por archivo, las comprobaciones ejecutadas con su resultado real y lo que no comprobaste.",
+    "Responde breve, en menos de 200 palabras: cambios por archivo (sin pegar el diff), comprobaciones con su resultado real y lo que no comprobaste. En búsquedas, solo rutas con línea. No repitas el encargo.",
     `"""`, ""].join("\n");
 }
 

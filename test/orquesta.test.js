@@ -20,6 +20,7 @@ test('el bloque global orquesta por niveles, revisa solo bajo demanda y deja el 
   for (const nivel of ['ligero', 'normal', 'exigente', 'alto']) assert.match(block, new RegExp(nivel, 'u'));
   assert.match(block, /niveles:nivel-<nivel>/u);
   assert.match(block, /nivel_<nivel>/u);
+  assert.match(block, /bifurca la\s+sesión \(fork\)/u);
 });
 
 test('los subagentes de nivel se ofrecen para cualquier tarea, no solo para la revisión', async () => {
@@ -27,10 +28,13 @@ test('los subagentes de nivel se ofrecen para cualquier tarea, no solo para la r
     const md = await leer(`plugins/niveles/agents/nivel-${nivel}.md`);
     assert.doesNotMatch(md, /revision-cruzada|revisión cruzada/u, nivel);
     assert.match(md.match(/^description: (.*)$/mu)[1], /Úsalo (?:para|cuando)/u, nivel);
+    assert.match(md, /menos de 200 palabras/u, nivel);
+    assert.match(md, /solo rutas con línea/u, nivel);
   }
   const { levelAgentPlan } = await import('../src/level-agents.js');
   assert.equal(typeof levelAgentPlan, 'function');
   assert.doesNotMatch(await leer('src/level-agents.js'), /revision-cruzada|revisión cruzada/u);
+  assert.match(await leer('src/level-agents.js'), /menos de 200 palabras/u);
 });
 
 test('revisar es la única skill de revisión y revision-cruzada queda retirada', async () => {

@@ -65,7 +65,8 @@ El catálogo incluido contiene **10 skills** con revisión de origen y hashes SH
 - **Revisión entre IA en solo lectura.** Aislamiento certificado y procedencia verificada entre Claude Code, Codex y Antigravity. [Flujo de revisión](docs/agentes/coordinacion/revision-entre-ia.md).
 - **Memoria por proyecto.** Contexto separado del código y conectado en solo lectura mediante MCP, con seguimiento de tareas largas y cierre con `/cerrar-memoria`. [Crear una memoria](docs/memoria/project-memory-init.md).
 - **Barra de modelo y uso.** El mod `nexakit-modelo` dibuja sobre el prompt el modelo y el esfuerzo, la recomendación para cada mensaje (sin cambiar nada) y el contexto y los límites con colores.
-- **Aviso de sesión.** El mod `nexakit-sesion` avisa al 60 % y al 80 % de contexto cuándo conviene abrir una sesión nueva.
+- **Aviso de sesión.** El mod `nexakit-sesion` avisa al 60 % y al 80 % de contexto cuándo conviene abrir una sesión nueva, pide delegar en serie cuando la cuota de 5 h pasa del 70 % y, al compactar, indica al resumen qué no puede perder (rama, archivos, decisiones, pendientes y comprobaciones).
+- **Ahorro de tokens.** El mod `nexakit-ahorro` recorta la salida larga de los comandos (más de 120 líneas) a su principio, su final y las líneas con fallos, y guarda la completa en `~/.nexakit/salidas/`. Para verla entera, pon `NEXAKIT_SALIDA=completa` delante del comando.
 - **Guía interactiva.** Los tres pasos de inicio, buscador de comandos copiables y resolución de problemas. Abre [la guía HTML](docs/guias/guia-de-comandos.html) en tu navegador.
 - **Catálogo ampliable.** Incorpora skills y comprueba sus archivos con `npm run catalog:validate`. [Añadir una skill](docs/skills/ampliar-catalogo.md).
 
