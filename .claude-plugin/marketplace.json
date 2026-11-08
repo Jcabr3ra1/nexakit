@@ -20,6 +20,11 @@
       "description": "Recorta la salida larga de los comandos antes de que entre al contexto; guarda la completa aparte."
     },
     {
+      "name": "nexakit-lecciones",
+      "source": "./plugins/nexakit-lecciones",
+      "description": "Frena comandos que repiten un fallo, avisa del error repetido y pide guardar tus correcciones."
+    },
+    {
       "name": "nexakit-sesion",
       "source": "./plugins/nexakit-sesion",
       "description": "Avisa al 60 % y al 80 % de contexto que conviene abrir una sesión nueva."

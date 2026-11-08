@@ -16,7 +16,7 @@ test('la cuota de 5 h decide si conviene delegar en serie', () => {
 });
 
 test('al compactar se pide conservar lo necesario para seguir la tarea', () => {
-  for (const clave of ['rama', 'archivos', 'decisiones', 'pendiente', 'comprobaci']) assert.match(CONSERVAR_AL_COMPACTAR, new RegExp(clave, 'u'));
+  for (const clave of ['rama', 'archivos', 'decisiones', 'pendiente', 'comprobaci', 'corrección']) assert.match(CONSERVAR_AL_COMPACTAR, new RegExp(clave, 'u'));
 });
 
 test('el mod añade la nota de cuota una vez por nivel y orienta la compactación de la sesión principal', async () => {
