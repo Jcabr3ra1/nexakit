@@ -1,12 +1,38 @@
-import { modelStatus } from './status.js';
-async function redraw($, observed, recommendation) {
-  const model = await $.session.model();
-  $.ui.status(modelStatus(model, observed?.model === model ? observed.effort : null, recommendation));
+import { familia, filasDeAgentes, segmentosDeBarra } from './barra.js';
+import { recomendarPorTexto } from './recomendar.js';
+
+async function refrescar($, estado, { usage = false } = {}) {
+  try {
+    estado.model = await $.session.model();
+    // El esfuerzo se observó en un modelo concreto: si cambió de modelo, ya no se sabe.
+    if (familia(estado.model) !== familia(estado.modeloDelEsfuerzo)) estado.effort = null;
+    if (usage) estado.usage = await $.session.usage();
+  } catch {
+    // Medir nunca debe romper el turno.
+  }
+  $.ui.invalidate('ui.render');
 }
 
+// Completa los subagentes vistos con lo que dice el motor: tipo, encargo y estado.
+async function sincronizarAgentes($, agentes) {
+  try {
+    for (const info of await $.agent.list()) {
+      const visto = agentes.get(info.id);
+      if (visto) Object.assign(visto, { type: info.type, description: info.description, status: info.status });
+    }
+  } catch {
+    // Sin lista, se conserva lo último conocido.
+  }
+  $.ui.invalidate('ui.render');
+}
+
+// Una sola barra sobre el prompt con modelo, esfuerzo, recomendación y uso. Solo muestra:
+// nunca cambia el modelo ni el esfuerzo de la sesión.
 export function register(on) {
-  let recommendation = null;
-  let observed = null;
+  const estado = { model: null, effort: null, modeloDelEsfuerzo: null, recommendation: null, usage: null };
+  // Subagentes de esta petición, por id, con el modelo y el esfuerzo que de verdad usaron.
+  const agentes = new Map();
+
   on('session.start', async ($, e, next) => {
     await $.tool.register({
       name: 'nexakit_recomendacion',
@@ -18,31 +44,61 @@ export function register(on) {
         additionalProperties: false,
       },
     });
-    await redraw($, observed, recommendation);
+    await refrescar($, estado, { usage: true });
     return next(e);
   });
+
   on('tool.call', { tool: 'mcp__nexakit-modelo__nexakit_recomendacion' }, async ($, e) => {
-    recommendation = { model: e.model, effort: e.effort, reason: e.reason };
-    await redraw($, observed, recommendation);
+    estado.recommendation = { model: e.model, effort: e.effort, reason: e.reason };
+    await refrescar($, estado);
     return { result: 'Recomendación mostrada; no se cambió el modelo ni el esfuerzo.' };
   });
+
+  on('prompt.submit', async ($, e, next) => {
+    estado.recommendation = recomendarPorTexto(e.text, estado.recommendation);
+    for (const [id, a] of agentes) if (['completed', 'idle', 'failed', 'killed'].includes(a.status)) agentes.delete(id);
+    $.ui.invalidate('ui.render');
+    return next(e);
+  });
+
   on('turn.step', async function* ($, e, next) {
     if (!e.agentId) {
-      observed = { model: e.model, effort: e.effort ?? null };
-      await redraw($, observed, recommendation);
+      // El último esfuerzo visto se conserva entre turnos; el siguiente paso lo corrige si cambió.
+      estado.model = e.model;
+      estado.effort = e.effort ?? null;
+      estado.modeloDelEsfuerzo = e.model;
+      $.ui.invalidate('ui.render');
+    } else {
+      const nuevo = !agentes.has(e.agentId);
+      const a = agentes.get(e.agentId) ?? { status: 'running' };
+      agentes.set(e.agentId, Object.assign(a, { model: e.model, effort: e.effort ?? null }));
+      if (nuevo) await sincronizarAgentes($, agentes);
     }
     yield* next(e);
   });
+
   on('turn.complete', async ($, e, next) => {
-    // Effort can change between turns; never present the previous request as current.
-    observed = null;
-    await redraw($, observed, recommendation);
+    if (!e.agentId) {
+      await refrescar($, estado, { usage: true });
+      if (agentes.size > 0) await sincronizarAgentes($, agentes);
+    }
     return next(e);
   });
+
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.props?.hasSurvey || !estado.model) return next(e);
+    const { Box, Text } = $.ui.resolve(e);
+    const tramos = segmentosDeBarra(estado).map((s, i) =>
+      h(Text, { key: String(i), color: s.color, dimColor: s.dim, bold: s.bold }, s.text));
+    const linea = (partes, clave) => h(Box, { key: clave, flexDirection: 'row' },
+      ...partes.map((s, i) => h(Text, { key: String(i), color: s.color, dimColor: s.dim, bold: s.bold }, s.text)));
+    const filas = filasDeAgentes([...agentes.values()]).map((f, i) => linea(f, `agente-${i}`));
+    return h(Box, { flexDirection: 'column' }, h(Box, { key: 'principal', flexDirection: 'row' }, ...tramos), ...filas);
+  });
+
   on('session.end', async ($, e, next) => {
-    recommendation = null;
-    observed = null;
-    $.ui.status(undefined);
+    agentes.clear();
+    Object.assign(estado, { model: null, effort: null, modeloDelEsfuerzo: null, recommendation: null, usage: null });
     return next(e);
   });
 }

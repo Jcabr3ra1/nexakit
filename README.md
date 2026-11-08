@@ -21,7 +21,8 @@ npx nexakit
 1. **Requisitos.** Instala **Node.js 24 o superior**, Git y al menos uno de los tres clientes de IA (**Claude Code**, **Codex** o **Antigravity CLI**).
 2. **Ejecuta `npx nexakit` en tu proyecto.** Responde tres preguntas breves (skills para el proyecto, memoria en Obsidian e IA donde dejarlo listo) y confirma una sola vez. Con `npx nexakit --si` aplica directamente las opciones sugeridas.
 3. **Reinicia tu agente y trabaja con normalidad.** No necesitas ningún comando especial para empezar a programar:
-   - **Revisión automática:** al terminar una tarea con cambios de código, la IA pide automáticamente una revisión en solo lectura a otra IA. La primera vez pregunta `«¿A dónde mando la revisión?»` marcando la recomendada; si dices `«sin revisión»`, la omite, y con `/revisar` (o `$revisar`) pides una revisión adicional cuando quieras.
+   - **Orquesta por niveles:** la sesión principal entiende, planifica e integra, y delega la ejecución en subagentes de nivel (ligero, normal, exigente y alto) con su propio modelo y esfuerzo. El modo tutor, en el que tú escribes el código, solo se activa si lo pides.
+   - **Revisión por otra IA, solo cuando la pides:** escribe `/revisar` (o `$revisar`) o di «que lo revise <IA>». La primera vez pregunta `«¿A dónde mando la revisión?»` marcando la recomendada; nunca se lanza sola.
    - **Seguimiento automático y cierre:** si una tarea larga queda a medias, escribe o actualiza la nota de seguimiento en la bóveda con `project-handoff`, y al fusionar el cambio se cierra con `/cerrar-memoria` (o `$cerrar-memoria`).
 
 ## Comandos
@@ -63,7 +64,8 @@ El catálogo incluido contiene **10 skills** con revisión de origen y hashes SH
 
 - **Revisión entre IA en solo lectura.** Aislamiento certificado y procedencia verificada entre Claude Code, Codex y Antigravity. [Flujo de revisión](docs/agentes/coordinacion/revision-entre-ia.md).
 - **Memoria por proyecto.** Contexto separado del código y conectado en solo lectura mediante MCP, con seguimiento de tareas largas y cierre con `/cerrar-memoria`. [Crear una memoria](docs/memoria/project-memory-init.md).
-- **Aviso de sesión.** El mod `nexakit-sesion` muestra contexto y límites en la línea de estado de Claude Code y avisa cuándo conviene abrir una sesión nueva.
+- **Barra de modelo y uso.** El mod `nexakit-modelo` dibuja sobre el prompt el modelo y el esfuerzo, la recomendación para cada mensaje (sin cambiar nada) y el contexto y los límites con colores.
+- **Aviso de sesión.** El mod `nexakit-sesion` avisa al 60 % y al 80 % de contexto cuándo conviene abrir una sesión nueva.
 - **Guía interactiva.** Los tres pasos de inicio, buscador de comandos copiables y resolución de problemas. Abre [la guía HTML](docs/guias/guia-de-comandos.html) en tu navegador.
 - **Catálogo ampliable.** Incorpora skills y comprueba sus archivos con `npm run catalog:validate`. [Añadir una skill](docs/skills/ampliar-catalogo.md).
 

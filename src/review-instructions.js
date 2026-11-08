@@ -1,4 +1,3 @@
-import { RECOMMENDED_REVIEWERS } from './review-policy.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
@@ -10,36 +9,25 @@ const BODY = `${START}
 Para programar sigue el proceso de Superpowers (obligatorio): contexto y
 memoria, diseño y plan proporcionales, rama, pruebas, implementación,
 verificación y cierre con memoria. No hace falta un comando para empezar.
-Sobre sus skills mandan: modo tutor (la persona escribe el código, un paso
-verificable cada vez); no borrar código existente sin acuerdo aunque el TDD lo
-pida; commit, push, PR y memoria solo con autorización. Reutiliza un diseño o
-plan ya aprobado. Antes de un PR o de la revisión cruzada, quality-gate.
+Sobre sus skills mandan: no borrar código existente sin acuerdo aunque el TDD
+lo pida; commit, push, PR y memoria solo con autorización. Reutiliza un diseño
+o plan ya aprobado. Antes de un PR, quality-gate. Modo tutor (la persona
+escribe el código, un paso verificable cada vez) solo si lo pide.
 
-Al terminar una tarea con cambios de código, pide automáticamente UNA revisión
-a otra IA, corrige los hallazgos verificables y resume el resultado. Máximo dos
-rondas por tarea; si queda algo grave, avisa. Solo documentos no dispara revisión.
-Si el usuario dice «sin revisión», omítela. /revisar pide una revisión adicional.
-No uses hooks ni subagentes para automatizarlo.
+Orquesta: tú entiendes, planificas, decides e integras; delega la ejecución en
+subagentes de nivel (Claude: niveles:nivel-<nivel>; Codex: nivel_<nivel>):
+ligero para comandos, búsquedas y cambios mecánicos; normal para implementar
+con diseño claro; exigente para pruebas, casos borde o un fallo acotado; alto
+para un fallo sutil, seguridad o lo que exigente no resolvió. Trabaja tú solo
+lo que se hace en uno o dos pasos y la conversación con la persona. Da a cada
+subagente un encargo autocontenido (objetivo, archivos, criterio de hecho),
+lanza en paralelo los independientes y comprueba su informe antes de darlo
+por bueno. Usa elegir-modelo para nombres reales; nunca cambies el modelo de
+la sesión por tu cuenta. Sin subagentes de nivel, trabaja tú.
 
-Lee la skill revision-cruzada para el encargo y la ejecución de solo lectura.
-Usa elegir-modelo para nombres reales y esfuerzos. Nunca cambies solo el modelo.
-Usa la orden estable ~/.nexakit/nexakit (Windows: nexakit.cmd en esa carpeta).
-Un fallo del comando o informe vacío no significa «sin hallazgos».
-
-La IA revisora se elige en la terminal durante la sesión, nunca en el arranque
-ni en answers. Excluye siempre a la IA que programa. Antes de cada revisión ejecuta
-\`nexakit revision --disponibles --principal <IA que programa>\` (claude,
-codex o antigravity), sin llamadas a modelos. Ofrece las otras IA instaladas
-con certificación «sí» o «pendiente» (avisa si la primera vez se certifican);
-nunca las «no». Recomendadas: Claude→${RECOMMENDED_REVIEWERS.claude},
-Codex→${RECOMMENDED_REVIEWERS.codex} y Antigravity→${RECOMMENDED_REVIEWERS.antigravity}.
-Primera revisión con varias opciones: «¿A dónde mando la revisión?» marcando
-la recomendada (Claude: selector; Codex/Antigravity: pregunta normal). Una
-opción: úsala sin preguntar; ninguna: avisa que no hay revisión; si falta
-certificar un perfil, infórmalo. Después conserva la elección en la sesión y
-anuncia «Revisando con <IA>…». «que lo revise <IA>» cambia la elección. Si
-desaparece, usa la única alternativa o pregunta entre las restantes. No persistas
-la elección.
+La revisión por otra IA es opcional: solo con /revisar o si la persona lo pide
+(«que lo revise <IA>»); sigue la skill revisar. Usa la orden estable
+~/.nexakit/nexakit (Windows: nexakit.cmd en esa carpeta).
 
 Si una tarea larga queda a medias —pausa, cambio de IA, bloqueo o cierre— escribe o actualiza la nota de seguimiento con project-handoff; recomienda sesión nueva en los casos de project-handoff, y cierra el seguimiento al integrar con cerrar-memoria.
 ${END}`;

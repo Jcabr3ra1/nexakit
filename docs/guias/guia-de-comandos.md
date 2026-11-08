@@ -202,7 +202,6 @@ El total sale de cinco criterios: riesgo, tamaño, ambigüedad, contexto y tipo 
 | `estado` | Tabla de las revisiones abiertas, el encargo pendiente y el último veredicto. Solo lectura. |
 | `gemini <lo que necesitas>` | Usa Gemini para explicar, investigar, analizar archivos o generar una imagen. `investigar` e `imagen` son atajos. Requiere `agy`. |
 | `cerrar-memoria` | Tras fusionar un PR, pone al día la memoria de Obsidian del proyecto. Solo si el proyecto tiene `project-memory.json`. |
-| `revision-cruzada` | Reúne todas las reglas de `programar` y `revisar`. Casi nunca la escribes tú. |
 | `elegir-modelo` | Recomienda y comprueba el modelo y el esfuerzo de Claude Code, Codex y Antigravity con los nombres reales de tu equipo. Se activa sola al empezar una tarea o al preguntar qué modelo usar. |
 | `quality-gate` | Puerta de nexakit antes de un PR o de la revisión cruzada: requisitos uno por uno, seguridad y diff, sobre la evidencia fresca de Superpowers. |
 | `superpowers:brainstorming`, `writing-plans`, `systematic-debugging`, `test-driven-development`… | Proceso de trabajo de Superpowers, obligatorio: `npx nexakit` lo instala en cada IA. Se activan solas; ver [Superpowers en nexakit](../skills/superpowers-integration.md). |

@@ -31,7 +31,7 @@ plugins de cada IA y añade encima las reglas y la puerta de calidad propias.
 | Programar con pruebas | `test-driven-development` | Superpowers |
 | Afirmar que algo funciona | `verification-before-completion` | Superpowers |
 | Puerta antes de PR o revisión | [`quality-gate`](../../skills/quality-gate/SKILL.md) | nexakit: requisitos uno por uno, seguridad, diff delegado y dictamen, sobre la evidencia de Superpowers |
-| Revisión por otra IA | [`revisar`](../../skills/revisar/SKILL.md), [`revision-cruzada`](../../skills/revision-cruzada/SKILL.md) y plugin `niveles` | nexakit |
+| Revisión por otra IA | [`revisar`](../../skills/revisar/SKILL.md) (solo bajo demanda) y plugin `niveles` | nexakit |
 | Cierre y traspaso | [`cerrar-memoria`](../../skills/cerrar-memoria/SKILL.md), [`project-handoff`](../../skills/project-handoff/SKILL.md) | nexakit |
 
 En Claude Code y Codex las skills se llaman con el prefijo del plugin (`superpowers:brainstorming`); en Antigravity,
