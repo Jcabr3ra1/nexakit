@@ -1,1 +1,1 @@
-{"name":"nexakit-modelo","version":"0.1.0","description":"Muestra modelo y esfuerzo observados frente a una recomendación, sin cambiarlos."}
+{"name":"nexakit-modelo","version":"0.1.0","description":"Barra sobre el prompt con modelo, esfuerzo, recomendación por mensaje y uso de contexto y límites, sin cambiar nada."}

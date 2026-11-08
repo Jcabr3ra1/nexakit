@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing';
-import { avisoDeContexto, textoDeEstado, mensajeDeAviso } from '../hooks/aviso.js';
+import { avisoDeContexto, mensajeDeAviso } from '../hooks/aviso.js';
 
 describe('nexakit-sesion · lógica', () => {
   test('los umbrales avisan al 60 % y al 80 %, y nunca sin dato', () => {
@@ -13,19 +13,6 @@ describe('nexakit-sesion · lógica', () => {
     expect(avisoDeContexto(Number.NaN)).toBe(0);
   });
 
-  test('la línea de estado junta contexto y límites de Claude, y omite lo que no se conoce', () => {
-    const usage = {
-      context: { window: 1000000, percent: 41.6 },
-      rateLimits: [
-        { kind: 'five_hour', percentUsed: 88 },
-        { kind: 'seven_day', percentUsed: 14.5 },
-        { kind: 'spend_limit', percentUsed: 3 },
-      ],
-    };
-    expect(textoDeEstado(usage)).toBe('contexto 42 % · 5 h 88 % · semana 15 %');
-    expect(textoDeEstado({ context: { window: 1000 }, rateLimits: [] })).toBeUndefined();
-    expect(textoDeEstado({ context: { window: 1000, percent: 5 }, rateLimits: [] })).toBe('contexto 5 %');
-  });
 
   test('cada aviso dice el porcentaje, propone el traspaso y no promete cerrar nada', () => {
     const uno = mensajeDeAviso(1, 62.2);
@@ -85,10 +72,10 @@ describe('nexakit-sesion · en la sesión', () => {
     await terminar(); // 20 -> tras compactar o limpiar
     await terminar(); // 70 -> vuelve a avisar
     expect(avisos).toHaveLength(3);
-    expect(estados.at(-1)).toBe('contexto 70 %');
+    expect(estados.filter((texto) => texto !== undefined)).toHaveLength(0);
   });
 
-  test('al terminar la sesión limpia su línea de estado', async ($, on) => {
+  test('al terminar la sesión limpia la línea de estado de versiones anteriores', async ($, on) => {
     const { estados } = await montar($, on, [10]);
     await $.session.end({ reason: 'exit' });
     expect(estados.at(-1)).toBeUndefined();

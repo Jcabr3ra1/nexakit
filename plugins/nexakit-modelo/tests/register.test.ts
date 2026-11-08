@@ -16,6 +16,6 @@ describe('nexakit-modelo API', () => {
     });
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/test' });
     expect(tools).toContain('nexakit_recomendacion');
-    expect(statuses.some((text) => text.includes('esfuerzo no informado'))).toBe(true);
+    expect(statuses).toHaveLength(0);
   });
 });

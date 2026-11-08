@@ -13,17 +13,6 @@ export function avisoDeContexto(percent) {
   return 0;
 }
 
-// Línea de estado: solo lo que se conoce; undefined si no hay nada que mostrar.
-export function textoDeEstado(usage) {
-  const partes = [];
-  if (esNumero(usage?.context?.percent)) partes.push(`contexto ${entero(usage.context.percent)} %`);
-  for (const limite of usage?.rateLimits ?? []) {
-    if (!esNumero(limite?.percentUsed)) continue;
-    if (limite.kind === 'five_hour') partes.push(`5 h ${entero(limite.percentUsed)} %`);
-    if (limite.kind === 'seven_day') partes.push(`semana ${entero(limite.percentUsed)} %`);
-  }
-  return partes.length > 0 ? partes.join(' · ') : undefined;
-}
 
 // El aviso solo recomienda: nunca promete ni hace el cierre por la persona.
 export function mensajeDeAviso(nivel, percent) {
