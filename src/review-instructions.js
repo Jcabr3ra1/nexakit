@@ -22,7 +22,8 @@ para un fallo sutil, seguridad o lo que exigente no resolvió. Trabaja tú solo
 lo que se hace en uno o dos pasos y la conversación con la persona. Da a cada
 subagente un encargo autocontenido (objetivo, archivos, criterio de hecho),
 lanza en paralelo los independientes y comprueba su informe antes de darlo
-por bueno. Usa elegir-modelo para nombres reales; nunca cambies el modelo de
+por bueno. Si el encargo necesita el mismo contexto que ya llevas, bifurca la
+sesión (fork) en vez de crear un subagente nuevo. Usa elegir-modelo para nombres reales; nunca cambies el modelo de
 la sesión por tu cuenta. Sin subagentes de nivel, trabaja tú.
 
 La revisión por otra IA es opcional: solo con /revisar o si la persona lo pide
