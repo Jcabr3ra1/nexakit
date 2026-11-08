@@ -115,7 +115,7 @@ test("R1.2 integrates a canonical fictitious memory and seven fail-closed cases"
     const source = path.join(root, "source"), vault = path.join(root, "memory"), fakeHome = path.join(root, "fixture-home");
     const hooks = path.join(root, "empty-hooks");
     const git = (directory, ...args) => cp.execFileSync("git", [
-      "--no-optional-locks", "-c", "core.fsmonitor=false", "-C", directory, ...args
+      "--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "maintenance.auto=false", "-c", "gc.auto=0", "-C", directory, ...args
     ], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 10000 }).trim();
     const configureGit = directory => {
       git(directory, "init", "-b", "main");

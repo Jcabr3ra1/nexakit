@@ -1,12 +1,12 @@
 # Guía de NexaKit
 
-NexaKit conecta Claude Code y Codex: una terminal programa, la otra revisa y tú apruebas cada paso. Esta referencia parte de cero, justo después de clonar el repositorio. Para seguir el inicio, crear una memoria y abrirla en Obsidian, usa la [guía interactiva con comandos copiables](guia-de-comandos.html); abre ese archivo HTML en tu navegador.
+NexaKit prepara Claude Code, Codex y Antigravity para trabajar contigo: la sesión principal entiende y decide, delega la ejecución en subagentes de nivel y otra IA revisa solo cuando tú lo pides. Esta referencia parte de cero, justo después de clonar el repositorio. Para seguir el inicio, crear una memoria y abrirla en Obsidian, usa la [guía interactiva con comandos copiables](guia-de-comandos.html); abre ese archivo HTML en tu navegador.
 
 | Para | Escribe | Dónde |
 | --- | --- | --- |
-| Programar | `/programar <tarea>` | en Claude (o `$programar` en Codex) |
-| Revisar | `$revisar` | en Codex (o `/revisar` en Claude) |
-| Ver cómo va | `/estado` en Claude, `$estado` en Codex | en el chat del agente |
+| Programar | Pide la tarea con tus palabras | en tu IA, sin comando especial |
+| Pedir una revisión | `/revisar` o «que lo revise <IA>» | en Claude o Antigravity (`$revisar` en Codex) |
+| Retomar una tarea larga | Pide el traspaso (`project-handoff`) | antes de abrir una sesión nueva |
 | Cerrar el PR | `/cerrar-memoria` | si el proyecto tiene memoria |
 
 En Claude Code las skills empiezan con `/`. En Codex, con `$`. Los comandos de terminal se ejecutan desde la carpeta donde clonaste el repositorio.
@@ -139,28 +139,25 @@ Para actualizar más adelante: `git pull --ff-only` y `npm ci --ignore-scripts` 
 
 ## Primer uso
 
-1. **Tú:** Abre dos terminales en la carpeta de tu proyecto. Una con `claude` y otra con `codex`. Debe ser la **misma ruta** en las dos, y es el proyecto en el que vas a trabajar, no Agent Toolkit.
-2. **Codex:** Escribe `$revisar`. Registra su sesión y dice «Registrada; me avisarán». Termina su turno y no gasta tokens esperando. Si no encuentra su sesión, pide el id: en Codex, `/status`.
-3. **Claude:** Escribe `/programar <la tarea>`. Claude puntúa la tarea y elige un nivel (tabla de abajo).
-4. **Tú:** Confirmas el nivel, solo si es Exigente o más. Con Ligero o Normal, Claude sigue solo.
-5. **Claude:** Programa, prueba y se revisa a sí mismo. Delega el código al agente del nivel cuando hace falta.
-6. **Tú:** Apruebas el encargo para Codex. Claude te lo muestra con preguntas, archivos y criterio de aprobación. Nada se envía sin tu OK.
-7. **Codex:** Revisa en solo lectura y entrega un informe. Claude le avisa con `avisar` y Codex lo recibe en su misma sesión.
-8. **Claude:** Verifica cada hallazgo y corrige lo que se sostenga. Máximo dos rondas por cambio.
-9. **Tú:** Pides el commit y el PR. Tú decides el merge. Si el proyecto tiene memoria de Obsidian, `/cerrar-memoria` la pone al día.
+1. **Tú:** Abre tu IA en la carpeta del proyecto en el que vas a trabajar (no en NexaKit) y pide la tarea con tus palabras.
+2. **La sesión principal:** Entiende la tarea, la planifica y decide qué hace ella y qué delega. Lo que se resuelve en uno o dos pasos lo hace ella misma.
+3. **Los subagentes de nivel:** Ejecutan lo delegado con su propio modelo y esfuerzo (tabla de abajo) y devuelven un informe breve. En Claude Code la barra de `nexakit-modelo` muestra cada uno con el modelo que usó.
+4. **La sesión principal:** Comprueba cada informe, integra el resultado y pasa las pruebas antes de darlo por terminado.
+5. **Tú, si quieres:** Escribe `/revisar` para que otra IA lo revise en solo lectura. La primera vez pregunta «¿A dónde mando la revisión?». Nunca se lanza sola.
+6. **Tú:** Pides el commit y el PR, y decides el merge. Si el proyecto tiene memoria de Obsidian, `/cerrar-memoria` la pone al día.
 
-Si Claude es el revisor, en su terminal escribe `/revisar`: espera en segundo plano sin gastar tokens y se activa cuando llega el encargo.
+El modo tutor, en el que tú escribes el código y la IA te guía paso a paso, solo se activa si lo pides.
 
 ### Qué nivel se elige
 
-| Total | Nivel | Claude | Codex |
+| Nivel | Claude | Codex | Para qué |
 | --- | --- | --- | --- |
-| 0–2 | Ligero | `haiku · low` | `gpt-6-luna · low` |
-| 3–4 | Normal | `sonnet · medium` | `gpt-6.1-sol · medium` |
-| 5–6 | Exigente | `sonnet · high` | `gpt-6.1-sol · high` |
-| 7–10 | Alto | `opus · high` | `gpt-6-astra · high` |
+| Ligero | `haiku · low` | `gpt-6-luna · low` | Comandos, búsquedas, lecturas y cambios mecánicos |
+| Normal | `sonnet · medium` | `gpt-6.1-sol · medium` | Implementar con un diseño claro |
+| Exigente | `sonnet · high` | `gpt-6.1-sol · high` | Pruebas, casos borde o un fallo acotado |
+| Alto | `opus · high` | `gpt-6-astra · high` | Un fallo sutil, seguridad o lo que Exigente no resolvió |
 
-El total sale de cinco criterios: riesgo, tamaño, ambigüedad, contexto y tipo de trabajo. Riesgo alto (seguridad, datos, dinero, producción) fija un mínimo de Exigente. Se sube de nivel solo si la corrección falló. Los nombres de Codex salen de `modelos` y pueden cambiar.
+La sesión principal elige el nivel según el tipo de trabajo y sube de nivel solo si la corrección falló. Los nombres de Codex salen de `modelos` y pueden cambiar.
 
 ## Comandos de terminal
 
@@ -211,13 +208,14 @@ El total sale de cinco criterios: riesgo, tamaño, ambigüedad, contexto y tipo 
 
 | Skill | Para qué |
 | --- | --- |
-| `programar <tarea>` | Esta terminal programa y pide revisión a la otra. |
-| `revisar` | Esta terminal es la revisora. |
-| `estado` | Tabla de las revisiones abiertas, el encargo pendiente y el último veredicto. Solo lectura. |
+| `revisar` | Pide una revisión de tus cambios a otra IA. Solo cuando escribes `/revisar` (`$revisar` en Codex) o pides «que lo revise <IA>». |
+| `project-handoff` | Escribe la nota de seguimiento para retomar una tarea larga en otra sesión o con otra IA. |
 | `gemini <lo que necesitas>` | Usa Gemini para explicar, investigar, analizar archivos o generar una imagen. `investigar` e `imagen` son atajos. Requiere `agy`. |
 | `cerrar-memoria` | Tras fusionar un PR, pone al día la memoria de Obsidian del proyecto. Solo si el proyecto tiene `project-memory.json`. |
 | `elegir-modelo` | Recomienda y comprueba el modelo y el esfuerzo de Claude Code, Codex y Antigravity con los nombres reales de tu equipo. Se activa sola al empezar una tarea o al preguntar qué modelo usar. |
-| `quality-gate` | Puerta de nexakit antes de un PR o de la revisión cruzada: requisitos uno por uno, seguridad y diff, sobre la evidencia fresca de Superpowers. |
+| `quality-gate` | Puerta de nexakit antes de un PR o de una revisión: requisitos uno por uno, seguridad y diff, sobre la evidencia fresca de Superpowers. |
+| `decision-records` | Redacta un registro de decisión con contexto, alternativas y consecuencias. |
+| `revisar-skill` | Busca, revisa sin ejecutar y, con tu aprobación, añade skills externas al catálogo. |
 | `superpowers:brainstorming`, `writing-plans`, `systematic-debugging`, `test-driven-development`… | Proceso de trabajo de Superpowers, obligatorio: `npx nexakit` lo instala en cada IA. Se activan solas; ver [Superpowers en nexakit](../skills/superpowers-integration.md). |
 | `differential-review, frontend-design, mcp-builder, web-design-guidelines, ordenar-proyecto` | Skills recomendadas que también instala `setup`: revisión de seguridad de un cambio, diseño de interfaces, crear servidores MCP, pautas web y ordenar archivos. |
 
