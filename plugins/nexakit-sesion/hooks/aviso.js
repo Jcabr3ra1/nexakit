@@ -25,3 +25,30 @@ export function mensajeDeAviso(nivel, percent) {
   }
   return undefined;
 }
+
+// Cuota de 5 horas: a partir de aquí los subagentes en paralelo agotan el límite antes de terminar.
+export const CUOTA_SERIE = 70;
+export const CUOTA_CRITICA = 90;
+
+export function nivelDeCuota(usage) {
+  const cinco = (usage?.rateLimits ?? []).find((l) => l?.kind === 'five_hour')?.percentUsed;
+  if (!esNumero(cinco)) return 0;
+  if (cinco >= CUOTA_CRITICA) return 2;
+  if (cinco >= CUOTA_SERIE) return 1;
+  return 0;
+}
+
+// Nota para el modelo, no para la persona: va al final del mensaje solo al cambiar de nivel.
+export function notaDeCuota(nivel, percent) {
+  const p = entero(percent);
+  if (nivel === 1) return `[nexakit: cuota de 5 h al ${p} %. Lanza los subagentes en serie, no en paralelo.]`;
+  if (nivel === 2) return `[nexakit: cuota de 5 h al ${p} %. Subagentes solo en serie y en los niveles ligero o normal; avisa antes de algo largo.]`;
+  return undefined;
+}
+
+// Lo que el resumen de una compactación debe conservar para poder seguir la tarea sin releer todo.
+export const CONSERVAR_AL_COMPACTAR = [
+  'Conserva literalmente: la rama y el directorio de trabajo, los archivos tocados, las decisiones',
+  'tomadas con la persona y su porqué, lo pendiente en orden, los comandos de comprobación con su',
+  'último resultado y cualquier autorización o prohibición que haya dado la persona.',
+].join(' ');
