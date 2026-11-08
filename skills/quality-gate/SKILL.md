@@ -21,7 +21,7 @@ Evidencia antes de afirmaciones, siempre. Decide si una entrega está lista, nec
 
 Superpowers es obligatorio en nexakit: `superpowers:verification-before-completion` pone la regla de base (identificar el comando que demuestra cada afirmación, ejecutarlo completo sobre el estado actual y leer su salida real antes de afirmar nada). Esta puerta la da por aplicada y reutiliza las comprobaciones ya ejecutadas sobre el mismo árbol de trabajo; si hubo cualquier edición posterior, vuelve a verificar. Lo que añade nexakit:
 
-- **Rol de solo lectura:** como revisor en `revision-cruzada`, inspecciona el código y declara expresamente qué comandos **no** ejecutaste.
+- **Rol de solo lectura:** como revisor pedido con `revisar`, inspecciona el código y declara expresamente qué comandos **no** ejecutaste.
 - **Requisitos y delegaciones:** revisa cada criterio de aceptación uno por uno. Si delegaste código a un subagente o recibiste una entrega externa, inspecciona tú mismo `git status` y `git diff`; el resumen de otro agente es una declaración, no una prueba.
 - **Límites declarados:** separa lo comprobado de lo pendiente o fuera de cobertura (por ejemplo, validar un archivo `SKILL.md` acredita su formato en disco, no que un cliente abierto ya lo haya cargado).
 

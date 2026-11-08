@@ -50,7 +50,7 @@ export function getToolkitCommandsGuide({ clients = {} } = {}) {
       codex: '$revisar',
       antigravity: '/revisar',
       stage: '4. Revisión par',
-      description: 'Pide una revisión adicional a otra IA desde esta terminal.',
+      description: 'Pide una revisión a otra IA desde esta terminal; solo ocurre cuando tú la pides.',
     },
     {
       id: 'cerrar-memoria',

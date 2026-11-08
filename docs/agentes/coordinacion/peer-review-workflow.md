@@ -159,7 +159,7 @@ registró `haiku`. El esfuerzo del archivo no se verificó de la misma forma.
 
 ## Uso diario con la skill
 
-La skill `skills/revision-cruzada` reduce el uso diario a un comando por
+La skill `skills/revisar` reduce el uso diario a un comando por
 terminal y aprueba cada encargo por separado, con la recomendación delante;
 solo usa `autoReviews` si el usuario lo pide. Instálala en `~/.claude/skills/`
 y `~/.codex/skills/`:
@@ -216,9 +216,9 @@ se pierde nada aunque otro proceso cambie el archivo a la vez. Si
 nombra el agente (por ejemplo, `nivel_alto`); `xhigh` se pide por llamada solo si
 `high` ya falló.
 
-`programar` y `revisar` son accesos directos a `revision-cruzada`, que sigue
-disponible con `iniciar` y `atender` y contiene todas las reglas. Instala las
-tres carpetas de skills.
+`revisar` contiene todas las reglas de la revisión, que solo ocurre cuando la
+persona la pide. Los subagentes de `niveles` sirven para cualquier tarea
+delegada, no solo para revisar.
 
 ## Esperar sin consumir el modelo
 

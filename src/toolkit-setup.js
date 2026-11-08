@@ -40,8 +40,8 @@ const SKILL_HOMES = {
 const MCP_CLIENTS = ['codex', 'claude'];
 // Skills nexakit no longer ships. Links it created are removed; anything else with the name is reported, never
 // touched. The last three are now covered by Superpowers (brainstorming/writing-plans, systematic-debugging and
-// test-driven-development), which is required.
-export const RETIRED_SKILLS = Object.freeze(['programar', 'estado', 'spec-driven-development', 'depurar', 'desarrollo-con-pruebas']);
+// test-driven-development), which is required. revision-cruzada merged into revisar when review became on demand.
+export const RETIRED_SKILLS = Object.freeze(['programar', 'estado', 'spec-driven-development', 'depurar', 'desarrollo-con-pruebas', 'revision-cruzada']);
 const MCP_SUFFIX = 'bin/agent-toolkit-mcp.js';
 const COMMANDS = { codex: 'codex', claude: 'claude', antigravity: 'agy' };
 export const globalSkillTarget = (home, client, name) => path.join(home, ...SKILL_HOMES[client], name);

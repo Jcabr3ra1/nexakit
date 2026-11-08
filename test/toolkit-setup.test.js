@@ -434,7 +434,7 @@ test('doctor reads Superpowers from each agent found, through the given runner',
 });
 test('the skills now covered by Superpowers are retired like the old commands', async t => {
   const f = await fixture(t); const { setupToolkit, RETIRED_SKILLS } = await import(moduleUrl);
-  assert.deepEqual(RETIRED_SKILLS.slice(2), ['spec-driven-development', 'depurar', 'desarrollo-con-pruebas']);
+  assert.deepEqual(RETIRED_SKILLS.slice(2), ['spec-driven-development', 'depurar', 'desarrollo-con-pruebas', 'revision-cruzada']);
   const target = path.join(f.homeDirectory, '.claude', 'skills', 'depurar'); await fs.mkdir(path.dirname(target), { recursive: true });
   await fs.symlink(path.join(f.toolkitRoot, 'skills', 'depurar'), target, directoryLinkType);
   const { acquireLock } = await import(lockUrl); const { recordEntries } = await import(registryUrl);

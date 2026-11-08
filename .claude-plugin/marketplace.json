@@ -12,12 +12,12 @@
     {
       "name": "nexakit-modelo",
       "source": "./plugins/nexakit-modelo",
-      "description": "Muestra modelo y esfuerzo observados frente a la recomendación sin cambiarlos."
+      "description": "Barra sobre el prompt con modelo, esfuerzo, recomendación por mensaje y uso, sin cambiar nada."
     },
     {
       "name": "nexakit-sesion",
       "source": "./plugins/nexakit-sesion",
-      "description": "Contexto y límites en la línea de estado, con aviso para abrir sesión nueva."
+      "description": "Avisa al 60 % y al 80 % de contexto que conviene abrir una sesión nueva."
     }
   ]
 }

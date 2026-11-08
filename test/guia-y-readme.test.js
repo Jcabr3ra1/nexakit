@@ -39,7 +39,7 @@ test('HTML command guide presents a 3-step route, the new auto-review and handof
 
   // Explains the new workflow
   assert.match(html, /¿A dónde mando la revisión\?/u);
-  assert.match(html, /sin revisión/u);
+  assert.match(html, /solo cuando la pides/u);
   assert.match(html, /\/revisar/u);
   assert.match(html, /seguimiento/u);
   assert.match(html, /\/cerrar-memoria/u);
@@ -69,14 +69,14 @@ test('HTML command guide presents a 3-step route, the new auto-review and handof
   assert.doesNotMatch(html, /agent-toolkit-workflow/u);
 });
 
-test('README.md documents the 3 AIs, 3-step setup, auto-review workflow, Spanish commands, and newly detected technologies', async () => {
+test('README.md documents the 3 AIs, 3-step setup, on-demand review workflow, Spanish commands, and newly detected technologies', async () => {
   const readme = await fs.readFile(README_PATH, 'utf8');
 
   assert.match(readme, /Claude Code/u);
   assert.match(readme, /Codex/u);
   assert.match(readme, /Antigravity/u);
   assert.match(readme, /¿A dónde mando la revisión\?/u);
-  assert.match(readme, /sin revisión/u);
+  assert.match(readme, /solo cuando la pides/u);
   assert.match(readme, /\/revisar/u);
 
   for (const cmd of [

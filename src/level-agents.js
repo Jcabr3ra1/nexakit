@@ -7,6 +7,7 @@ import { agentModels } from "./agent-models.js";
 // Codex has no plugins, so its level agents are files. Claude's come from the `niveles` plugin.
 // The top level is "alto"; xhigh is asked per spawn, only after high failed.
 const LEVELS = [["Ligero", "ligero"], ["Normal", "normal"], ["Exigente", "exigente"], ["Alto", "alto"]];
+const USES = { ligero: "comandos, búsquedas, lecturas y cambios mecánicos", normal: "implementar con un diseño claro", exigente: "pruebas, casos borde o un fallo acotado", alto: "un fallo sutil, seguridad o lo que exigente no resolvió" };
 const MODEL = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/u;
 
 export class LevelAgentsError extends Error {
@@ -17,10 +18,10 @@ function content(slug, level, { model, effort }) {
   const task = `nivel ${level} (${model}, ${effort})`;
   return [`# Generado por \`agent-toolkit-inbox agentes\`. Ese comando nunca sobrescribe ni borra: lo anterior queda como .anterior-*.`,
     `name = ${JSON.stringify(`nivel_${slug}`)}`,
-    `description = ${JSON.stringify(`Ejecuta una tarea delegada de ${task}. Úsalo solo cuando la skill revision-cruzada indique este nivel.`)}`,
+    `description = ${JSON.stringify(`Ejecuta una tarea delegada de ${task}. Úsalo para ${USES[slug]}.`)}`,
     `model = ${JSON.stringify(model)}`, `model_reasoning_effort = ${JSON.stringify(effort)}`,
     `developer_instructions = """`,
-    `Ejecutas una tarea que te delega la sesión principal de la revisión cruzada, con el ${task}.`,
+    `Ejecutas una tarea que te delega la sesión principal, con el ${task}.`,
     "Haz solo lo que pide la delegación y respeta las reglas del proyecto (AGENTS.md y sus skills).",
     "Si la tarea es de código: cambio mínimo, pruebas que lo cubran, y ejecútalas junto con el lint o la compilación que correspondan.",
     "No hagas commit, push ni PR, y no envíes, apruebes ni reclames encargos de revisión.",

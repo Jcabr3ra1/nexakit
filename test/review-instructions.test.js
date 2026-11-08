@@ -72,7 +72,7 @@ test('global instructions respect CODEX_HOME and never alter project files', asy
   await applyReviewInstructions(plan, lock);
   assert.ok(
     (await fs.readFile(path.join(environment.CODEX_HOME, 'AGENTS.md'), 'utf8')).includes(
-      'Si el usuario dice',
+      'solo con /revisar',
     ),
   );
   assert.ok(

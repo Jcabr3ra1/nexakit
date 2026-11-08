@@ -1,14 +1,12 @@
 # Revisión entre IA en la misma terminal
 
 La programación normal aplica contexto, plan proporcional, rama, pruebas,
-implementación, comprobación y cierre con memoria. Al terminar una tarea con
-cambios de código, las instrucciones piden una revisión a otra IA, verifican
-sus hallazgos y resumen los arreglos. Una vez por tarea, máximo dos rondas.
-Los cambios solo documentales y «sin revisión» omiten la revisión automática.
-`/revisar` (o `$revisar`) pide una revisión adicional. `/programar` y `/estado`
-se retiran. La automatización es una instrucción para la IA, sin hooks.
+implementación, comprobación y cierre con memoria. La revisión por otra IA es
+opcional: solo ocurre cuando la persona escribe `/revisar` (o `$revisar`) o
+pide «que lo revise <IA>». Entonces la IA verifica los hallazgos, corrige los
+reales y resume, con un máximo de dos rondas por petición. Nunca se lanza sola.
 
-La primera revisión de la sesión pregunta el destino entre las otras IA
+La primera revisión pedida en la sesión pregunta el destino entre las otras IA
 instaladas: antes de cada revisión se ejecuta `nexakit revision --disponibles --principal <IA>` (claude, codex o antigravity). La consulta es de solo lectura y no llama modelos. Se ofrecen las certificadas y las pendientes, avisando de que estas últimas se certifican la primera vez; las fallidas no se ofrecen. Claude usa el selector; Codex y Antigravity una
 pregunta normal. Con una opción no pregunta; sin opciones avisa. Recomendadas:
 Claude → Codex; Codex → Claude; Antigravity → Claude. La elección vive en la
@@ -80,13 +78,15 @@ en `~/.nexakit/review-instructions.json`; no escribe las reglas en el proyecto. 
 las reglas editadas se conservan. Solo se modifican esos archivos de instrucciones tras la confirmación. Los ajustes, credenciales y permisos de las IA no se reescriben. Las instrucciones globales se retiran únicamente con la retirada global (`quitar --global --apply`); quitar un proyecto no retira reglas compartidas. Las skills antiguas registradas se retiran;
 los conflictos ajenos y MCP/agentes obsoletos se informan para acción manual.
 
-El mod opcional `nexakit-modelo` muestra modelo y esfuerzo observado frente a
-la recomendación. No realiza revisiones ni cambia ajustes. Usa los eventos de
-la API de mods, independientes de la revisión automática por instrucciones.
-La CLI 2.1.316 valida el módulo y ejecuta sus pruebas sin llamadas de modelo.
-Sin esfuerzo observado muestra «esfuerzo no informado», nunca ✓; al terminar
-el turno descarta ese esfuerzo para no presentar el del turno anterior como
-actual. No se instala globalmente de forma automática.
+El mod opcional `nexakit-modelo` dibuja una barra sobre el prompt con el
+modelo y el último esfuerzo observados, la recomendación y el uso (contexto,
+5 h y semana). Al enviar cada mensaje recomienda por su texto, sin llamar a
+ningún modelo: tareas mecánicas → haiku · low; fallos o seguridad → opus · high;
+diseño → opus · medium; el resto → sonnet · medium. Una confirmación corta
+(«sí», «dale») conserva la recomendación anterior, y `elegir-modelo` puede
+fijar otra con `nexakit_recomendacion`. Solo muestra: no cambia el modelo ni el
+esfuerzo. Sin esfuerzo observado muestra «esfuerzo ?», nunca ✓. No realiza
+revisiones ni se instala globalmente de forma automática.
 
 Fuentes de la API: [referencia oficial de mods](https://code.claude.com/docs/en/plugins/mods/reference)
 y [registro de herramientas](https://code.claude.com/docs/en/plugins/mods/api).

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <meta name="description" content="Inicia NexaKit en tres pasos: instala skills, crea y conecta tu memoria en Obsidian y trabaja con revisión automática entre Claude Code, Codex y Antigravity.">
+  <meta name="description" content="Inicia NexaKit en tres pasos: instala skills, crea y conecta tu memoria en Obsidian y trabaja con Claude Code, Codex y Antigravity, con revisión entre ellas cuando la pidas.">
   <title>NexaKit · De cero a tu proyecto listo en tres pasos</title>
   <style>
     :root { --bg:#111015; --surface:#19171f; --raised:#211e2a; --line:#35303f; --text:#eeebf5; --muted:#aaa3b8; --accent:#c4b5fd; --purple:#7c3aed; --green:#a2d9bb; --mono:ui-monospace,"Cascadia Code","SFMono-Regular",Consolas,monospace; font-family:"Segoe UI Variable", "Segoe UI", sans-serif; color-scheme:dark; }
@@ -234,7 +234,8 @@ agy</code></pre></div></div>
       </div>
       <ol class="tui-steps">
         <li><div><strong>Programa normalmente, sin comando especial</strong><p>Pide la tarea directamente en el chat. La IA consulta la memoria del proyecto en solo lectura, crea rama, escribe pruebas e implementa sin que tengas que invocar ningún comando previo.</p></div></li>
-        <li><div><strong>Revisión automática al terminar cambios de código</strong><p>Cuando termina una tarea con cambios de código, la IA pide automáticamente una revisión en solo lectura a otra IA. La primera vez en la sesión te pregunta <code>«¿A dónde mando la revisión?»</code> marcando la recomendada y conserva tu respuesta el resto de la conversación. Si en una tarea dices <code>«sin revisión»</code>, la omite. Si quieres pedir una revisión adicional en cualquier momento, escribe <code>/revisar</code> (o <code>$revisar</code> en Codex).</p></div></li>
+        <li><div><strong>Orquesta por niveles</strong><p>La sesión principal entiende, planifica e integra, y delega la ejecución en subagentes de nivel (ligero, normal, exigente y alto), cada uno con su modelo y esfuerzo. El modo tutor, en el que tú escribes el código, solo se activa si lo pides.</p></div></li>
+        <li><div><strong>Revisión por otra IA, solo cuando la pides</strong><p>Escribe <code>/revisar</code> (o <code>$revisar</code> en Codex) o di «que lo revise &lt;IA&gt;». La primera vez en la sesión te pregunta <code>«¿A dónde mando la revisión?»</code> marcando la recomendada y conserva tu respuesta el resto de la conversación. Nunca se lanza sola.</p></div></li>
         <li><div><strong>Nota de seguimiento automática y cierre de memoria</strong><p>Si una tarea larga queda a medias (por pausa, cambio de IA, bloqueo o cierre), la IA escribe o actualiza la nota de seguimiento en <code>03-IMPLEMENTACION/Planes/&lt;fecha&gt;-&lt;slug&gt;-seguimiento.md</code> dentro de la bóveda (pidiendo una sola autorización por sesión) y te indica cuándo conviene abrir una sesión nueva. Al fusionar en <code>main</code>, usa <code>/cerrar-memoria</code> (o <code>$cerrar-memoria</code>) para llevar las decisiones a las notas permanentes y marcar el seguimiento como completado.</p></div></li>
       </ol>
       <details><summary>Abrir la memoria como bóveda en Obsidian</summary><div class="details-body">
