@@ -24,7 +24,7 @@ const defaultRow = (number = 42, result = "Sin cambios documentales") =>
   `| [#${number}](https://github.com/owner/project/pull/${number}) | Revisado | 2026-10-01 | ${result} | — |`;
 
 function git(dir, ...args) {
-  return execFileSync("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "-C", dir, ...args],
+  return execFileSync("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "maintenance.auto=false", "-c", "gc.auto=0", "-C", dir, ...args],
     { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 }
 

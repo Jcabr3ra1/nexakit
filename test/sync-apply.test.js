@@ -20,7 +20,7 @@ const fileSymlinks = { skip: fileSymlinkSkipReason() };
 function git(dir, ...args) {
   // Fixture commits must not start background maintenance that creates/removes
   // .git/objects/maintenance.lock between strict filesystem snapshots.
-  return execFileSync("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "maintenance.auto=false", "-C", dir, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  return execFileSync("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "maintenance.auto=false", "-c", "gc.auto=0", "-c", "maintenance.auto=false", "-C", dir, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 }
 function fixture(t, options = {}) {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "project-memory-apply-")));
