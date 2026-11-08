@@ -19,7 +19,8 @@
     "catalog:files": "node scripts/validate-skill-catalog.js --files",
     "catalog:add": "node scripts/add-catalog-skill.js",
     "prepack": "node scripts/prepare-package.js",
-    "test:mod": "claude plugin test plugins/nexakit-modelo"
+    "test:mod": "claude plugin test plugins/nexakit-modelo",
+    "plugins:huellas": "node scripts/plugin-huellas.js"
   },
   "engines": {
     "node": ">=24"
