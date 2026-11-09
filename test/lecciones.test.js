@@ -86,3 +86,121 @@ test('añade la nota solo a los mensajes que corrigen', async () => {
   assert.equal(await enviar('añade un botón'), 'añade un botón');
   assert.match(await enviar('te dije que en español'), /^te dije que en español\n\n\[nexakit: .*memoria persistente/su);
 });
+
+// --- Registro propio de lecciones: eventos, correcciones pendientes y lecciones guardadas ---
+
+const DIA = 24 * 60 * 60 * 1000;
+const HOME = '/casa';
+const REGISTRO = `${HOME}/.nexakit/lecciones.jsonl`;
+const MEMORIA = `${HOME}/.claude/projects/-Users-yo-proyecto/memory/feedback-espanol.md`;
+
+// Un `$` mínimo con el sistema de archivos y el reloj en memoria; `ahora` se mueve a mano.
+function entorno({ previo = '', fallaEscritura = false } = {}) {
+  const archivos = new Map(previo ? [[REGISTRO, previo]] : []);
+  const reloj = { ahora: 1_000_000_000_000 };
+  const $ = {
+    env: { get: async (k) => (k === 'HOME' ? HOME : undefined) },
+    clock: { now: async () => reloj.ahora },
+    fs: {
+      exists: async (r) => archivos.has(r),
+      read: async (r) => archivos.get(r),
+      write: async (r, t) => { if (fallaEscritura) throw new Error('disco lleno'); archivos.set(r, t); },
+    },
+  };
+  const eventos = () => (archivos.get(REGISTRO) ?? '').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  return { $, reloj, eventos, archivos };
+}
+const linea = (e) => `${JSON.stringify(e)}\n`;
+
+test('las reglas puras: podar, pendientes, texto seguro y ruta de memoria', async () => {
+  const { podarEventos, pendientes, textoSeguro, esRutaDeMemoria, leerEventos } = await import('../plugins/nexakit-lecciones/hooks/lecciones.js');
+  const ahora = 1_000_000_000_000;
+  const evs = [
+    { fecha: ahora - 100 * DIA, tipo: 'correccion', texto: 'vieja' },
+    { fecha: ahora - 5 * DIA, tipo: 'correccion', texto: 'a' },
+    { fecha: ahora - 4 * DIA, tipo: 'guardada' },
+    { fecha: ahora - 3 * DIA, tipo: 'correccion', texto: 'b' },
+    { fecha: ahora - 2 * DIA, tipo: 'avisada' },
+    { fecha: ahora - 1 * DIA, tipo: 'correccion', texto: 'c' },
+  ];
+  assert.deepEqual(podarEventos(evs, ahora).map((e) => e.texto ?? e.tipo), ['a', 'guardada', 'b', 'avisada', 'c'], 'quita lo de más de 90 días');
+  assert.equal(podarEventos(Array.from({ length: 700 }, (_, i) => ({ fecha: ahora - i, tipo: 'freno' })), ahora).length, 500, 'tope de 500');
+  assert.deepEqual(pendientes(evs).map((e) => e.texto), ['c'], 'solo lo posterior a la última guardada y a la última avisada');
+  assert.deepEqual(pendientes(evs.slice(0, 2)).map((e) => e.texto), ['vieja', 'a']);
+  assert.deepEqual(leerEventos('basura\n{"fecha":1,"tipo":"freno"}\n{"tipo":"raro","fecha":2}\n{"fecha":"x","tipo":"freno"}\n').map((e) => e.tipo), ['freno'], 'ignora líneas inválidas y tipos desconocidos');
+  assert.equal(textoSeguro('háblame en español'), 'háblame en español');
+  assert.equal(textoSeguro('x'.repeat(300)).length, 200);
+  assert.match(textoSeguro('te dije que mi token=abc123def456 no se pega'), /omitido/u);
+  assert.match(textoSeguro('la clave es sk-abcdefghijklmnop1234'), /omitido/u);
+  assert.equal(esRutaDeMemoria('/Users/yo/.claude/projects/-Users-yo-p/memory/feedback.md'), true);
+  assert.equal(esRutaDeMemoria('C:\\Users\\yo\\.claude\\projects\\p\\memory\\MEMORY.md'), true);
+  assert.equal(esRutaDeMemoria('/Users/yo/proyecto/memory/notas.md'), false);
+  assert.equal(esRutaDeMemoria('/Users/yo/.claude/projects/p/memory/foto.png'), false);
+});
+
+test('registra los frenos y el error repetido tres veces', async () => {
+  const h = await montar();
+  const { $, eventos } = entorno();
+  const bash = h('tool.call');
+  await bash($, { tool: 'Bash', command: 'git rebase origin/main' }, falla('error: cannot rebase: unstaged changes'));
+  await bash($, { tool: 'Bash', command: 'git rebase origin/main' }, async () => assert.fail('no debía ejecutarse'));
+  assert.deepEqual(eventos().map((e) => e.tipo), ['freno']);
+  for (const c of ['node a.js', 'node b.js', 'node c.js']) await bash($, { tool: 'Bash', command: c }, falla(`Error: Cannot find module '/tmp/${c}'`));
+  assert.deepEqual(eventos().map((e) => e.tipo), ['freno', 'repeticion']);
+});
+
+test('una corrección se apunta con su texto y una frase con un secreto no', async () => {
+  const h = await montar();
+  const { $, eventos } = entorno();
+  const enviar = async (text) => { let e2; await h('prompt.submit')($, { text }, async (e) => { e2 = e; return e; }); return e2.text; };
+  await enviar('añade un botón');
+  assert.deepEqual(eventos(), [], 'un mensaje normal no se apunta');
+  await enviar('te dije que en español');
+  await enviar('te dije que mi token=abc123def456 no se pega');
+  const [uno, dos] = eventos();
+  assert.deepEqual([uno.tipo, uno.texto], ['correccion', 'te dije que en español']);
+  assert.equal(dos.tipo, 'correccion');
+  assert.match(dos.texto, /omitido/u);
+  assert.doesNotMatch(JSON.stringify(eventos()), /abc123def456/u);
+});
+
+test('escribir en la memoria persistente marca las correcciones como guardadas; un error o otra ruta no', async () => {
+  const h = await montar();
+  const { $, eventos } = entorno();
+  const herramienta = h('tool.call');
+  await h('prompt.submit')($, { text: 'te dije que en español' }, async (e) => e);
+  await herramienta($, { tool: 'Write', file_path: MEMORIA }, async () => ({ ref: 1, isError: true, result: 'sin permiso' }));
+  await herramienta($, { tool: 'Write', file_path: '/casa/proyecto/notas.md' }, bien);
+  assert.deepEqual(eventos().map((e) => e.tipo), ['correccion']);
+  await herramienta($, { tool: 'Write', file_path: MEMORIA }, bien);
+  assert.deepEqual(eventos().map((e) => e.tipo), ['correccion', 'guardada']);
+  await herramienta($, { tool: 'Edit', file_path: MEMORIA }, bien);
+  assert.equal(eventos().filter((e) => e.tipo === 'guardada').length, 1, 'sin correcciones pendientes no apunta otra guardada');
+});
+
+test('al empezar una sesión recuerda una sola vez las correcciones que quedaron sin guardar', async () => {
+  const ahora = 1_000_000_000_000;
+  const previo = linea({ fecha: ahora - 3 * DIA, tipo: 'correccion', texto: 'ya guardada' }) + linea({ fecha: ahora - 2 * DIA, tipo: 'guardada' })
+    + linea({ fecha: ahora - DIA, tipo: 'correccion', texto: 'háblame en español' }) + linea({ fecha: ahora - DIA + 1, tipo: 'correccion', texto: 'no hagas commit solo' });
+  const h = await montar();
+  const { $, eventos } = entorno({ previo });
+  const enviar = async (text) => { let e2; await h('prompt.submit')($, { text }, async (e) => { e2 = e; return e; }); return e2.text; };
+  const primero = await enviar('añade un botón');
+  assert.match(primero, /^añade un botón\n\n\[nexakit: .*2 correcciones.*«háblame en español».*«no hagas commit solo».*memoria persistente/su);
+  assert.doesNotMatch(primero, /ya guardada/u);
+  assert.equal(eventos().at(-1).tipo, 'avisada');
+  assert.equal(await enviar('otra cosa'), 'otra cosa', 'solo al primer mensaje de la sesión');
+  const h2 = await montar();
+  const otra = async (text) => { let e2; await h2('prompt.submit')($, { text }, async (e) => { e2 = e; return e; }); return e2.text; };
+  assert.equal(await otra('sesión siguiente'), 'sesión siguiente', 'tras avisar, no se repite en otra sesión');
+});
+
+test('registrar nunca rompe el turno aunque el disco falle', async () => {
+  const h = await montar();
+  const { $ } = entorno({ fallaEscritura: true });
+  let e2;
+  await h('prompt.submit')($, { text: 'te dije que en español' }, async (e) => { e2 = e; return e; });
+  assert.match(e2.text, /memoria persistente/u);
+  const r = await h('tool.call')($, { tool: 'Bash', command: 'make' }, falla('boom'));
+  assert.equal(r.isError, true);
+});

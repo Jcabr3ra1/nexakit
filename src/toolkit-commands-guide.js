@@ -99,6 +99,10 @@ export function getToolkitCommandsGuide({ clients = {} } = {}) {
       command: 'nexakit ahorro',
       description: 'Resume cuánta salida de comandos recortó el mod nexakit-ahorro.',
     },
+    {
+      command: 'nexakit lecciones',
+      description: 'Resume las correcciones y lecciones que registra el mod nexakit-lecciones y las pendientes.',
+    },
   ];
 
   return {
