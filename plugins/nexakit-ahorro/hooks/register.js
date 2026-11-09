@@ -11,6 +11,35 @@ async function guardar($, texto) {
   return ruta;
 }
 
+const contarLineas = (texto) => (texto === '' ? 0 : texto.split('\n').length);
+
+// Registra solo cifras del recorte (nunca el contenido ni el comando) para poder medir el ahorro.
+// El motor no ofrece añadir al final: se lee el registro y se reescribe con la línea nueva.
+async function registrar($, antes, despues) {
+  try {
+    const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'));
+    if (!home) return;
+    const ruta = `${home}/.nexakit/ahorro.jsonl`;
+    let previo = '';
+    try {
+      if (await $.fs.exists(ruta)) previo = await $.fs.read(ruta);
+    } catch {
+      previo = '';
+    }
+    if (previo && !previo.endsWith('\n')) previo += '\n';
+    const linea = JSON.stringify({
+      fecha: await $.clock.now(),
+      antes: antes.length,
+      despues: despues.length,
+      lineasAntes: contarLineas(antes),
+      lineasDespues: contarLineas(despues),
+    });
+    await $.fs.write(ruta, `${previo}${linea}\n`);
+  } catch {
+    // Un fallo al registrar nunca debe romper el recorte.
+  }
+}
+
 export function register(on) {
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const r = await next(e);
@@ -26,6 +55,7 @@ export function register(on) {
       // Sin copia en disco igual se recorta; el aviso explica cómo pedirla completa.
     }
     const { texto } = compactarSalida(unida, { ruta });
+    await registrar($, unida, texto);
     // Sin `ref` ni `text`, el motor vuelve a presentar al modelo el resultado recortado.
     return { result: { ...salida, stdout: texto, stderr: '' }, ...(r.context ? { context: r.context } : {}), ...(r.isError ? { isError: r.isError } : {}) };
   });

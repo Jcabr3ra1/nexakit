@@ -95,6 +95,10 @@ export function getToolkitCommandsGuide({ clients = {} } = {}) {
       command: 'nexakit modelo',
       description: 'Consulta modelos reales, esfuerzos y valores guardados.',
     },
+    {
+      command: 'nexakit ahorro',
+      description: 'Resume cuánta salida de comandos recortó el mod nexakit-ahorro.',
+    },
   ];
 
   return {

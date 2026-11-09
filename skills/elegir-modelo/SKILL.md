@@ -38,7 +38,19 @@ La elección se hace por **papel**, no por nombres fijos que caducan:
 - **Generaciones pasadas:** los modelos marcados con `papel: anterior` (*older* / *previous generation*) no se recomiendan salvo que el usuario los pida expresamente.
 - **Límites y cuota:** un aviso de límite o de cuota nunca baja el modelo sin decírselo al usuario. Si una cuenta se acerca al límite o agota cuota, informa al usuario y espera su decisión antes de pasar a otro modelo o a otra IA.
 
-## 4. Si un resultado salió mal, diagnostica antes de subir
+## 4. Cambiar a mitad de sesión cuesta caché
+
+Cada modelo tiene su propia caché: tras un `/model`, el turno siguiente relee todo el historial sin ella. Ese turno puede costar más de lo que se ahorra con el cambio, y más cuanto más contexto haya. Cambiar el esfuerzo **no** rompe la caché en Claude 5.x con suscripción o clave de API; en Bedrock, Google Cloud o una pasarela, sí la rompe.
+
+- Elige modelo y esfuerzo **al empezar** la sesión. A mitad de tarea, ajusta antes el esfuerzo que el modelo.
+- Para lo mecánico (comandos, búsquedas, lint, commit) no bajes la sesión a `haiku`: **delega** en un subagente `nivel-ligero`. Tiene su propia caché y no toca la de la sesión.
+- Para un fallo difícil con mucho contexto ya cargado (más o menos del 30 % en adelante), delega en `nivel-alto` en vez de pasar la sesión a `opus`. Con poco contexto, cambiar sale barato.
+- Si el subagente necesita el mismo contexto que llevas, usa una bifurcación (fork): hereda la caché del padre.
+- `opusplan` cambia de modelo cada vez que entras o sales del modo plan, así que cada cambio es un turno sin caché. Úsalo cuando planificas una vez y luego ejecutas largo, no si alternas a menudo.
+- `fable` es el más caro por token: resérvalo para trabajo largo y ambiguo que de verdad lo necesite.
+- `/usage` muestra el acierto de caché (`Prompt cache (main)`), y la barra de `nexakit-modelo` también (`caché N%`). Si baja de golpe, algo cambió el prefijo: un cambio de modelo, un MCP o un plugin.
+
+## 5. Si un resultado salió mal, diagnostica antes de subir
 
 1. ¿Tenía buen contexto (instrucciones claras, archivos, herramientas)? Si no, arréglalo primero.
 2. ¿Tenía todo, lo intentó y se equivocó? Le faltó saber: modelo más capaz.
@@ -46,7 +58,7 @@ La elección se hace por **papel**, no por nombres fijos que caducan:
 
 Más esfuerzo no arregla un enfoque equivocado.
 
-## 5. Responde con esta forma
+## 6. Responde con esta forma
 
 | IA | Trabajo | Modelo | Esfuerzo | Por qué (una línea) |
 | --- | --- | --- | --- | --- |

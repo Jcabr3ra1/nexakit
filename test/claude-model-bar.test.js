@@ -165,6 +165,93 @@ test('el mod registra el modelo real de cada subagente y lo dibuja bajo la líne
   }
 });
 
+test('preguntar por qué o pedir investigar no escala a Opus: es trabajo habitual', () => {
+  assert.deepEqual(pick(recomendarPorTexto('¿por qué usamos zod aquí?')), ['sonnet', 'medium']);
+  assert.deepEqual(pick(recomendarPorTexto('investiga cómo funciona el login')), ['sonnet', 'medium']);
+  assert.deepEqual(pick(recomendarPorTexto('el login falla y no sé por qué')), ['opus', 'high']);
+});
+
+test('lo mecánico se delega en nivel-ligero y un fallo ofrece nivel-alto como alternativa', () => {
+  assert.equal(recomendarPorTexto('haz commit y push de esto').delegar, 'nivel-ligero');
+  assert.equal(recomendarPorTexto('arregla el botón que no guarda').delegar, 'nivel-alto');
+  assert.equal(recomendarPorTexto('añade un botón de exportar').delegar, undefined);
+});
+
+test('la barra no propone cambiar de modelo cuando eso relee mucho contexto sin caché', () => {
+  const mecanica = recomendarPorTexto('haz commit');
+  const fallo = recomendarPorTexto('arregla el botón que no guarda');
+  const barra = (model, effort, recommendation, percent) =>
+    texto(segmentosDeBarra({ model, effort, recommendation, usage: { context: { percent }, rateLimits: [] } }));
+  assert.match(barra('claude-opus-5-5', 'medium', mecanica, 5), /→ delega: nivel-ligero/);
+  assert.doesNotMatch(barra('claude-opus-5-5', 'medium', mecanica, 5), /→ Haiku/);
+  assert.match(barra('claude-sonnet-5-5', 'medium', fallo, 45), /→ delega: nivel-alto/);
+  assert.match(barra('claude-sonnet-5-5', 'medium', fallo, 10), /→ Opus · high/);
+  assert.match(barra('claude-opus-5-5', 'medium', fallo, 70), /→ Opus · high/, 'cambiar el esfuerzo no rompe la caché');
+  assert.match(barra('claude-haiku-5-5', 'low', mecanica, 50), /✓/);
+});
+
+test('la barra muestra el acierto de caché desde el segundo turno, con su tono', () => {
+  const con = (cache) => texto(segmentosDeBarra({ model: 'claude-sonnet-5-5', effort: 'medium', cache }));
+  assert.doesNotMatch(con({ read: 0, creation: 900, input: 10, turnos: 1 }), /caché/);
+  assert.match(con({ read: 900, creation: 50, input: 50, turnos: 3 }), /caché 90%/);
+  const segmento = (cache) => segmentosDeBarra({ model: 'claude-sonnet-5-5', effort: 'medium', cache }).find((s) => /%$/.test(s.text));
+  assert.equal(segmento({ read: 90, creation: 10, input: 0, turnos: 2 }).color, 'success');
+  assert.equal(segmento({ read: 60, creation: 40, input: 0, turnos: 2 }).color, 'warning');
+  assert.equal(segmento({ read: 20, creation: 80, input: 0, turnos: 2 }).color, 'error');
+  assert.doesNotMatch(con({ read: 0, creation: 0, input: 0, turnos: 4 }), /caché/, 'sin tokens no inventa un porcentaje');
+});
+
+test('el mod acumula la caché de los turnos principales, no la de los subagentes', async () => {
+  const { register } = await import('../plugins/nexakit-modelo/hooks/register.js?cache');
+  const hooks = new Map();
+  register((event, ...rest) => { hooks.set(event, rest.at(-1)); });
+  const api = { session: { model: async () => 'claude-sonnet-5-5', usage: async () => null }, tool: { register: async () => {} }, ui: { status() {}, invalidate() {}, resolve: () => ({ Box: 'Box', Text: 'Text' }) } };
+  const turno = (usage, agentId) => hooks.get('turn.complete')(api, agentId ? { agentId } : {}, async () => ({ text: '', usage }));
+  globalThis.h = (tag, props, ...children) => ({ tag, props, children });
+  try {
+    await hooks.get('session.start')(api, {}, async (e) => e);
+    await turno({ model: 'claude-sonnet-5-5', input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 990 });
+    await turno({ model: 'claude-haiku-5-5', input_tokens: 0, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 5000 }, 'sub');
+    await turno({ model: 'claude-sonnet-5-5', input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 2990, cache_creation_input_tokens: 0 });
+    const plano = JSON.stringify(await hooks.get('ui.render')(api, { props: { hasSurvey: false } }, async () => 'engine'));
+    assert.match(plano, /caché "\]\},\{[^}]*\},"children":\["75%"\]/);
+    await hooks.get('session.end')(api, {}, async (e) => e);
+    await turno({ model: 'claude-sonnet-5-5', input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 990 });
+    const nueva = JSON.stringify(await hooks.get('ui.render')(api, { props: { hasSurvey: false } }, async () => 'engine'));
+    assert.doesNotMatch(nueva, /caché/, 'una sesión nueva empieza a contar de cero');
+  } finally {
+    delete globalThis.h;
+  }
+});
+
+test('la recomendación se actualiza mientras se escribe, antes de enviar', async () => {
+  const { register } = await import('../plugins/nexakit-modelo/hooks/register.js?escribiendo');
+  const hooks = new Map();
+  register((event, ...rest) => { hooks.set(event, rest.at(-1)); });
+  let invalidaciones = 0;
+  const api = { session: { model: async () => 'claude-sonnet-5-5', usage: async () => null }, tool: { register: async () => {} }, ui: { status() {}, invalidate() { invalidaciones += 1; }, resolve: () => ({ Box: 'Box', Text: 'Text' }) } };
+  const escribe = (text) => hooks.get('prompt.edit')(api, { text: '', cursor: 0, start: 0, end: 0, inputText: text }, async () => ({ text, cursor: text.length }));
+  const pinta = async () => JSON.stringify(await hooks.get('ui.render')(api, { props: { hasSurvey: false } }, async () => 'engine'));
+  globalThis.h = (tag, props, ...children) => ({ tag, props, children });
+  try {
+    await hooks.get('session.start')(api, {}, async (e) => e);
+    for await (const _ of hooks.get('turn.step')(api, { model: 'claude-sonnet-5-5', effort: 'medium' }, async function* () {})) { /* nada */ }
+    const r = await escribe('el login falla al guardar');
+    assert.deepEqual(r, { text: 'el login falla al guardar', cursor: 25 }, 'devuelve la caja tal cual');
+    assert.match(await pinta(), /→ Opus · high/);
+    const antes = invalidaciones;
+    await escribe('el login falla al guardar.');
+    assert.equal(invalidaciones, antes, 'no redibuja si la recomendación no cambia');
+    await hooks.get('prompt.submit')(api, { text: 'el login falla al guardar.' }, async (e) => e);
+    await escribe('');
+    assert.match(await pinta(), /→ Opus · high/, 'con la caja vacía queda la del último mensaje enviado');
+    await escribe('ok dale');
+    assert.match(await pinta(), /→ Opus · high/, 'una confirmación conserva la del último enviado');
+  } finally {
+    delete globalThis.h;
+  }
+});
+
 function pick(r) {
   return [r.model, r.effort];
 }

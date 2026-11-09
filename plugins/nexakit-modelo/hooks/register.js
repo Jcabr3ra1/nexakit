@@ -26,10 +26,25 @@ async function sincronizarAgentes($, agentes) {
   $.ui.invalidate('ui.render');
 }
 
+const mismaRecomendacion = (a, b) =>
+  a?.model === b?.model && a?.effort === b?.effort && a?.delegar === b?.delegar;
+
+const cacheVacia = () => ({ read: 0, creation: 0, input: 0, turnos: 0 });
+const tokens = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0);
+
+function sumarCache(estado, usage) {
+  if (!usage) return;
+  const c = estado.cache;
+  c.read += tokens(usage.cache_read_input_tokens);
+  c.creation += tokens(usage.cache_creation_input_tokens);
+  c.input += tokens(usage.input_tokens);
+  c.turnos += 1;
+}
+
 // Una sola barra sobre el prompt con modelo, esfuerzo, recomendación y uso. Solo muestra:
 // nunca cambia el modelo ni el esfuerzo de la sesión.
 export function register(on) {
-  const estado = { model: null, effort: null, modeloDelEsfuerzo: null, recommendation: null, usage: null };
+  const estado = { model: null, effort: null, modeloDelEsfuerzo: null, recommendation: null, enviada: null, usage: null, cache: cacheVacia() };
   // Subagentes de esta petición, por id, con el modelo y el esfuerzo que de verdad usaron.
   const agentes = new Map();
 
@@ -50,12 +65,30 @@ export function register(on) {
 
   on('tool.call', { tool: 'mcp__nexakit-modelo__nexakit_recomendacion' }, async ($, e) => {
     estado.recommendation = { model: e.model, effort: e.effort, reason: e.reason };
+    estado.enviada = estado.recommendation;
     await refrescar($, estado);
     return { result: 'Recomendación mostrada; no se cambió el modelo ni el esfuerzo.' };
   });
 
+  // Mientras se escribe: la recomendación aparece antes de pulsar Enter, cuando todavía se puede cambiar
+  // de modelo o delegar. Parte de la del último mensaje enviado, para que «ok, dale» la conserve.
+  on('prompt.edit', async ($, e, next) => {
+    const r = await next(e);
+    try {
+      const nueva = recomendarPorTexto(r?.text ?? '', estado.enviada);
+      if (!mismaRecomendacion(nueva, estado.recommendation)) {
+        estado.recommendation = nueva;
+        $.ui.invalidate('ui.render');
+      }
+    } catch {
+      // Recomendar nunca debe estorbar la escritura.
+    }
+    return r;
+  });
+
   on('prompt.submit', async ($, e, next) => {
-    estado.recommendation = recomendarPorTexto(e.text, estado.recommendation);
+    estado.recommendation = recomendarPorTexto(e.text, estado.enviada);
+    estado.enviada = estado.recommendation;
     for (const [id, a] of agentes) if (['completed', 'idle', 'failed', 'killed'].includes(a.status)) agentes.delete(id);
     $.ui.invalidate('ui.render');
     return next(e);
@@ -78,11 +111,14 @@ export function register(on) {
   });
 
   on('turn.complete', async ($, e, next) => {
+    const r = await next(e);
     if (!e.agentId) {
+      // Solo la sesión principal: cada subagente tiene su propia caché y no toca la de la sesión.
+      sumarCache(estado, r?.usage);
       await refrescar($, estado, { usage: true });
       if (agentes.size > 0) await sincronizarAgentes($, agentes);
     }
-    return next(e);
+    return r;
   });
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
@@ -98,7 +134,7 @@ export function register(on) {
 
   on('session.end', async ($, e, next) => {
     agentes.clear();
-    Object.assign(estado, { model: null, effort: null, modeloDelEsfuerzo: null, recommendation: null, usage: null });
+    Object.assign(estado, { model: null, effort: null, modeloDelEsfuerzo: null, recommendation: null, enviada: null, usage: null, cache: cacheVacia() });
     return next(e);
   });
 }

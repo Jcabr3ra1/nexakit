@@ -17,6 +17,20 @@ async function codexHome(models, config) {
   return dir;
 }
 
+test("Claude lists fable and opusplan with each model's default effort, without changing the levels", async () => {
+  const result = await agentModels({ codexHome: await codexHome(null, null), claudeHome: root });
+  const byModel = Object.fromEntries(result.claude.map(item => [item.model, item]));
+  assert.deepEqual(Object.keys(byModel), ["haiku", "sonnet", "opus", "opusplan", "fable"]);
+  assert.equal(byModel.fable.defaultEffort, "high");
+  assert.equal(byModel.sonnet.defaultEffort, "medium");
+  assert.match(byModel.opusplan.note, /plan/u);
+  assert.match(byModel.fable.note, /caro/u);
+  assert.deepEqual(result.levels.map(level => level.claude.model), ["haiku", "sonnet", "sonnet", "opus"]);
+  const table = agentModelsTable(result);
+  assert.match(table, /\| Claude \| `fable` \| el más capaz \| high \| low, medium, high, xhigh, max \| .*caro/u);
+  assert.match(table, /\| Claude \| `opusplan` \| mixto \| medium \|/u);
+});
+
 test("levels use the newest Codex model of each category and skip older or hidden ones", async () => {
   const dir = await codexHome([
     { slug: "nuevo-diario", description: "Latest workhorse model for coding", priority: 1, supported_reasoning_levels: levels(["low", "medium", "high", "xhigh", "max"]) },

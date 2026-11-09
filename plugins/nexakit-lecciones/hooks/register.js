@@ -45,9 +45,10 @@ export function register(on) {
     const veces = (b.errores.get(tipo) ?? 0) + 1;
     b.errores.set(tipo, veces);
     if (veces !== TOPE_MISMO_ERROR) return r;
+    // Se devuelve la respuesta del motor (con su `ref`) y solo se añade la nota: un objeto rehecho sin `ref` se
+    // revalida contra la forma de salida de Bash, y un error llega como texto, que esa forma rechaza.
     return {
-      result: r.result,
-      isError: r.isError,
+      ...r,
       context: [...(r.context ?? []), `[nexakit: el mismo tipo de error salió ${veces} veces en esta tarea («${tipo}»). Para, explica la causa raíz antes de otro intento y cambia de enfoque; si es una lección que vale para el futuro, guárdala en tu memoria persistente.]`],
     };
   });
