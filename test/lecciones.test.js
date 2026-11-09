@@ -63,8 +63,21 @@ test('al tercer error del mismo tipo pide parar y cambiar de enfoque', async () 
   let r;
   for (const c of ['node a.js', 'node b.js', 'node c.js']) r = await bash({}, { tool: 'Bash', command: c }, falla(`Error: Cannot find module '/tmp/${c}'`));
   assert.ok(r.context?.some((t) => /3 veces.*para/su.test(t)));
-  assert.equal(r.ref, undefined);
+  assert.equal(r.ref, 'x', 'conserva la respuesta del motor: sin ref, el motor revalida el resultado contra la forma de salida de Bash');
   assert.equal(r.isError, true);
+});
+
+test('la nota del tercer error no rehace un resultado de error en texto', async () => {
+  // Un Bash fallido llega con el texto del error como resultado: rehacerlo sin `ref` hacía que el motor lo
+  // rechazara («expected object, received string»).
+  const h = await montar();
+  const bash = h('tool.call');
+  const fallaTexto = (c) => async () => ({ ref: 7, text: `Exit code 1\nError: Cannot find module '/tmp/${c}'`, isError: true, result: `Exit code 1\nError: Cannot find module '/tmp/${c}'` });
+  let r;
+  for (const c of ['node a.js', 'node b.js', 'node c.js']) r = await bash({}, { tool: 'Bash', command: c }, fallaTexto(c));
+  assert.equal(r.ref, 7);
+  assert.equal(r.text, r.result);
+  assert.ok(r.context?.some((t) => /3 veces/u.test(t)));
 });
 
 test('añade la nota solo a los mensajes que corrigen', async () => {
