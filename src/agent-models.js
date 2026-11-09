@@ -4,10 +4,17 @@ import path from "node:path";
 import { getStaticTOMLValue, parseTOML } from "toml-eslint-parser";
 
 // Claude Code accepts stable aliases; Codex publishes its catalog in models_cache.json.
+// Esfuerzo por defecto según la documentación de Claude Code (model-config, 2026-11). El orden importa: los niveles
+// toman el primero de cada categoría, así que opus va antes que fable.
+const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 const CLAUDE = [
-  { model: "haiku", category: "ligero", efforts: ["low", "medium", "high", "xhigh", "max"] },
-  { model: "sonnet", category: "uso diario", efforts: ["low", "medium", "high", "xhigh", "max"] },
-  { model: "opus", category: "el más capaz", efforts: ["low", "medium", "high", "xhigh", "max"] }
+  { model: "haiku", category: "ligero", defaultEffort: "medium", efforts: EFFORTS, note: "" },
+  { model: "sonnet", category: "uso diario", defaultEffort: "medium", efforts: EFFORTS, note: "" },
+  { model: "opus", category: "el más capaz", defaultEffort: "medium", efforts: EFFORTS, note: "" },
+  { model: "opusplan", category: "mixto", defaultEffort: "medium", efforts: EFFORTS,
+    note: "Opus en modo plan y Sonnet al ejecutar; cada entrada o salida del plan es un cambio de modelo y relee sin caché" },
+  { model: "fable", category: "el más capaz", defaultEffort: "high", efforts: EFFORTS,
+    note: "el más caro por token: solo trabajo largo y ambiguo; si tu cuenta lo tiene" }
 ];
 const LEVELS = [
   { level: "Ligero", total: "0–2", category: "ligero", effort: "low" },
@@ -111,10 +118,10 @@ export async function agentModels({ codexHome = process.env.CODEX_HOME ?? path.j
 }
 
 export function agentModelsTable({ claude, codex, codexCurrent, claudeCurrent, levels }) {
-  const lines = ["**Modelos disponibles**", "", "| Agente | Modelo | Categoría | Esfuerzos |", "| --- | --- | --- | --- |"];
-  for (const item of claude) lines.push(`| Claude | \`${item.model}\` | ${item.category} | ${item.efforts.join(", ")} |`);
-  if (!codex.available) lines.push("| Codex | — | — | No se encontró `models_cache.json`; abre Codex una vez |");
-  for (const item of codex.models) lines.push(`| Codex | \`${item.model}\` | ${item.category} | ${item.efforts.join(", ")} |`);
+  const lines = ["**Modelos disponibles**", "", "| Agente | Modelo | Categoría | Por defecto | Esfuerzos | Nota |", "| --- | --- | --- | --- | --- | --- |"];
+  for (const item of claude) lines.push(`| Claude | \`${item.model}\` | ${item.category} | ${item.defaultEffort} | ${item.efforts.join(", ")} | ${item.note} |`);
+  if (!codex.available) lines.push("| Codex | — | — | — | — | No se encontró `models_cache.json`; abre Codex una vez |");
+  for (const item of codex.models) lines.push(`| Codex | \`${item.model}\` | ${item.category} | — | ${item.efforts.join(", ")} | |`);
   lines.push("", "**Niveles con los modelos actuales**", "", "| Nivel | Total | Claude | Codex |", "| --- | --- | --- | --- |");
   for (const entry of levels) {
     const codexCell = entry.codex ? `\`${entry.codex.model}\`, \`${entry.codex.effort}\`` : "Sin modelo de esa categoría";
