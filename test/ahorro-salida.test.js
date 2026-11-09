@@ -57,3 +57,37 @@ test('el mod recorta Bash, guarda la salida completa y respeta la salida complet
   const fondo = async () => ({ ref: 'f', result: { stdout: larga, stderr: '', interrupted: false, backgroundTaskId: 'b1' } });
   assert.equal((await hooks.get('tool.call')(api, { tool: 'Bash', command: 'servidor' }, fondo)).ref, 'f');
 });
+
+test('cada recorte añade una línea con cifras a ahorro.jsonl y un fallo al registrar no rompe el recorte', async () => {
+  const { register } = await import('../plugins/nexakit-ahorro/hooks/register.js');
+  const hooks = new Map();
+  register((event, matcher, hook) => hooks.set(event, hook ?? matcher));
+  const archivos = new Map();
+  const api = {
+    env: { get: async () => '/casa' },
+    clock: { now: async () => 1700000000000 },
+    fs: {
+      write: async (p, t) => { archivos.set(p, t); },
+      exists: async (p) => archivos.has(p),
+      read: async (p) => archivos.get(p),
+    },
+  };
+  const larga = lineas(3000);
+  const next = async () => ({ ref: 'r', result: { stdout: larga, stderr: '', interrupted: false } });
+  const r1 = await hooks.get('tool.call')(api, { tool: 'Bash', command: 'secreto --token abc' }, next);
+  await hooks.get('tool.call')(api, { tool: 'Bash', command: 'otro' }, next);
+  const registro = archivos.get('/casa/.nexakit/ahorro.jsonl');
+  const filas = registro.trim().split('\n').map((f) => JSON.parse(f));
+  assert.equal(filas.length, 2);
+  assert.deepEqual(Object.keys(filas[0]).sort(), ['antes', 'despues', 'fecha', 'lineasAntes', 'lineasDespues']);
+  assert.equal(filas[0].fecha, 1700000000000);
+  assert.equal(filas[0].antes, larga.length);
+  assert.equal(filas[0].despues, r1.result.stdout.length);
+  assert.ok(filas[0].lineasDespues < filas[0].lineasAntes);
+  assert.doesNotMatch(registro, /secreto|token|ok 1/u);
+
+  const roto = { ...api, fs: { ...api.fs, write: async (p) => { if (p.endsWith('.jsonl')) throw new Error('disco'); } } };
+  const r2 = await hooks.get('tool.call')(roto, { tool: 'Bash', command: 'npm test' }, next);
+  assert.equal(r2.ref, undefined);
+  assert.ok(r2.result.stdout.length < larga.length / 5);
+});
