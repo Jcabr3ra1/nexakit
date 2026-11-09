@@ -27,18 +27,38 @@ export function tono(percent) {
   return 'success';
 }
 
-export function segmentosDeBarra({ model, effort, recommendation, usage }) {
+// Desde este porcentaje de contexto, cambiar de modelo cuesta más que delegar: el turno siguiente relee
+// todo el historial sin caché (cada modelo tiene la suya). Cambiar el esfuerzo no la rompe en los 5.x.
+export const CONTEXTO_PARA_DELEGAR = 30;
+
+// Acierto de caché acumulado: lo leído de la caché frente a todo lo que entró. null hasta tener dos
+// turnos, porque el primero siempre escribe la caché entera.
+export function aciertoDeCache(cache) {
+  if (!cache || cache.turnos < 2) return null;
+  const total = cache.read + cache.creation + cache.input;
+  return total > 0 ? (cache.read / total) * 100 : null;
+}
+
+const tonoCache = (p) => (p >= 80 ? 'success' : p >= 50 ? 'warning' : 'error');
+
+function sugerencia({ model, effort, recommendation, ctx }) {
+  const mismaFamilia = familia(model) === familia(recommendation.model);
+  if (effort && mismaFamilia && effort === recommendation.effort) return { text: '  ✓', color: 'success' };
+  const delegar = recommendation.delegar &&
+    (recommendation.delegar === 'nivel-ligero' || (!mismaFamilia && esNumero(ctx) && ctx >= CONTEXTO_PARA_DELEGAR));
+  if (delegar && !mismaFamilia) return { text: `  → delega: ${recommendation.delegar}`, color: 'suggestion' };
+  return { text: `  → ${nombreModelo(recommendation.model)} · ${recommendation.effort}`, color: 'suggestion' };
+}
+
+export function segmentosDeBarra({ model, effort, recommendation, usage, cache }) {
   const s = [
     { text: nombreModelo(model), color: 'claude', bold: true },
     effort ? { text: ` · ${effort}` } : { text: ' · esfuerzo ?', dim: true },
   ];
-  if (recommendation) {
-    const coincide = effort && familia(model) === familia(recommendation.model) && effort === recommendation.effort;
-    s.push(coincide
-      ? { text: '  ✓', color: 'success' }
-      : { text: `  → ${nombreModelo(recommendation.model)} · ${recommendation.effort}`, color: 'suggestion' });
-  }
   const ctx = usage?.context?.percent;
+  if (recommendation) s.push(sugerencia({ model, effort, recommendation, ctx }));
+  const acierto = aciertoDeCache(cache);
+  if (acierto !== null) s.push({ text: '   caché ', dim: true }, { text: `${Math.round(acierto)}%`, color: tonoCache(acierto) });
   if (esNumero(ctx)) {
     s.push({ text: '    ctx ', dim: true }, { text: medidor(ctx), color: tono(ctx) }, { text: ` ${Math.round(ctx)}%` });
   }
