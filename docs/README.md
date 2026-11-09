@@ -32,6 +32,7 @@ Para una reorganización, utiliza la skill
 ## Memoria de proyectos
 
 - [Project Memory Connect](memoria/project-memory-connect.md)
+- [Project Memory Allow-dir](memoria/project-memory-allow-dir.md)
 - [Project Memory Doctor](memoria/project-memory-doctor.md)
 - [Project Memory Init](memoria/project-memory-init.md)
 - [RG — MCP de memoria con raíz fija y lectura limitada](memoria/project-memory-mcp-guard.md)

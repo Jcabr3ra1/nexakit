@@ -15,7 +15,7 @@ Si una tarea larga queda a medias —por pausa a petición del usuario, cambio d
 
 ## 2. Permiso único por sesión y ubicación en la bóveda
 
-- **Permiso de escritura:** la bóveda está fuera del repositorio del proyecto y el MCP de memoria es estrictamente de solo lectura. Pide **una sola autorización por sesión** para crear o actualizar la nota de seguimiento usando tus **herramientas de archivos**. Si el usuario no concede permiso (o el proyecto no tiene bóveda conectada), entrega el traspaso directamente en el chat.
+- **Permiso de escritura:** la bóveda está fuera del repositorio del proyecto y el MCP de memoria es estrictamente de solo lectura. Pide **una sola autorización por sesión** para crear o actualizar la nota de seguimiento usando tus **herramientas de archivos**. Si el usuario no concede permiso (o el proyecto no tiene bóveda conectada), entrega el traspaso directamente en el chat. Si Claude Code bloquea la lectura o la escritura por estar la bóveda fuera de las carpetas de trabajo, no lo rodees por otra vía: dile al usuario que ejecute `npx nexakit memoria allow-dir <ruta de la bóveda> --apply` (o `/add-dir <ruta>` solo para esta sesión) y entrega mientras tanto el traspaso en el chat.
 - **Ubicación y nombre:** `<bóveda>/03-IMPLEMENTACION/Planes/<AAAA-MM-DD>-<slug>-seguimiento.md`, reutilizando la fecha y el `<slug>` base del plan activo (o la fecha actual y el nombre de la rama sin prefijo si no hay plan). Mientras la tarea siga con `estado: en curso`, actualiza siempre esa misma nota sin crear duplicados.
 - **Cierre al fusionar:** cuando la rama se integra en `main` y se ejecuta `cerrar-memoria`, las decisiones y el estado final pasan a las notas permanentes y la nota de seguimiento cambia su frontmatter a `estado: completado`.
 

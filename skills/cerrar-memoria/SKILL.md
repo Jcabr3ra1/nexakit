@@ -74,7 +74,11 @@ los permisos expresos de la sesión y las automatizaciones efectivamente autoriz
 Si falta autorización para un paso posterior, deja antes preparada una propuesta
 concreta y revisable, sin retener los pasos ya autorizados.
 
-Edita solo notas relacionadas, con herramientas de archivos autorizadas. Conserva
+Edita solo notas relacionadas, con herramientas de archivos autorizadas. Si Claude
+Code bloquea leer o escribir en la bóveda por estar fuera de las carpetas de
+trabajo, no lo rodees: prepara las filas o cambios exactos para pegarlos y pide al
+usuario `npx nexakit memoria allow-dir <ruta de la bóveda> --apply` (o
+`/add-dir <ruta>` solo para esa sesión). Conserva
 fuentes comprobables y cambia `ultima_verificacion` solo donde verificaste la
 fuente. Respeta el layout del manifiesto. No toques `.obsidian`, skills de la
 bóveda, secretos ni cambios ajenos. Revisa diff, enlaces y verificaciones pertinentes.
