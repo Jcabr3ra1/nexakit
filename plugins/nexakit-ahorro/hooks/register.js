@@ -13,8 +13,12 @@ async function guardar($, texto) {
 
 const contarLineas = (texto) => (texto === '' ? 0 : texto.split('\n').length);
 
+const RETENCION_MS = 90 * 24 * 60 * 60 * 1000;
+const MAX_LINEAS = 5000;
+
 // Registra solo cifras del recorte (nunca el contenido ni el comando) para poder medir el ahorro.
-// El motor no ofrece añadir al final: se lee el registro y se reescribe con la línea nueva.
+// El motor no ofrece añadir al final: se lee el registro, se conservan los últimos 90 días y como máximo 5000
+// líneas, y se reescribe con la línea nueva.
 async function registrar($, antes, despues) {
   try {
     const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'));
@@ -26,9 +30,18 @@ async function registrar($, antes, despues) {
     } catch {
       previo = '';
     }
-    if (previo && !previo.endsWith('\n')) previo += '\n';
+    const ahora = await $.clock.now();
+    const vigentes = previo.split('\n').filter((l) => {
+      try {
+        const f = JSON.parse(l)?.fecha;
+        return Number.isFinite(f) && f >= ahora - RETENCION_MS;
+      } catch {
+        return false;
+      }
+    });
+    previo = vigentes.slice(-(MAX_LINEAS - 1)).map((l) => `${l}\n`).join('');
     const linea = JSON.stringify({
-      fecha: await $.clock.now(),
+      fecha: ahora,
       antes: antes.length,
       despues: despues.length,
       lineasAntes: contarLineas(antes),

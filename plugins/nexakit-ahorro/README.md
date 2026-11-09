@@ -9,7 +9,7 @@ Para ver una salida entera, pon `NEXAKIT_SALIDA=completa` delante del comando. L
 las imágenes no se tocan.
 
 Cada recorte añade una línea con cifras (fecha, caracteres y líneas antes y después; nunca el contenido ni el
-comando) a `~/.nexakit/ahorro.jsonl`. `nexakit ahorro` resume cuántos recortes hubo y cuánto se evitó.
+comando) a `~/.nexakit/ahorro.jsonl`, donde se conservan 90 días (y como máximo 5000 líneas). `nexakit ahorro` resume cuántos recortes hubo y cuánto se evitó.
 
 ## Por qué solo Bash
 

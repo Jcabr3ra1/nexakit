@@ -91,3 +91,37 @@ test('cada recorte añade una línea con cifras a ahorro.jsonl y un fallo al reg
   assert.equal(r2.ref, undefined);
   assert.ok(r2.result.stdout.length < larga.length / 5);
 });
+
+test('al registrar se podan las líneas de más de 90 días, las ilegibles y las que pasen de 5000', async () => {
+  const { register } = await import('../plugins/nexakit-ahorro/hooks/register.js');
+  const hooks = new Map();
+  register((event, matcher, hook) => hooks.set(event, hook ?? matcher));
+  const AHORA = 1700000000000;
+  const DIA = 24 * 60 * 60 * 1000;
+  const ruta = '/casa/.nexakit/ahorro.jsonl';
+  const fila = (fecha) => JSON.stringify({ fecha, antes: 10, despues: 5, lineasAntes: 2, lineasDespues: 1 });
+  const archivos = new Map();
+  const api = {
+    env: { get: async () => '/casa' },
+    clock: { now: async () => AHORA },
+    fs: {
+      write: async (p, t) => { archivos.set(p, t); },
+      exists: async (p) => archivos.has(p),
+      read: async (p) => archivos.get(p),
+    },
+  };
+  const next = async () => ({ ref: 'r', result: { stdout: lineas(3000), stderr: '', interrupted: false } });
+  const correr = () => hooks.get('tool.call')(api, { tool: 'Bash', command: 'x' }, next);
+
+  archivos.set(ruta, [fila(AHORA - 100 * DIA), 'basura', fila(AHORA - 89 * DIA), fila(AHORA - DIA)].join('\n') + '\n');
+  await correr();
+  let filas = archivos.get(ruta).trim().split('\n').map((f) => JSON.parse(f));
+  assert.deepEqual(filas.map((f) => f.fecha), [AHORA - 89 * DIA, AHORA - DIA, AHORA]);
+
+  archivos.set(ruta, Array.from({ length: 5100 }, (_, i) => fila(AHORA - 5100 + i)).join('\n') + '\n');
+  await correr();
+  filas = archivos.get(ruta).trim().split('\n').map((f) => JSON.parse(f));
+  assert.equal(filas.length, 5000);
+  assert.equal(filas[0].fecha, AHORA - 5100 + 101);
+  assert.equal(filas.at(-1).fecha, AHORA);
+});

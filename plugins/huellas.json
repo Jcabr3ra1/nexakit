@@ -1,11 +1,11 @@
 {
   "nexakit-ahorro": {
-    "version": "0.2.0",
-    "huella": "4574cfda461dfedb"
+    "version": "0.2.1",
+    "huella": "70388f284a8af2f6"
   },
   "nexakit-lecciones": {
-    "version": "0.1.1",
-    "huella": "164f6a23effca4ab"
+    "version": "0.2.0",
+    "huella": "bd69fee735347b02"
   },
   "nexakit-modelo": {
     "version": "0.3.0",

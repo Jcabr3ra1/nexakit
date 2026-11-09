@@ -12,6 +12,15 @@ Repetir lo que ya falló, o lo que la persona ya corrigió, gasta tokens dos vec
   «otra vez lo mismo», «háblame en…», «deja de…», «no vuelvas a…»), el modelo recibe una nota para guardar la
   lección en su memoria persistente (tipo feedback) y aplicarla. Si no era una corrección, la ignora.
 
+- **Apunta lo que pasa, sin depender de que Claude se acuerde.** Cada corrección (tu frase, de 200 caracteres como
+  máximo, y nada si parece llevar un secreto), cada comando frenado, cada error repetido tres veces y cada vez que
+  Claude escribe en su memoria persistente quedan en `~/.nexakit/lecciones.jsonl` (solo los últimos 90 días y 500
+  eventos). Escribir en la memoria resuelve las correcciones apuntadas hasta ese momento.
+- **Recuerda lo que quedó sin guardar.** Al primer mensaje de una sesión, si de sesiones anteriores quedaron
+  correcciones sin guardar, Claude recibe una nota con las últimas tres. Se recuerda una sola vez.
+- **`nexakit lecciones`** resume el registro: correcciones, lecciones guardadas, errores frenados y repetidos, y las
+  que siguen pendientes. Sirve para ver si el mod ayuda.
+
 La detección es local y no llama a ningún modelo. Al compactar, `nexakit-sesion` pide conservar las correcciones.
 
 ## Pruebas

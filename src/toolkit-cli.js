@@ -2,6 +2,7 @@ import os from 'node:os';
 import { runCli } from './cli.js';
 import { runModelCommand } from './model-command.js';
 import { runAhorroCommand } from './ahorro-command.js';
+import { runLeccionesCommand } from './lecciones-command.js';
 import { runRevisionCommand } from './revision.js';
 import path from 'node:path';
 import readline from 'node:readline';
@@ -39,6 +40,7 @@ const HELP = `Uso: npx nexakit [--project <ruta>] [--si]
      nexakit revision --con <ia> --modelo <m> --esfuerzo <e> --encargo <archivo> [--base <rama>]
      nexakit modelo [--nivel <nivel>] [--ia claude|codex|antigravity] [--perfil-codex <nombre>]
      nexakit ahorro [--json]
+     nexakit lecciones [--json]
      npx nexakit recommend [--project <ruta>] [--profile frontend|backend|mcp|security] [--client codex|claude] [--dry-run] [--json]
      npx nexakit scan <carpeta de skill> [--json]
      npx nexakit doctor [--agent codex|claude|antigravity|all] [--perfil-codex <nombre>] [--json]
@@ -57,6 +59,7 @@ que ya no existe); lista lo que encontró y siempre pregunta.
 memoria ejecuta los subcomandos de project-memory (init, connect, doctor, status, sync).
 revision y modelo piden una revisión a otra IA o consultan los modelos disponibles.
 ahorro resume cuánta salida de comandos recortó el mod nexakit-ahorro (caracteres y tokens estimados).
+lecciones resume las correcciones y lecciones que registra el mod nexakit-lecciones y las que siguen pendientes.
 recommend inspecciona el proyecto en solo lectura; setup prepara las skills base globales y respeta las que quitaste
 (--omitir <skill> declara quitada una que ya no tiene enlace; --reponer <skill> devuelve una; ambos se repiten).
 (Alias local compatible: agent-toolkit)
@@ -95,6 +98,7 @@ export async function runToolkitCli(
   const [command, ...rest] = argv;
   if (command === 'modelo') return runModelCommand(rest, { out, err }, options);
   if (command === 'ahorro') return runAhorroCommand(rest, { out, err }, options);
+  if (command === 'lecciones') return runLeccionesCommand(rest, { out, err }, options);
   if (command === 'revision') return runRevisionCommand(rest, { out, err }, { options });
   if (command === 'memoria') {
     return runCli(

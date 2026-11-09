@@ -2,6 +2,7 @@ import path from "node:path";
 
 import { connectMemory, ConnectionError } from "./connect.js";
 import { diagnoseMemory } from "./doctor.js";
+import { allowMemoryDirectory } from "./memory-allow-dir.js";
 import { initializeMemory, InitializationError } from "./init.js";
 import { inspectMemoryStatus } from "./status.js";
 import { planMemorySync, SyncPlanningError } from "./sync.js";
@@ -16,6 +17,7 @@ Uso:
   project-memory connect [ruta] --agent <agente> [opciones]
   project-memory doctor [ruta] [opciones]
   project-memory status [ruta] [opciones]
+  project-memory allow-dir [ruta] [opciones]
   project-memory sync plan [ruta] [opciones]
   project-memory sync inspect [ruta] --pr <número> [opciones]
   project-memory sync record [ruta] --pr <número> --outcome <valor> --reviewed [opciones]
@@ -42,6 +44,11 @@ Opciones de connect:
   --agent <agente>   Agente a conectar: codex, claude o antigravity.
   --manifest <ruta>  Selecciona un manifiesto concreto.
   --apply            Aplica el plan; sin esta opción solo previsualiza.
+
+Opciones de allow-dir:
+  --agent claude     Solo Claude Code; es el valor por defecto.
+  --manifest <ruta>  Selecciona un manifiesto concreto.
+  --apply            Aplica el cambio; sin esta opción solo previsualiza.
 
 Opciones de status:
   --agent <agente>   Limita la inspección a un agente declarado.
@@ -81,6 +88,9 @@ Opciones de sync apply:
   --reviewed             Declara revisión semántica; obligatorio al aplicar.
   --expect <sha256>     Huella de la vista previa aprobada; exige --apply.
 
+allow-dir declara la bóveda como carpeta permitida de Claude Code en el
+archivo local del proyecto (.claude/settings.local.json, fuera de git): las
+lecturas dejan de pedir permiso y las escrituras siguen el modo de permisos.
 init y connect no sobrescriben configuraciones diferentes. doctor, status,
 sync plan e inspect son de solo lectura. sync record y apply escriben con --apply.
 Evita editar o sincronizar la memoria durante --apply: su bloqueo no controla
@@ -115,6 +125,10 @@ export async function runCli(argv, io = defaultIo(), context = {}) {
 
   if (command === "status") {
     return runStatusCommand(rest, io, context);
+  }
+
+  if (command === "allow-dir") {
+    return runAllowDirCommand(rest, io);
   }
 
   if (command === "sync") {
@@ -461,6 +475,88 @@ async function runConnectCommand(rest, io, context = {}) {
     io.out(formatConnectReport(report));
   }
   return report.status === "conflict" ? 1 : 0;
+}
+
+async function runAllowDirCommand(rest, io) {
+  const options = { apply: false };
+  let json = false;
+  let targetProvided = false;
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const argument = rest[index];
+    if (argument === "--json") {
+      json = true;
+      continue;
+    }
+    if (argument === "--apply") {
+      options.apply = true;
+      continue;
+    }
+    if (argument === "--agent" || argument === "--manifest") {
+      const value = rest[index + 1];
+      if (!value || value.startsWith("--")) {
+        io.err(`La opción ${argument} requiere un valor.`);
+        return 2;
+      }
+      if (argument === "--agent") {
+        if (value !== "claude") {
+          io.err("allow-dir solo existe para Claude Code: --agent debe ser claude.");
+          return 2;
+        }
+      } else {
+        options.manifestPath = path.resolve(value);
+      }
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--")) {
+      io.err(`Opción desconocida: ${argument}`);
+      return 2;
+    }
+    if (targetProvided) {
+      io.err(`Ruta adicional no esperada: ${argument}`);
+      return 2;
+    }
+    options.targetPath = path.resolve(argument);
+    targetProvided = true;
+  }
+
+  let report;
+  try {
+    report = await allowMemoryDirectory(options);
+  } catch (error) {
+    if (error instanceof ConnectionError) {
+      for (const detail of error.details) io.err(`- ${detail}`);
+      return 1;
+    }
+    io.err(`No se pudo preparar el permiso: ${error instanceof Error ? error.message : String(error)}`);
+    return 1;
+  }
+
+  io.out(json ? JSON.stringify(report, null, 2) : formatAllowDirReport(report));
+  return report.status === "conflict" ? 1 : 0;
+}
+
+function formatAllowDirReport(report) {
+  const lines = [
+    `Project Memory Allow-dir: ${report.status.toUpperCase()}`,
+    `Bóveda: ${report.vaultPath}`,
+    `Archivo local de Claude Code: ${report.settingsPath}`
+  ];
+  const names = {
+    additionalDirectories: "declarar la bóveda en permissions.additionalDirectories",
+    gitExclude: "excluir ese archivo de git en .git/info/exclude (solo en tu copia, no se sube)"
+  };
+  for (const change of report.changes) lines.push(`- ${names[change.id] ?? change.id}`);
+  for (const reason of report.reasons) lines.push(`- ${reason}`);
+  if (report.status === "preview") {
+    lines.push(
+      "Sin --apply no se ha cambiado nada.",
+      "Efecto: Claude Code lee esa carpeta sin preguntar; las escrituras siguen el modo de permisos de la sesión."
+    );
+  }
+  if (report.status === "applied") lines.push("Reinicia la sesión de Claude Code para que lo use.");
+  return lines.join("\n");
 }
 
 async function runDoctorCommand(rest, io) {

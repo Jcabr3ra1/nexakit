@@ -37,3 +37,70 @@ export function claveDeError(texto) {
     .replace(/\d+/gu, '#')
     .slice(0, 160);
 }
+
+// --- Registro propio (~/.nexakit/lecciones.jsonl): una línea JSON por evento, en orden cronológico. ---
+// correccion: el usuario corrigió a Claude (con su texto). guardada: Claude escribió en su memoria persistente.
+// avisada: se recordaron al empezar una sesión las correcciones sin guardar. freno / repeticion: ver register.js.
+
+const TIPOS = new Set(['correccion', 'guardada', 'avisada', 'freno', 'repeticion']);
+const DIA_MS = 24 * 60 * 60 * 1000;
+export const DIAS_DE_REGISTRO = 90;
+export const MAX_EVENTOS = 500;
+const MAX_TEXTO = 200;
+
+export function leerEventos(texto) {
+  const eventos = [];
+  for (const linea of String(texto ?? '').split('\n')) {
+    if (!linea.trim()) continue;
+    try {
+      const e = JSON.parse(linea);
+      if (Number.isFinite(e?.fecha) && TIPOS.has(e?.tipo)) eventos.push(e);
+    } catch {
+      // Las líneas ilegibles se descartan.
+    }
+  }
+  return eventos;
+}
+
+// El registro no crece sin límite: solo los últimos 90 días y como máximo 500 eventos.
+export function podarEventos(eventos, ahora) {
+  return eventos.filter((e) => e.fecha >= ahora - DIAS_DE_REGISTRO * DIA_MS).slice(-MAX_EVENTOS);
+}
+
+const despuesDe = (eventos, tipos) => {
+  let ultimo = -1;
+  eventos.forEach((e, i) => { if (tipos.includes(e.tipo)) ultimo = i; });
+  return eventos.slice(ultimo + 1).filter((e) => e.tipo === 'correccion');
+};
+
+// Correcciones que ninguna lección guardada ha resuelto. Se cuenta por orden en el registro, no por hora:
+// dos eventos pueden caer en el mismo milisegundo.
+export const sinGuardar = (eventos) => despuesDe(eventos, ['guardada']);
+
+// Las que además no se han recordado ya: lo que toca avisar al empezar una sesión.
+export const pendientes = (eventos) => despuesDe(eventos, ['guardada', 'avisada']);
+
+const SENSIBLE = new RegExp([
+  String.raw`\b(?:sk-[\w-]{10,}|gh[pousr]_\w{20,}|AKIA[0-9A-Z]{12,}|xox[abprs]-[\w-]{10,})`,
+  String.raw`-----BEGIN [A-Z ]*PRIVATE KEY`,
+  String.raw`\b(?:password|passwd|contraseña|token|secret|api[_-]?key|clave)\s*[=:]\s*\S{6,}`,
+].join('|'), 'iu');
+
+// Lo que se guarda de lo que escribió la persona: una frase corta, y nada si parece llevar un secreto.
+export function textoSeguro(texto) {
+  const limpio = String(texto ?? '').replace(/\s+/gu, ' ').trim();
+  if (SENSIBLE.test(limpio)) return '(texto omitido: parecía contener un dato sensible)';
+  return limpio.slice(0, MAX_TEXTO);
+}
+
+// Memoria persistente de Claude Code: ~/.claude/projects/<proyecto>/memory/<nota>.md
+export function esRutaDeMemoria(ruta) {
+  return /\/\.claude\/projects\/[^/]+\/memory\/[^/]+\.md$/u.test(String(ruta ?? '').replaceAll('\\', '/'));
+}
+
+export function avisoPendientes(correcciones) {
+  const ultimas = correcciones.slice(-3).map((c) => `«${c.texto ?? '(sin texto)'}»`).join(', ');
+  const n = correcciones.length;
+  const cuantas = n === 1 ? '1 corrección tuya' : `${n} correcciones tuyas`;
+  return `[nexakit: quedaron ${cuantas} sin guardar de sesiones anteriores: ${ultimas}. Si siguen valiendo, guárdalas en tu memoria persistente (tipo feedback, con el porqué y cómo aplicarlas) y aplícalas desde ahora.]`;
+}

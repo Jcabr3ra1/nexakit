@@ -625,7 +625,7 @@ function requireSuccess(result, message) {
   }
 }
 
-function resolveManifestPath(target, explicitManifestPath) {
+export function resolveManifestPath(target, explicitManifestPath) {
   if (explicitManifestPath) {
     const explicit = path.resolve(explicitManifestPath);
     return isFile(explicit) ? explicit : null;
@@ -637,13 +637,13 @@ function resolveManifestPath(target, explicitManifestPath) {
   return isFile(candidate) ? candidate : null;
 }
 
-function resolveConfiguredPath(baseDirectory, configuredPath) {
+export function resolveConfiguredPath(baseDirectory, configuredPath) {
   return path.isAbsolute(configuredPath)
     ? path.normalize(configuredPath)
     : path.resolve(baseDirectory, configuredPath);
 }
 
-function readJson(filePath, label) {
+export function readJson(filePath, label) {
   try {
     return JSON.parse(fs.readFileSync(filePath, "utf8"));
   } catch (error) {
@@ -658,7 +658,7 @@ function writeJsonAtomic(filePath, value) {
   writeTextAtomic(filePath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-function writeTextAtomic(filePath, content) {
+export function writeTextAtomic(filePath, content) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const temporaryPath = `${filePath}.project-memory-${process.pid}.tmp`;
   fs.writeFileSync(temporaryPath, content, { encoding: "utf8", mode: 0o600 });
