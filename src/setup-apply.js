@@ -5,6 +5,7 @@ import { planReviewInstructions, applyReviewInstructions } from './review-instru
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { connectMemory } from './connect.js';
+import { allowMemoryDirectory } from './memory-allow-dir.js';
 import { diagnoseMemory } from './doctor.js';
 import { initializeMemory } from './init.js';
 import { acquireLock } from './install-lock.js';
@@ -157,6 +158,10 @@ export async function applySetup(
       const diagnosis = await diagnoseMemory(memoryPath);
       if (diagnosis.summary.errors > 0)
         throw new Error('La memoria se creó, pero su comprobación encontró errores.');
+    },
+    'memory-allow-dir': async () => {
+      const report = await allowMemoryDirectory({ targetPath: memoryPath, apply: true });
+      if (report.status === 'conflict') throw new Error(report.reasons.join(' '));
     },
     answers: () =>
       withLock(homeDirectory, acquire, (lock) => writeSetupAnswers(state.project.root, answers, lock)),

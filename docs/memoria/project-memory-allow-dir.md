@@ -18,6 +18,10 @@ project-memory allow-dir /ruta/a/la/memoria --json
 
 Después de aplicar, reinicia la sesión de Claude Code.
 
+`npx nexakit` lo hace por ti: si eliges Claude Code y el proyecto tiene memoria,
+la confirmación incluye «Permitir a Claude Code abrir la memoria desde este
+proyecto» y lo aplica con el resto. Si hay un conflicto, solo avisa.
+
 ## Qué cambia
 
 1. Añade la ruta de la bóveda a `permissions.additionalDirectories` de

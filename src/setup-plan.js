@@ -200,6 +200,16 @@ export function buildConfirmation(state, answers) {
           add('!', `No encontré ${AGENT_NAMES[agent]}; no puedo conectarle la memoria`);
       }
       for (const agent of need) block(`memory-connect:${agent}`, `Memoria conectada a ${AGENT_NAMES[agent]}`);
+      // Claude Code refuses files outside the project unless the folder is declared; closing the memory needs it.
+      if (agents.includes('claude') && state.agentsFound.claude) {
+        const allowDir = state.memory.allowDir?.[target];
+        if (allowDir === 'create') {
+          add('+', 'Permitir a Claude Code abrir la memoria desde este proyecto (solo en tu copia; escribir sigue pidiendo permiso)');
+          block('memory-allow-dir', 'Memoria permitida en Claude Code');
+        } else if (allowDir === 'conflict') {
+          add('!', 'No pude declarar la memoria como carpeta permitida de Claude Code; revisa `nexakit memoria allow-dir`');
+        }
+      }
     }
   }
 

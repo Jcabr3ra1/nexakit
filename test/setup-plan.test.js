@@ -218,3 +218,22 @@ test('Superpowers: an agent not chosen or not found is left alone', () => {
   const confirmation = buildConfirmation(state, { ...suggestedAnswers(state), agents: ['claude'] });
   assert.deepEqual(blockIds(confirmation).filter(id => id.startsWith('superpowers:')), ['superpowers:claude']);
 });
+
+test('con Claude elegido, la memoria se declara como carpeta permitida; ya declarada no se repite y un conflicto solo avisa', () => {
+  const con = (allowDir, extra = {}) => {
+    const state = puntoMotos({ memory: { existing: { vaultPath: VAULT }, suggestedPath: VAULT, kinds: { [VAULT]: 'memory' },
+      connections: { [VAULT]: { claude: 'unchanged', codex: 'unchanged' } }, allowDir: { [VAULT]: allowDir } }, ...extra });
+    return buildConfirmation(state, suggestedAnswers(state));
+  };
+  const pendiente = con('create');
+  assert.ok(marks(pendiente).some(line => /^\+ Permitir a Claude Code abrir la memoria desde este proyecto/u.test(line)));
+  const ids = blockIds(pendiente);
+  assert.ok(ids.includes('memory-allow-dir'));
+  assert.ok(ids.indexOf('memory-allow-dir') < ids.indexOf('final-check'));
+  assert.ok(!blockIds(con('unchanged')).includes('memory-allow-dir'));
+  assert.ok(!marks(con('unchanged')).some(line => /Permitir a Claude Code/u.test(line)));
+  const conflicto = con('conflict');
+  assert.ok(!blockIds(conflicto).includes('memory-allow-dir'));
+  assert.ok(marks(conflicto).some(line => /^! .*allow-dir/u.test(line)));
+  assert.ok(!blockIds(con('create', { agentsFound: { claude: false, codex: true, antigravity: false } })).includes('memory-allow-dir'), 'sin Claude Code no aplica');
+});
