@@ -50,6 +50,22 @@ Cada modelo tiene su propia caché: tras un `/model`, el turno siguiente relee t
 - `fable` es el más caro por token: resérvalo para trabajo largo y ambiguo que de verdad lo necesite.
 - `/usage` muestra el acierto de caché (`Prompt cache (main)`), y la barra de `nexakit-modelo` también (`caché N%`). Si baja de golpe, algo cambió el prefijo: un cambio de modelo, un MCP o un plugin.
 
+### Qué salida elegir, de la más barata a la más cara
+
+Aplica la primera que resuelva el caso (es el mismo criterio que usa la barra de `nexakit-modelo`):
+
+| Situación | Salida | Coste |
+| --- | --- | --- |
+| Pregunta corta o explicación de algo ya en contexto | bajar el esfuerzo a `low` | ninguno; ahorra razonamiento |
+| Fallo normal en código existente | subir el esfuerzo a `high`, mismo modelo | ninguno de caché |
+| Tarea mecánica (commit, push, lint, búsquedas) | delegar en `nivel-ligero` | un subagente pequeño |
+| Fallo que ya se intentó y sigue, intermitente, de seguridad o concurrencia | con poco contexto o caché fría, cambiar al más capaz; si no, delegar en `nivel-alto` | relectura sin caché, o un subagente |
+| Diseño o arquitectura | el más capaz; con mucho contexto, mejor en sesión nueva | relee todo el contexto si se cambia a mitad |
+| Cinco o más turnos de rutina en un modelo más caro del necesario | sesión nueva en el modelo de uso diario | ninguno; deja de pagar de más en cada turno |
+| Límite de uso al 80 % o más y trabajo de diseño | modelo de uso diario con `high`, avisando al usuario | ninguno de caché |
+
+La caché está fría tras una hora sin actividad con suscripción (cinco minutos con clave de API): en ese momento cambiar de modelo no cuesta nada extra, y es el mejor momento para hacerlo o para abrir sesión nueva.
+
 ## 5. Si un resultado salió mal, diagnostica antes de subir
 
 1. ¿Tenía buen contexto (instrucciones claras, archivos, herramientas)? Si no, arréglalo primero.

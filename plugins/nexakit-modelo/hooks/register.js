@@ -1,4 +1,5 @@
 import { familia, filasDeAgentes, segmentosDeBarra } from './barra.js';
+import { ajustarPorLimite } from './decidir.js';
 import { recomendarPorTexto } from './recomendar.js';
 
 async function refrescar($, estado, { usage = false } = {}) {
@@ -29,6 +30,33 @@ async function sincronizarAgentes($, agentes) {
 const mismaRecomendacion = (a, b) =>
   a?.model === b?.model && a?.effort === b?.effort && a?.delegar === b?.delegar;
 
+// La caché de la conversación caduca tras un rato sin actividad: una hora con suscripción (la API informa
+// límites de uso) y cinco minutos con clave de API. Con la caché fría, cambiar de modelo ya no cuesta nada extra.
+const MINUTO = 60 * 1000;
+const vidaDeCache = (usage) => ((usage?.rateLimits ?? []).length > 0 ? 60 : 5) * MINUTO;
+const RANGO = { haiku: 0, sonnet: 1, opus: 2, fable: 3 };
+const rango = (model) => RANGO[familia(model)] ?? -1;
+
+async function medirCacheFria($, estado) {
+  try {
+    const fria = estado.ultimaActividad !== null && (await $.clock.now()) - estado.ultimaActividad > vidaDeCache(estado.usage);
+    if (fria === estado.cacheFria) return false;
+    estado.cacheFria = fria;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function marcarActividad($, estado) {
+  try {
+    estado.ultimaActividad = await $.clock.now();
+    estado.cacheFria = false;
+  } catch {
+    // Sin reloj no se sabe si la caché está fría: se asume caliente.
+  }
+}
+
 const cacheVacia = () => ({ read: 0, creation: 0, input: 0, turnos: 0 });
 const tokens = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0);
 
@@ -44,7 +72,7 @@ function sumarCache(estado, usage) {
 // Una sola barra sobre el prompt con modelo, esfuerzo, recomendación y uso. Solo muestra:
 // nunca cambia el modelo ni el esfuerzo de la sesión.
 export function register(on) {
-  const estado = { model: null, effort: null, modeloDelEsfuerzo: null, recommendation: null, enviada: null, usage: null, cache: cacheVacia() };
+  const estado = { model: null, effort: null, modeloDelEsfuerzo: null, recommendation: null, enviada: null, usage: null, cache: cacheVacia(), ultimaActividad: null, cacheFria: false, rutinaSeguidas: 0 };
   // Subagentes de esta petición, por id, con el modelo y el esfuerzo que de verdad usaron.
   const agentes = new Map();
 
@@ -76,7 +104,8 @@ export function register(on) {
     const r = await next(e);
     try {
       const nueva = recomendarPorTexto(r?.text ?? '', estado.enviada);
-      if (!mismaRecomendacion(nueva, estado.recommendation)) {
+      const cambioCache = await medirCacheFria($, estado);
+      if (cambioCache || !mismaRecomendacion(nueva, estado.recommendation)) {
         estado.recommendation = nueva;
         $.ui.invalidate('ui.render');
       }
@@ -89,6 +118,11 @@ export function register(on) {
   on('prompt.submit', async ($, e, next) => {
     estado.recommendation = recomendarPorTexto(e.text, estado.enviada);
     estado.enviada = estado.recommendation;
+    await medirCacheFria($, estado);
+    // Turnos seguidos de rutina en un modelo más caro del que hace falta: al quinto se propone sesión nueva.
+    const limite = Math.max(-1, ...(estado.usage?.rateLimits ?? []).map((l) => (Number.isFinite(l?.percentUsed) ? l.percentUsed : -1)));
+    const necesaria = ajustarPorLimite(estado.recommendation, limite < 0 ? undefined : limite);
+    estado.rutinaSeguidas = estado.model && !necesaria.delegar && rango(necesaria.model) < rango(estado.model) ? estado.rutinaSeguidas + 1 : 0;
     for (const [id, a] of agentes) if (['completed', 'idle', 'failed', 'killed'].includes(a.status)) agentes.delete(id);
     $.ui.invalidate('ui.render');
     return next(e);
@@ -115,6 +149,7 @@ export function register(on) {
     if (!e.agentId) {
       // Solo la sesión principal: cada subagente tiene su propia caché y no toca la de la sesión.
       sumarCache(estado, r?.usage);
+      await marcarActividad($, estado);
       await refrescar($, estado, { usage: true });
       if (agentes.size > 0) await sincronizarAgentes($, agentes);
     }
@@ -134,7 +169,7 @@ export function register(on) {
 
   on('session.end', async ($, e, next) => {
     agentes.clear();
-    Object.assign(estado, { model: null, effort: null, modeloDelEsfuerzo: null, recommendation: null, enviada: null, usage: null, cache: cacheVacia() });
+    Object.assign(estado, { model: null, effort: null, modeloDelEsfuerzo: null, recommendation: null, enviada: null, usage: null, cache: cacheVacia(), ultimaActividad: null, cacheFria: false, rutinaSeguidas: 0 });
     return next(e);
   });
 }

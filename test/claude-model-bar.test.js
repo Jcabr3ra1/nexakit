@@ -22,15 +22,15 @@ test('lo difícil gana a lo mecánico y una confirmación conserva la recomendac
 
 test('casos de la revisión: confirmaciones exactas, alcance completo y error inocuo', () => {
   const ligera = recomendarPorTexto('haz commit');
-  assert.deepEqual(pick(recomendarPorTexto('no funciona', ligera)), ['opus', 'high']);
-  assert.deepEqual(pick(recomendarPorTexto('ok, depura esto', ligera)), ['opus', 'high']);
+  assert.deepEqual(pick(recomendarPorTexto('no funciona', ligera)), ['sonnet', 'high']);
+  assert.deepEqual(pick(recomendarPorTexto('ok, depura esto', ligera)), ['sonnet', 'high']);
   assert.deepEqual(pick(recomendarPorTexto('sí, investiga seguridad', ligera)), ['opus', 'high']);
   assert.equal(recomendarPorTexto('ok dale gracias', ligera), ligera);
   assert.equal(recomendarPorTexto('¡sí, dale!', ligera), ligera);
   assert.notEqual(recomendarPorTexto('sídale', ligera), ligera);
   assert.deepEqual(pick(recomendarPorTexto('implementa el módulo y haz commit')), ['sonnet', 'medium']);
   assert.deepEqual(pick(recomendarPorTexto('traduce los mensajes de error')), ['haiku', 'low']);
-  assert.deepEqual(pick(recomendarPorTexto('arregla el botón que no guarda')), ['opus', 'high']);
+  assert.deepEqual(pick(recomendarPorTexto('arregla el botón que no guarda')), ['sonnet', 'high']);
 });
 
 test('los nombres de modelo se leen como personas', () => {
@@ -166,20 +166,21 @@ test('el mod registra el modelo real de cada subagente y lo dibuja bajo la líne
 });
 
 test('preguntar por qué o pedir investigar no escala a Opus: es trabajo habitual', () => {
-  assert.deepEqual(pick(recomendarPorTexto('¿por qué usamos zod aquí?')), ['sonnet', 'medium']);
+  assert.deepEqual(pick(recomendarPorTexto('¿por qué usamos zod aquí?')), ['sonnet', 'low']);
   assert.deepEqual(pick(recomendarPorTexto('investiga cómo funciona el login')), ['sonnet', 'medium']);
   assert.deepEqual(pick(recomendarPorTexto('el login falla y no sé por qué')), ['opus', 'high']);
 });
 
 test('lo mecánico se delega en nivel-ligero y un fallo ofrece nivel-alto como alternativa', () => {
   assert.equal(recomendarPorTexto('haz commit y push de esto').delegar, 'nivel-ligero');
-  assert.equal(recomendarPorTexto('arregla el botón que no guarda').delegar, 'nivel-alto');
+  assert.equal(recomendarPorTexto('el botón sigue fallando y no sé por qué').delegar, 'nivel-alto');
+  assert.equal(recomendarPorTexto('arregla el botón que no guarda').delegar, undefined, 'un fallo normal solo sube el esfuerzo');
   assert.equal(recomendarPorTexto('añade un botón de exportar').delegar, undefined);
 });
 
 test('la barra no propone cambiar de modelo cuando eso relee mucho contexto sin caché', () => {
   const mecanica = recomendarPorTexto('haz commit');
-  const fallo = recomendarPorTexto('arregla el botón que no guarda');
+  const fallo = recomendarPorTexto('el botón sigue fallando y no sé por qué');
   const barra = (model, effort, recommendation, percent) =>
     texto(segmentosDeBarra({ model, effort, recommendation, usage: { context: { percent }, rateLimits: [] } }));
   assert.match(barra('claude-opus-5-5', 'medium', mecanica, 5), /→ delega: nivel-ligero/);
@@ -238,20 +239,90 @@ test('la recomendación se actualiza mientras se escribe, antes de enviar', asyn
     for await (const _ of hooks.get('turn.step')(api, { model: 'claude-sonnet-5-5', effort: 'medium' }, async function* () {})) { /* nada */ }
     const r = await escribe('el login falla al guardar');
     assert.deepEqual(r, { text: 'el login falla al guardar', cursor: 25 }, 'devuelve la caja tal cual');
-    assert.match(await pinta(), /→ Opus · high/);
+    assert.match(await pinta(), /→ Sonnet · high/);
     const antes = invalidaciones;
     await escribe('el login falla al guardar.');
     assert.equal(invalidaciones, antes, 'no redibuja si la recomendación no cambia');
     await hooks.get('prompt.submit')(api, { text: 'el login falla al guardar.' }, async (e) => e);
     await escribe('');
-    assert.match(await pinta(), /→ Opus · high/, 'con la caja vacía queda la del último mensaje enviado');
+    assert.match(await pinta(), /→ Sonnet · high/, 'con la caja vacía queda la del último mensaje enviado');
     await escribe('ok dale');
-    assert.match(await pinta(), /→ Opus · high/, 'una confirmación conserva la del último enviado');
+    assert.match(await pinta(), /→ Sonnet · high/, 'una confirmación conserva la del último enviado');
   } finally {
     delete globalThis.h;
   }
 });
 
+test('un fallo normal sube el esfuerzo; el modelo solo sube si ya se intentó, es intermitente o es de seguridad', () => {
+  for (const t of ['corrígela', 'haz entonces los arreglos', 'arrglemos los fallos por favor', 'hay un error en el PR', 'mira que no carga, se queda pegado'])
+    assert.deepEqual(pick(recomendarPorTexto(t)), ['sonnet', 'high'], t);
+  for (const t of ['si no hay endpoints todavía no los crees', 'no sé por qué estás cambiando los fondos'])
+    assert.deepEqual(pick(recomendarPorTexto(t)), ['sonnet', 'medium'], t);
+  assert.deepEqual(pick(recomendarPorTexto('no sé por qué no aparece todavía la recomendación')), ['opus', 'high']);
+  for (const t of ['sigue fallando después del arreglo', 'todavía no funciona el login', 'a veces falla al guardar', 'es un fallo intermitente', 'revisa si hay una vulnerabilidad', 'hay una condición de carrera en el bloqueo', 'otra vez el mismo error'])
+    assert.deepEqual(pick(recomendarPorTexto(t)), ['opus', 'high'], t);
+});
+
+test('preguntas y continuaciones no se toman por trabajo mecánico ni por diseño', () => {
+  for (const t of ['¿ya están instalados los mods?', 'listo, ¿ya hiciste el merge y todo?', 'tengo una pregunta: ¿esa skill aprende de los errores?'])
+    assert.deepEqual(pick(recomendarPorTexto(t)), ['sonnet', 'low'], t);
+  for (const t of ['haz el commit y sigue con el paso 2', 'sí, haz el commit y sigue con el plan', 'haz el commit y sigues', 'terminemos los otros puntos antes de hacer commit'])
+    assert.deepEqual(pick(recomendarPorTexto(t)), ['sonnet', 'medium'], t);
+  assert.deepEqual(pick(recomendarPorTexto('instala las skills y rediseña el panel')), ['opus', 'medium'], 'rediseñar manda sobre instalar');
+  for (const t of ['haz commit, push, pr y merge', 'listo, haz el merge y elimina las ramas', 'haz commit, push, pr y merge para seguir con taller'])
+    assert.equal(recomendarPorTexto(t).delegar, 'nivel-ligero', t);
+  const previa = recomendarPorTexto('diseña la arquitectura del módulo de pagos');
+  assert.equal(recomendarPorTexto('sí, confirmo, sigue con el diseño', previa), previa, 'seguir con el diseño conserva la recomendación');
+  assert.deepEqual(pick(recomendarPorTexto('está bien así, sigue con el diseño')), ['sonnet', 'medium']);
+  assert.deepEqual(pick(recomendarPorTexto('rediseñemos el flujo de compras')), ['opus', 'medium']);
+});
+
+test('con mucho contexto la barra no propone bajar de modelo: solo ajusta el esfuerzo', () => {
+  const fallo = recomendarPorTexto('arregla el botón que no guarda');
+  const barra = (model, effort, recommendation, percent) =>
+    texto(segmentosDeBarra({ model, effort, recommendation, usage: { context: { percent }, rateLimits: [] } }));
+  assert.match(barra('claude-opus-5-5', 'medium', fallo, 50), /→ high/);
+  assert.doesNotMatch(barra('claude-opus-5-5', 'medium', fallo, 50), /Sonnet/);
+  assert.match(barra('claude-opus-5-5', 'high', fallo, 50), /✓/);
+  assert.match(barra('claude-opus-5-5', 'medium', fallo, 5), /→ Sonnet · high/, 'con poco contexto cambiar sale barato');
+  assert.match(barra('claude-sonnet-5-5', 'medium', fallo, 50), /→ Sonnet · high/);
+});
+
 function pick(r) {
   return [r.model, r.effort];
 }
+
+test('el mod detecta la caché fría y los turnos de rutina seguidos en un modelo caro', async () => {
+  const { register } = await import('../plugins/nexakit-modelo/hooks/register.js?decision');
+  const hooks = new Map();
+  register((event, ...rest) => { hooks.set(event, rest.at(-1)); });
+  let ahora = 1_000_000;
+  const usage = { context: { percent: 50, tokens: 100_000 }, rateLimits: [{ kind: 'five_hour', percentUsed: 10 }] };
+  const api = { clock: { now: async () => ahora }, session: { model: async () => 'claude-opus-5-5', usage: async () => usage }, tool: { register: async () => {} }, ui: { status() {}, invalidate() {}, resolve: () => ({ Box: 'Box', Text: 'Text' }) } };
+  const pinta = async () => JSON.stringify(await hooks.get('ui.render')(api, { props: { hasSurvey: false } }, async () => 'engine'));
+  const envia = (text) => hooks.get('prompt.submit')(api, { text }, async (e) => e);
+  const turno = async () => {
+    for await (const _ of hooks.get('turn.step')(api, { model: 'claude-opus-5-5', effort: 'medium' }, async function* () {})) { /* nada */ }
+    await hooks.get('turn.complete')(api, {}, async () => ({ text: '', usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 9, cache_creation_input_tokens: 0 } }));
+  };
+  globalThis.h = (tag, props, ...children) => ({ tag, props, children });
+  try {
+    await hooks.get('session.start')(api, {}, async (e) => e);
+    for (let i = 0; i < 4; i += 1) { await envia('añade un botón de exportar'); await turno(); }
+    assert.match(await pinta(), /✓/, 'cuatro turnos de rutina en Opus con mucho contexto: se mantiene');
+    await envia('añade otro botón');
+    assert.match(await pinta(), /→ sesión nueva en Sonnet/);
+    await turno();
+    await envia('el login sigue fallando y no sé por qué');
+    assert.doesNotMatch(await pinta(), /sesión nueva/, 'un trabajo que sí necesita el modelo reinicia la cuenta');
+    await turno();
+    ahora += 61 * 60 * 1000;
+    await hooks.get('prompt.edit')(api, { text: '' }, async () => ({ text: 'añade un filtro', cursor: 15 }));
+    assert.match(await pinta(), /→ Sonnet · medium \(caché fría: cambiar no cuesta\)/);
+    await turno();
+    await hooks.get('prompt.edit')(api, { text: '' }, async () => ({ text: 'añade un filtro más', cursor: 19 }));
+    assert.doesNotMatch(await pinta(), /caché fría/, 'tras un turno la caché vuelve a estar caliente');
+  } finally {
+    delete globalThis.h;
+  }
+});

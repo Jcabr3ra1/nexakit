@@ -1,4 +1,5 @@
 // Contenido de la barra sobre el prompt: datos puros (texto y color por tramo) para poder probarlos.
+import { decidir } from './decidir.js';
 import { UMBRAL_AVISO, UMBRAL_URGENTE } from './umbrales.js';
 
 const FAMILIA = /(haiku|sonnet|opus|fable)(?:-(\d+)-(\d+))?/iu;
@@ -27,10 +28,6 @@ export function tono(percent) {
   return 'success';
 }
 
-// Desde este porcentaje de contexto, cambiar de modelo cuesta más que delegar: el turno siguiente relee
-// todo el historial sin caché (cada modelo tiene la suya). Cambiar el esfuerzo no la rompe en los 5.x.
-export const CONTEXTO_PARA_DELEGAR = 30;
-
 // Acierto de caché acumulado: lo leído de la caché frente a todo lo que entró. null hasta tener dos
 // turnos, porque el primero siempre escribe la caché entera.
 export function aciertoDeCache(cache) {
@@ -41,22 +38,25 @@ export function aciertoDeCache(cache) {
 
 const tonoCache = (p) => (p >= 80 ? 'success' : p >= 50 ? 'warning' : 'error');
 
-function sugerencia({ model, effort, recommendation, ctx }) {
-  const mismaFamilia = familia(model) === familia(recommendation.model);
-  if (effort && mismaFamilia && effort === recommendation.effort) return { text: '  ✓', color: 'success' };
-  const delegar = recommendation.delegar &&
-    (recommendation.delegar === 'nivel-ligero' || (!mismaFamilia && esNumero(ctx) && ctx >= CONTEXTO_PARA_DELEGAR));
-  if (delegar && !mismaFamilia) return { text: `  → delega: ${recommendation.delegar}`, color: 'suggestion' };
-  return { text: `  → ${nombreModelo(recommendation.model)} · ${recommendation.effort}`, color: 'suggestion' };
+// La decisión (mantener, esfuerzo, delegar, cambiar o sesión nueva) la toma decidir.js; aquí solo se pinta.
+function sugerencia(estado) {
+  const d = decidir(estado);
+  if (!d) return null;
+  return d.accion === 'mantener' ? { text: '  ✓', color: 'success' } : { text: `  → ${d.texto}`, color: 'suggestion' };
 }
 
-export function segmentosDeBarra({ model, effort, recommendation, usage, cache }) {
+// El límite de uso más alto de los que informa la API (5 horas o semanal).
+const limiteMasAlto = (usage) => Math.max(-1, ...(usage?.rateLimits ?? []).map((l) => (esNumero(l?.percentUsed) ? l.percentUsed : -1)));
+
+export function segmentosDeBarra({ model, effort, recommendation, usage, cache, cacheFria = false, rutinaSeguidas = 0 }) {
   const s = [
     { text: nombreModelo(model), color: 'claude', bold: true },
     effort ? { text: ` · ${effort}` } : { text: ' · esfuerzo ?', dim: true },
   ];
   const ctx = usage?.context?.percent;
-  if (recommendation) s.push(sugerencia({ model, effort, recommendation, ctx }));
+  const limite = limiteMasAlto(usage);
+  const propuesta = recommendation && sugerencia({ model, effort, recommendation, ctx, tokens: usage?.context?.tokens, cacheFria, limite: limite < 0 ? undefined : limite, rutinaSeguidas });
+  if (propuesta) s.push(propuesta);
   const acierto = aciertoDeCache(cache);
   if (acierto !== null) s.push({ text: '   caché ', dim: true }, { text: `${Math.round(acierto)}%`, color: tonoCache(acierto) });
   if (esNumero(ctx)) {
