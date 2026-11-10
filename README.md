@@ -39,6 +39,9 @@ npx nexakit setup --omitir <skill> --apply   # Declarar quitada una skill global
 npx nexakit setup --reponer <skill> --apply  # Devolver una skill global que quitaste
 ~/.nexakit/nexakit revision --disponibles --principal <ia>  # Ver IA revisoras certificadas
 ~/.nexakit/nexakit modelo                      # Ver catálogo real de modelos y esfuerzos
+~/.nexakit/nexakit ahorro                      # Cuánta salida de comandos recortó nexakit-ahorro
+~/.nexakit/nexakit lecciones                   # Correcciones, lecciones guardadas y pendientes
+npx nexakit memoria allow-dir <bóveda> --apply # Permitir a Claude Code abrir la memoria desde el proyecto
 ```
 
 Si quitas a mano el enlace de una skill global que nexakit instaló, `npx nexakit` no la vuelve a crear en esa IA. `frontend-design`, `web-design-guidelines` y `mcp-builder` ya no forman parte de la base global: se instalan por proyecto cuando se detecta su stack.
@@ -67,10 +70,10 @@ Los mods de Claude Code se instalan *dentro* de Claude Code: `/plugin marketplac
 
 - **Revisión entre IA en solo lectura.** Aislamiento certificado y procedencia verificada entre Claude Code, Codex y Antigravity. [Flujo de revisión](docs/agentes/coordinacion/revision-entre-ia.md).
 - **Memoria por proyecto.** Contexto separado del código y conectado en solo lectura mediante MCP, con seguimiento de tareas largas y cierre con `/cerrar-memoria`. [Crear una memoria](docs/memoria/project-memory-init.md).
-- **Barra de modelo y uso.** El mod `nexakit-modelo` dibuja sobre el prompt el modelo y el esfuerzo, la recomendación para cada mensaje (sin cambiar nada) y el contexto y los límites con colores.
+- **Barra de modelo y uso.** El mod `nexakit-modelo` dibuja sobre el prompt el modelo y el esfuerzo, la recomendación para cada mensaje (sin cambiar nada), el acierto de caché y el contexto y los límites con colores. La recomendación aparece mientras escribes y elige la salida más barata: ajustar el esfuerzo, delegar en un subagente, cambiar de modelo solo cuando no cuesta caché, o abrir una sesión nueva.
 - **Aviso de sesión.** El mod `nexakit-sesion` avisa al 60 % y al 80 % de contexto cuándo conviene abrir una sesión nueva, pide delegar en serie cuando la cuota de 5 h pasa del 70 % y, al compactar, indica al resumen qué no puede perder (rama, archivos, decisiones, pendientes y comprobaciones).
-- **Aprender de los errores.** El mod `nexakit-lecciones` frena un comando que acaba de fallar igual (si nada cambió desde entonces), pide parar y cambiar de enfoque cuando el mismo tipo de error sale tres veces, y cuando un mensaje tuyo corrige algo pide guardar la lección en la memoria persistente de Claude. Para repetir a propósito, pon `NEXAKIT_REPETIR=1` delante del comando.
-- **Ahorro de tokens.** El mod `nexakit-ahorro` recorta la salida larga de los comandos (más de 120 líneas) a su principio, su final y las líneas con fallos, y guarda la completa en `~/.nexakit/salidas/`. Para verla entera, pon `NEXAKIT_SALIDA=completa` delante del comando.
+- **Aprender de los errores.** El mod `nexakit-lecciones` frena un comando que acaba de fallar igual (si nada cambió desde entonces), pide parar y cambiar de enfoque cuando el mismo tipo de error sale tres veces, y cuando un mensaje tuyo corrige algo pide guardar la lección en la memoria persistente de Claude. Apunta las correcciones y, si alguna quedó sin guardar, la recuerda una vez en la sesión siguiente; `nexakit lecciones` las resume. Para repetir a propósito, pon `NEXAKIT_REPETIR=1` delante del comando.
+- **Ahorro de tokens.** El mod `nexakit-ahorro` recorta la salida larga de los comandos (más de 120 líneas) a su principio, su final y las líneas con fallos, y guarda la completa en `~/.nexakit/salidas/`. Para verla entera, pon `NEXAKIT_SALIDA=completa` delante del comando. `nexakit ahorro` resume cuánto se recortó.
 - **Guía interactiva.** Los tres pasos de inicio, buscador de comandos copiables y resolución de problemas. Abre [la guía HTML](docs/guias/guia-de-comandos.html) en tu navegador.
 - **Catálogo ampliable.** Incorpora skills y comprueba sus archivos con `npm run catalog:validate`. [Añadir una skill](docs/skills/ampliar-catalogo.md).
 

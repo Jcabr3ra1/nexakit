@@ -111,10 +111,10 @@ Se escribe *dentro* de Claude Code, no en la terminal, y se aplica al abrir una 
 | Plugin | Qué hace |
 | --- | --- |
 | `niveles` | Cuatro subagentes con modelo y esfuerzo fijos (ligero, normal, exigente y alto) para delegar sin cambiar `/model`. |
-| `nexakit-modelo` | Barra sobre el prompt: modelo, esfuerzo, recomendación por mensaje, contexto, límites y subagentes delegados. |
+| `nexakit-modelo` | Barra sobre el prompt: modelo, esfuerzo, recomendación mientras escribes (ajustar esfuerzo, delegar, cambiar de modelo o sesión nueva), acierto de caché, contexto, límites y subagentes delegados. |
 | `nexakit-sesion` | Avisos al 60 % y al 80 % de contexto, delegar en serie con la cuota alta y qué conservar al compactar. |
-| `nexakit-ahorro` | Recorta la salida larga de los comandos y guarda la completa en `~/.nexakit/salidas/`. |
-| `nexakit-lecciones` | Frena comandos que repiten un fallo y convierte tus correcciones en lecciones guardadas. |
+| `nexakit-ahorro` | Recorta la salida larga de los comandos y guarda la completa en `~/.nexakit/salidas/`. `nexakit ahorro` resume lo recortado. |
+| `nexakit-lecciones` | Frena comandos que repiten un fallo, apunta tus correcciones y recuerda las que quedaron sin guardar. `nexakit lecciones` las resume y `--descartar` da por resueltas las pendientes. |
 
 Para actualizarlos después: `/plugin marketplace update agent-toolkit` y reinicia la sesión.
 
@@ -197,6 +197,7 @@ La sesión principal elige el nivel según el tipo de trabajo y sube de nivel so
 | --- | --- |
 | `node bin/project-memory.js init <carpeta-nueva> --source <repositorio-del-proyecto> --project-id mi-proyecto --project-name "Mi proyecto"` | Vista previa de una memoria nueva en Obsidian para ese proyecto. `--source` es obligatorio. Con `--apply` la crea. |
 | `node bin/project-memory.js connect <bóveda> --agent claude` | Prepara la conexión de la memoria con Claude (o `--agent codex`). Con `--apply` la aplica. |
+| `node bin/project-memory.js allow-dir <bóveda>` | Vista previa de declarar la memoria como carpeta permitida de Claude Code en el proyecto (lo hace `npx nexakit` al elegir Claude). Con `--apply` la aplica. |
 | `node bin/project-memory.js doctor <bóveda>` | Diagnóstico de la bóveda. |
 | `node bin/project-memory.js sync plan <bóveda>` | Qué PR fusionados faltan por registrar en la memoria. |
 | `node bin/project-memory.js sync inspect <bóveda> --pr 42` | Evidencia de un PR concreto, solo lectura. |
@@ -258,7 +259,8 @@ Límites que conviene recordar:
 - Los agentes de solo lectura de Codex lo son por instrucción, no por sandbox.
 - Gemini no participa en la revisión cruzada y no genera vídeo ni audio; el audio no se analiza.
 - Probado en macOS con Node 24, clonando en carpetas distintas. No se ha comprobado en Linux ni en Windows.
-- Todavía no hay una medición controlada que demuestre ahorro de tokens.
+- `nexakit ahorro` estima los tokens recortados (caracteres / 4); todavía no hay una medición controlada del ahorro total.
+- La recomendación de modelo lee frases en español; con mensajes en otro idioma muestra el valor por defecto.
 - Nada se fusiona, se sube ni se despliega sin tu autorización.
 
 ### Avanzado
