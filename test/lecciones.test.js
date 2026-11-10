@@ -125,7 +125,7 @@ test('las reglas puras: podar, pendientes, texto seguro y ruta de memoria', asyn
   ];
   assert.deepEqual(podarEventos(evs, ahora).map((e) => e.texto ?? e.tipo), ['a', 'guardada', 'b', 'avisada', 'c'], 'quita lo de más de 90 días');
   assert.equal(podarEventos(Array.from({ length: 700 }, (_, i) => ({ fecha: ahora - i, tipo: 'freno' })), ahora).length, 500, 'tope de 500');
-  assert.deepEqual(pendientes(evs).map((e) => e.texto), ['c'], 'solo lo posterior a la última guardada y a la última avisada');
+  assert.deepEqual(pendientes(evs).map((e) => e.texto), ['c'], 'solo lo que sigue sin guardar y aún no se ha recordado');
   assert.deepEqual(pendientes(evs.slice(0, 2)).map((e) => e.texto), ['vieja', 'a']);
   assert.deepEqual(leerEventos('basura\n{"fecha":1,"tipo":"freno"}\n{"tipo":"raro","fecha":2}\n{"fecha":"x","tipo":"freno"}\n').map((e) => e.tipo), ['freno'], 'ignora líneas inválidas y tipos desconocidos');
   assert.equal(textoSeguro('háblame en español'), 'háblame en español');
@@ -133,7 +133,8 @@ test('las reglas puras: podar, pendientes, texto seguro y ruta de memoria', asyn
   assert.match(textoSeguro('te dije que mi token=abc123def456 no se pega'), /omitido/u);
   assert.match(textoSeguro('la clave es sk-abcdefghijklmnop1234'), /omitido/u);
   assert.equal(esRutaDeMemoria('/Users/yo/.claude/projects/-Users-yo-p/memory/feedback.md'), true);
-  assert.equal(esRutaDeMemoria('C:\\Users\\yo\\.claude\\projects\\p\\memory\\MEMORY.md'), true);
+  assert.equal(esRutaDeMemoria('C:\\Users\\yo\\.claude\\projects\\p\\memory\\feedback.md'), true);
+  assert.equal(esRutaDeMemoria('/Users/yo/.claude/projects/p/memory/MEMORY.md'), false, 'el índice no es una lección');
   assert.equal(esRutaDeMemoria('/Users/yo/proyecto/memory/notas.md'), false);
   assert.equal(esRutaDeMemoria('/Users/yo/.claude/projects/p/memory/foto.png'), false);
 });
@@ -203,4 +204,32 @@ test('registrar nunca rompe el turno aunque el disco falle', async () => {
   assert.match(e2.text, /memoria persistente/u);
   const r = await h('tool.call')($, { tool: 'Bash', command: 'make' }, falla('boom'));
   assert.equal(r.isError, true);
+});
+
+test('cada lección guardada resuelve una sola corrección, la más reciente; descartar las resuelve todas', async () => {
+  const { sinGuardar, pendientes } = await import('../plugins/nexakit-lecciones/hooks/lecciones.js');
+  const c = (texto) => ({ fecha: 1, tipo: 'correccion', texto });
+  const g = { fecha: 1, tipo: 'guardada' };
+  const textos = (evs) => evs.map((e) => e.texto);
+  assert.deepEqual(textos(sinGuardar([c('a'), c('b'), g])), ['a'], 'la guardada resuelve la última, no las dos');
+  assert.deepEqual(textos(sinGuardar([c('a'), c('b'), g, g])), []);
+  assert.deepEqual(textos(sinGuardar([g, c('a')])), ['a'], 'una guardada anterior no resuelve una corrección posterior');
+  assert.deepEqual(textos(sinGuardar([c('a'), g, g, c('b')])), ['b'], 'una guardada de más no queda a crédito');
+  assert.deepEqual(textos(sinGuardar([c('a'), c('b'), { fecha: 1, tipo: 'descartada' }, c('d')])), ['d']);
+  assert.deepEqual(textos(pendientes([c('a'), c('b'), { fecha: 1, tipo: 'avisada' }, g, c('d')])), ['d'], 'lo ya recordado no se repite');
+  assert.deepEqual(textos(sinGuardar([c('a'), c('b'), { fecha: 1, tipo: 'avisada' }, g, c('d')])), ['a', 'd']);
+});
+
+test('dos correcciones y una sola nota de memoria dejan una pendiente; el índice MEMORY.md no cuenta', async () => {
+  const h = await montar();
+  const { $, eventos } = entorno();
+  const herramienta = h('tool.call');
+  await h('prompt.submit')($, { text: 'te dije que en español' }, async (e) => e);
+  await h('prompt.submit')($, { text: 'no vuelvas a hacer commit solo' }, async (e) => e);
+  await herramienta($, { tool: 'Write', file_path: MEMORIA }, bien);
+  await herramienta($, { tool: 'Edit', file_path: MEMORIA.replace('feedback-espanol.md', 'MEMORY.md') }, bien);
+  assert.deepEqual(eventos().map((e) => e.tipo), ['correccion', 'correccion', 'guardada']);
+  await herramienta($, { tool: 'Write', file_path: MEMORIA.replace('espanol', 'commit') }, bien);
+  await herramienta($, { tool: 'Write', file_path: MEMORIA.replace('espanol', 'otra') }, bien);
+  assert.equal(eventos().filter((e) => e.tipo === 'guardada').length, 2, 'sin pendientes no apunta más');
 });

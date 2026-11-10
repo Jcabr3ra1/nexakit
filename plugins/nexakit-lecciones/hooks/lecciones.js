@@ -39,10 +39,11 @@ export function claveDeError(texto) {
 }
 
 // --- Registro propio (~/.nexakit/lecciones.jsonl): una línea JSON por evento, en orden cronológico. ---
-// correccion: el usuario corrigió a Claude (con su texto). guardada: Claude escribió en su memoria persistente.
+// correccion: el usuario corrigió a Claude (con su texto). guardada: Claude escribió una nota en su memoria
+// persistente. descartada: la persona dio por resueltas todas las pendientes (`nexakit lecciones --descartar`).
 // avisada: se recordaron al empezar una sesión las correcciones sin guardar. freno / repeticion: ver register.js.
 
-const TIPOS = new Set(['correccion', 'guardada', 'avisada', 'freno', 'repeticion']);
+const TIPOS = new Set(['correccion', 'guardada', 'descartada', 'avisada', 'freno', 'repeticion']);
 const DIA_MS = 24 * 60 * 60 * 1000;
 export const DIAS_DE_REGISTRO = 90;
 export const MAX_EVENTOS = 500;
@@ -67,18 +68,24 @@ export function podarEventos(eventos, ahora) {
   return eventos.filter((e) => e.fecha >= ahora - DIAS_DE_REGISTRO * DIA_MS).slice(-MAX_EVENTOS);
 }
 
-const despuesDe = (eventos, tipos) => {
-  let ultimo = -1;
-  eventos.forEach((e, i) => { if (tipos.includes(e.tipo)) ultimo = i; });
-  return eventos.slice(ultimo + 1).filter((e) => e.tipo === 'correccion');
-};
+// Correcciones que ninguna lección guardada ha resuelto. Cada nota escrita en la memoria resuelve UNA: la más
+// reciente sin resolver (lo habitual es corregir y guardar acto seguido). Se recorre por orden en el registro,
+// no por hora: dos eventos pueden caer en el mismo milisegundo. Cada elemento lleva `recordada` si ya se avisó.
+function recorrer(eventos) {
+  const abiertas = [];
+  for (const e of eventos) {
+    if (e.tipo === 'correccion') abiertas.push({ evento: e, recordada: false });
+    else if (e.tipo === 'guardada') abiertas.pop();
+    else if (e.tipo === 'descartada') abiertas.length = 0;
+    else if (e.tipo === 'avisada') for (const a of abiertas) a.recordada = true;
+  }
+  return abiertas;
+}
 
-// Correcciones que ninguna lección guardada ha resuelto. Se cuenta por orden en el registro, no por hora:
-// dos eventos pueden caer en el mismo milisegundo.
-export const sinGuardar = (eventos) => despuesDe(eventos, ['guardada']);
+export const sinGuardar = (eventos) => recorrer(eventos).map((a) => a.evento);
 
 // Las que además no se han recordado ya: lo que toca avisar al empezar una sesión.
-export const pendientes = (eventos) => despuesDe(eventos, ['guardada', 'avisada']);
+export const pendientes = (eventos) => recorrer(eventos).filter((a) => !a.recordada).map((a) => a.evento);
 
 const SENSIBLE = new RegExp([
   String.raw`\b(?:sk-[\w-]{10,}|gh[pousr]_\w{20,}|AKIA[0-9A-Z]{12,}|xox[abprs]-[\w-]{10,})`,
@@ -93,9 +100,11 @@ export function textoSeguro(texto) {
   return limpio.slice(0, MAX_TEXTO);
 }
 
-// Memoria persistente de Claude Code: ~/.claude/projects/<proyecto>/memory/<nota>.md
+// Una nota de la memoria persistente de Claude Code: ~/.claude/projects/<proyecto>/memory/<nota>.md. El índice
+// MEMORY.md se toca junto con cada nota y no es una lección: contarlo resolvería dos correcciones por nota.
 export function esRutaDeMemoria(ruta) {
-  return /\/\.claude\/projects\/[^/]+\/memory\/[^/]+\.md$/u.test(String(ruta ?? '').replaceAll('\\', '/'));
+  const normal = String(ruta ?? '').replaceAll('\\', '/');
+  return /\/\.claude\/projects\/[^/]+\/memory\/[^/]+\.md$/u.test(normal) && !/\/MEMORY\.md$/u.test(normal);
 }
 
 export function avisoPendientes(correcciones) {

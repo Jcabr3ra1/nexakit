@@ -80,7 +80,7 @@ test('el texto lista hasta 5 pendientes y el JSON todos', async () => {
 test('un argumento desconocido muestra el uso y devuelve 2', async () => {
   const { code, error } = await ejecutar(['--otro']);
   assert.equal(code, 2);
-  assert.match(error, /Uso: nexakit lecciones \[--json\]/u);
+  assert.match(error, /Uso: nexakit lecciones \[--json \| --descartar\]/u);
 });
 
 test('las pendientes se cuentan por orden en el registro, no por hora: dos eventos del mismo milisegundo', async () => {
@@ -89,4 +89,29 @@ test('las pendientes se cuentan por orden en el registro, no por hora: dos event
   assert.deepEqual(JSON.parse(despues.salida).pendientes, ['posterior']);
   const antes = await ejecutar(['--json'], unir(ev(AHORA, 'correccion', 'anterior'), ev(AHORA, 'guardada')));
   assert.deepEqual(JSON.parse(antes.salida).pendientes, []);
+});
+
+test('cada guardada resuelve una corrección y --descartar deja el registro sin pendientes', async () => {
+  const contenido = unir(ev(AHORA - 3, 'correccion', 'a'), ev(AHORA - 2, 'correccion', 'b'), ev(AHORA - 1, 'guardada'));
+  const antes = await ejecutar(['--json'], contenido);
+  assert.deepEqual(JSON.parse(antes.salida).pendientes, ['a']);
+
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'lecciones-'));
+  await fs.mkdir(path.join(home, '.nexakit'));
+  const registro = path.join(home, '.nexakit', 'lecciones.jsonl');
+  await fs.writeFile(registro, contenido);
+  let salida = '';
+  const io = { out: (m) => { salida += m; }, err: () => {} };
+  assert.equal(await runLeccionesCommand(['--descartar'], io, { homeDirectory: home, now: AHORA }), 0);
+  assert.match(salida, /1 corrección descartada/u);
+  const lineas = (await fs.readFile(registro, 'utf8')).trim().split('\n').map((l) => JSON.parse(l));
+  assert.deepEqual(lineas.at(-1), { fecha: AHORA, tipo: 'descartada' });
+  assert.equal(lineas.length, 4, 'conserva el historial');
+  salida = '';
+  assert.equal(await runLeccionesCommand(['--json'], io, { homeDirectory: home, now: AHORA }), 0);
+  assert.deepEqual(JSON.parse(salida).pendientes, []);
+  salida = '';
+  assert.equal(await runLeccionesCommand(['--descartar'], io, { homeDirectory: home, now: AHORA }), 0);
+  assert.match(salida, /No hay correcciones pendientes/u);
+  assert.equal((await fs.readFile(registro, 'utf8')).trim().split('\n').length, 4, 'sin pendientes no escribe');
 });
