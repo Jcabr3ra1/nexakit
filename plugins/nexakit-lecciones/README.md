@@ -15,11 +15,13 @@ Repetir lo que ya falló, o lo que la persona ya corrigió, gasta tokens dos vec
 - **Apunta lo que pasa, sin depender de que Claude se acuerde.** Cada corrección (tu frase, de 200 caracteres como
   máximo, y nada si parece llevar un secreto), cada comando frenado, cada error repetido tres veces y cada vez que
   Claude escribe en su memoria persistente quedan en `~/.nexakit/lecciones.jsonl` (solo los últimos 90 días y 500
-  eventos). Escribir en la memoria resuelve las correcciones apuntadas hasta ese momento.
+  eventos). Cada nota escrita en la memoria resuelve una corrección, la más reciente
+  sin resolver; el índice `MEMORY.md` no cuenta.
 - **Recuerda lo que quedó sin guardar.** Al primer mensaje de una sesión, si de sesiones anteriores quedaron
   correcciones sin guardar, Claude recibe una nota con las últimas tres. Se recuerda una sola vez.
 - **`nexakit lecciones`** resume el registro: correcciones, lecciones guardadas, errores frenados y repetidos, y las
-  que siguen pendientes. Sirve para ver si el mod ayuda.
+  que siguen pendientes. Sirve para ver si el mod ayuda. `nexakit lecciones --descartar` da por resueltas las
+  pendientes que no eran correcciones o ya no valen, sin borrar el historial.
 
 La detección es local y no llama a ningún modelo. Al compactar, `nexakit-sesion` pide conservar las correcciones.
 
