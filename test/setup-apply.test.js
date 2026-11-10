@@ -35,13 +35,15 @@ test('applies the blocks in the fixed order, reports progress, and a second run 
   const result = await applySetup(w.options, answers, { onProgress: (id, phase) => progress.push(`${id}:${phase}`) });
   assert.equal(result.ok, true, JSON.stringify(result.failed));
   assert.deepEqual(result.done, ['answers', 'stable-command', 'project-skills', 'global-skills:claude', 'global-skills:codex', 'global-skills:antigravity',
-    'superpowers:claude', 'superpowers:codex', 'superpowers:antigravity', 'memory-init', 'memory-connect:claude', 'memory-connect:codex', 'memory-connect:antigravity', 'review-instructions', 'final-check']);
+    'superpowers:claude', 'superpowers:codex', 'superpowers:antigravity', 'memory-init', 'memory-connect:claude', 'memory-connect:codex', 'memory-connect:antigravity', 'memory-allow-dir', 'review-instructions', 'final-check']);
   assert.deepEqual(progress.slice(0, 2), ['answers:start', 'answers:done']);
   assert.equal(result.finalCheck.ok, true, result.finalCheck.message);
   assert.deepEqual(w.clis.plugins, { claude: 'activo', codex: 'activo', agy: 'activo' }, 'Superpowers installed in every agent');
 
   const vault = path.join(w.home, 'nexakit-memorias', 'punto-motos');
   assert.equal(await exists(path.join(vault, 'project-memory.json')), true);
+  const local = JSON.parse(await fs.readFile(path.join(w.repo, '.claude/settings.local.json'), 'utf8'));
+  assert.deepEqual(local.permissions.additionalDirectories, [vault], 'la memoria queda como carpeta permitida de Claude Code');
   assert.equal(await exists(path.join(w.repo, '.claude/skills/frontend-design/SKILL.md')), true);
   assert.equal(await exists(path.join(w.repo, '.agents/skills/frontend-design/SKILL.md')), true);
   assert.equal(await exists(path.join(w.home, '.gemini/antigravity-cli/skills/punto-motos/SKILL.md')), true, 'the memory skill for Antigravity');

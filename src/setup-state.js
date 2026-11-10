@@ -10,6 +10,7 @@ import { planReviewInstructions } from './review-instructions.js';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { connectMemory } from './connect.js';
+import { allowMemoryDirectory } from './memory-allow-dir.js';
 import { ACTIONABLE_LINK_STATES } from './link-states.js';
 import {
   findKnownMemories,
@@ -121,6 +122,19 @@ export async function memoryConnections(
   return result;
 }
 
+// Read-only preview of `project-memory allow-dir`: create (not declared yet), unchanged or conflict.
+async function allowDirState(vaultPath) {
+  try {
+    const report = await allowMemoryDirectory({ targetPath: vaultPath });
+    if (report.status === 'unchanged') return 'unchanged';
+    // Only the git exclusion pending is not worth a setup step: the folder is already allowed.
+    if (report.status === 'preview') return report.changes.some((change) => change.id === 'additionalDirectories') ? 'create' : 'unchanged';
+    return 'conflict';
+  } catch {
+    return 'conflict';
+  }
+}
+
 export async function gatherSetupState({
   start = process.cwd(),
   homeDirectory = os.homedir(),
@@ -219,6 +233,7 @@ export async function gatherSetupState({
     suggestedPath,
     kinds: {},
     connections: {},
+    allowDir: {},
   };
   // The chosen path is always inspected, also one typed in "otra carpeta…" (memoryPaths).
   const candidates = [
@@ -241,6 +256,9 @@ export async function gatherSetupState({
     memory.kinds[candidate] = kind;
     if (kind === 'memory' || kind === 'new')
       memory.connections[candidate] = await memoryConnections(candidate, { ...context, kind });
+    // Whether Claude Code may open the vault from this project: a memory to create always needs it declared.
+    if (kind === 'new') memory.allowDir[candidate] = 'create';
+    else if (kind === 'memory') memory.allowDir[candidate] = await allowDirState(candidate);
   }
 
   const reviewInstructions = await planReviewInstructions({ homeDirectory, environment, codexHome });

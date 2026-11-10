@@ -71,6 +71,14 @@ test('an existing memory for the repository is found with how it is connected to
   assert.equal(state.memory.kinds[vault], 'memory');
   // The memory declares Codex and Claude, but neither CLI is installed here; Antigravity is not declared nor found.
   assert.deepEqual(state.memory.connections[vault], { claude: 'create', codex: 'create', antigravity: 'unavailable' });
+  assert.equal(state.memory.allowDir[vault], 'create', 'la memoria aún no es carpeta permitida de Claude Code');
+  await fs.mkdir(path.join(w.repo, '.claude'), { recursive: true });
+  await fs.writeFile(path.join(w.repo, '.claude', 'settings.local.json'), JSON.stringify({ permissions: { additionalDirectories: [vault] } }));
+  const after = await gatherSetupState({ start: w.repo, homeDirectory: w.home, environment: w.environment, toolkitRoot: TOOLKIT_ROOT, runCommand: notFound });
+  assert.equal(after.memory.allowDir[vault], 'unchanged');
+  await fs.writeFile(path.join(w.repo, '.claude', 'settings.local.json'), '{ roto');
+  const broken = await gatherSetupState({ start: w.repo, homeDirectory: w.home, environment: w.environment, toolkitRoot: TOOLKIT_ROOT, runCommand: notFound });
+  assert.equal(broken.memory.allowDir[vault], 'conflict');
 });
 
 test('a memory path is new, an existing memory, or something else that is not touched', async t => {
