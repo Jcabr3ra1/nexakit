@@ -35,6 +35,7 @@ export async function buildRevisionInvocation({
       'read-only',
       '--json',
       '--ignore-user-config',
+      '--skip-git-repo-check',
       '-C',
       root,
       '-',
