@@ -14,6 +14,7 @@ test('review invocation keeps models separate, disables Codex apps and sends pro
   assert.equal(c.executable, process.execPath);
   assert.ok(c.args.includes('apps'));
   assert.ok(c.args.includes('--ignore-user-config'));
+  assert.ok(c.args.includes('--skip-git-repo-check'));
   assert.ok(c.args.includes('read-only'));
   assert.equal(c.args.at(-1), '-');
   const a = await buildRevisionInvocation({
