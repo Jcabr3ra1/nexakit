@@ -223,8 +223,10 @@ localTest("S2 uncertain group observation retains workspace and blocks task", as
   assert.equal((await store(root).observe(request().identity)).state, "reconciliation-required");
 });
 localTest("S2 late started-write cannot race terminal persistence", async t => {
+  // The process must start before the deadline so the held started-write is what misses it. With 400 ms only
+  // 150 ms were left for reservation and claim; a loaded runner spent them and reported "timed-out" before spawning.
   const root = await setup(t); let release;
-  const hold = new Promise(r => { release = r; }); const d = request(); d.limits.timeoutMs = 400;
+  const hold = new Promise(r => { release = r; }); const d = request(); d.limits.timeoutMs = 2000;
   const r = check(await coordinator(root, { store: { checkpoint: async name => { if (name === "after-write-started") await hold; } } })(d));
   assert.equal(r.state, "indeterminate"); release();
   await new Promise(r => setTimeout(r, 50));
