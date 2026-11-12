@@ -1,5 +1,6 @@
 // Pure: turns what nexakit found (setup-state.js) and the person's answers into the confirmation summary, in short
 // sentences, and the ordered blocks that apply it. No I/O, so every screen and every decision is testable.
+import { MODS } from './mods.js';
 
 export const AGENTS = Object.freeze(['claude', 'codex', 'antigravity']);
 export const AGENT_NAMES = Object.freeze({
@@ -23,6 +24,19 @@ export const shortPath = (target, homeDirectory) =>
     target.startsWith(`${homeDirectory}\\`))
     ? `~${target.slice(homeDirectory.length)}`
     : target;
+
+// The confirmation screen groups its lines under these headings, in this order, skipping empty sections.
+export const SECTION_TITLES = Object.freeze({
+  proyecto: 'Proyecto',
+  ia: 'Tus IA',
+  mods: 'Mods de Claude Code',
+  memoria: 'Memoria',
+});
+export function groupLines(lines) {
+  return Object.entries(SECTION_TITLES)
+    .map(([section, title]) => ({ section, title, lines: lines.filter((line) => line.section === section) }))
+    .filter((group) => group.lines.length);
+}
 const plural = (count, one, many) => (count === 1 ? one : many);
 
 // "frontend usa React", "el README menciona Tauri": the reason for a suggestion, from where the signal was found.
@@ -53,6 +67,7 @@ export function suggestedAnswers(state) {
       skills: { chosen, discarded: saved.skills.discarded.filter((name) => names.has(name)) },
       agents: [...saved.agents],
       memory: { ...saved.memory },
+      ...modAnswers(state, saved.agents, saved),
     };
   }
   const installed = (skill) => Object.values(skill.links ?? {}).includes('installed');
@@ -70,15 +85,42 @@ export function suggestedAnswers(state) {
     },
     agents: found.length ? found : [...AGENTS],
     memory,
+    ...modAnswers(state, found.length ? found : AGENTS, null),
   };
 }
 
-const sameAnswers = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const MOD_NAMES = MODS.map((mod) => mod.name);
+const NOT_SUGGESTED = new Set(['activo', 'desconocido']);
+
+// The mods the person wants: what they chose before, plus every mod that still needs something (missing, disabled,
+// outdated) unless they discarded it. Without a mods state (no Claude Code) there is nothing to ask, but what was
+// saved is kept. Answers saved before the mods step have no `mods` and read as no discards.
+function modAnswers(state, agents, saved) {
+  const before = saved?.mods;
+  if (!state.mods) return before ? { mods: { chosen: [...before.chosen], discarded: [...before.discarded] } } : {};
+  const suggest = agents.includes('claude');
+  const decided = new Set([...(before?.chosen ?? []), ...(before?.discarded ?? [])]);
+  const chosen = MOD_NAMES.filter(
+    (name) =>
+      before?.chosen.includes(name) ||
+      (suggest && !decided.has(name) && !NOT_SUGGESTED.has(state.mods[name] ?? 'desconocido')),
+  );
+  return { mods: { chosen, discarded: MOD_NAMES.filter((name) => before?.discarded.includes(name)) } };
+}
+
+// Answers saved before the mods step have no `mods`: they read as no mods chosen and none discarded.
+const withMods = (answers) => ({
+  ...answers,
+  mods: { chosen: [...(answers.mods?.chosen ?? [])].sort(), discarded: [...(answers.mods?.discarded ?? [])].sort() },
+});
+const sameAnswers = (a, b) => JSON.stringify(withMods(a)) === JSON.stringify(withMods(b));
 
 export function buildConfirmation(state, answers) {
   const lines = [];
   const blocks = [];
-  const add = (mark, text) => lines.push({ mark, text });
+  // `section` groups the confirmation screen: 'proyecto', 'ia', 'mods' or 'memoria'.
+  let section = 'proyecto';
+  const add = (mark, text) => lines.push({ mark, text, section });
   const block = (id, label) => blocks.push({ id, label });
   const answersChanged = !state.savedAnswers || !sameAnswers(state.savedAnswers, answers);
   const agents = AGENTS.filter((agent) => answers.agents.includes(agent));
@@ -128,6 +170,7 @@ export function buildConfirmation(state, answers) {
   if (toInstall.length || removeSkills.length) block('project-skills', 'Skills del proyecto');
 
   // Base skills of each chosen agent: only what is missing or repairable; conflicts are reported.
+  section = 'ia';
   const globalBlocks = [];
   for (const agent of agents) {
     const global = state.globalSkills[agent] ?? { pending: 0, conflicts: 0 };
@@ -170,7 +213,27 @@ export function buildConfirmation(state, answers) {
   }
   if (activeIn.length) add('✓', `Superpowers activo en ${joinNames(activeIn)}`);
 
+  // Mods: nexakit's own Claude Code plugins. Only the ones the person chose are installed, updated or enabled.
+  section = 'mods';
+  if (agents.includes('claude') && state.mods) {
+    const mods = state.mods;
+    const chosenMods = MODS.filter((mod) => answers.mods?.chosen.includes(mod.name));
+    for (const mod of chosenMods) {
+      const status = mods[mod.name];
+      if (status === 'falta') add('+', `Mod ${mod.name} en Claude Code`);
+      else if (status === 'actualizable') add('↻', `Actualizar el mod ${mod.name}`);
+      else if (status === 'desactivado') add('↻', `Activar el mod ${mod.name}`);
+      else continue;
+      block(`mod:${mod.name}`, `Mod ${mod.name}`);
+    }
+    const activeMods = MODS.filter((mod) => mods[mod.name] === 'activo');
+    if (activeMods.length) add('✓', `Mods activos en Claude Code: ${joinNames(activeMods.map((mod) => mod.name))}`);
+    if (MODS.some((mod) => (mods[mod.name] ?? 'desconocido') === 'desconocido'))
+      add('!', 'No pude comprobar los mods de Claude Code; revisa /plugin');
+  }
+
   // Memory: create it if needed, then connect it to each chosen agent.
+  section = 'memoria';
   if (answers.memory.decision === 'path') {
     const target = answers.memory.path;
     const kind = state.memory.kinds?.[target] ?? 'new';
@@ -213,6 +276,7 @@ export function buildConfirmation(state, answers) {
     }
   }
 
+  section = 'ia';
   const instructionNames = new Set(
     agents.map((agent) => ({ claude: 'CLAUDE.md', codex: 'AGENTS.md', antigravity: 'GEMINI.md' })[agent]),
   );
@@ -232,8 +296,10 @@ export function buildConfirmation(state, answers) {
   if (answersChanged && (blocks.length || state.savedAnswers)) {
     // Saved first, before any block that can fail, so a retry starts from what the person decided.
     blocks.unshift({ id: 'answers', label: 'Respuestas guardadas' });
-    if (!blocks.some((item) => item.id === 'project-skills'))
+    if (!blocks.some((item) => item.id === 'project-skills')) {
+      section = 'proyecto';
       add('+', 'Guardar tus respuestas en .agent-toolkit (ignorado en Git)');
+    }
   }
   if (blocks.length) block('final-check', 'Comprobación final');
   const allReady = !lines.some((line) => ['+', '−', '↻'].includes(line.mark));

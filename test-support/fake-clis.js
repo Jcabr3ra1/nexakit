@@ -4,6 +4,7 @@
 // { 'agy add': true } fails `agy mcp add`.
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const readJson = (file, fallback) => {
   try {
@@ -16,18 +17,26 @@ const writeJson = (file, value) => {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(value, null, 2));
 };
+const MOD_NAMES = ['niveles', 'nexakit-modelo', 'nexakit-ahorro', 'nexakit-lecciones', 'nexakit-sesion'];
+const toolkitRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const modVersion = (name) =>
+  readJson(path.join(toolkitRoot, 'plugins', name, '.claude-plugin', 'plugin.json'), {}).version;
 const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
 const missing = () => ({ status: 1, stdout: '', stderr: 'No MCP server found' });
 
 export function createFakeClis(
   home,
-  { fail = {}, installed = ['claude', 'codex', 'agy'], reviewOutputs = {}, versions = {}, superpowers = {} } = {},
+  { fail = {}, installed = ['claude', 'codex', 'agy'], reviewOutputs = {}, versions = {}, superpowers = {}, mods = {} } = {},
 ) {
   const calls = [];
   // Superpowers plugin per CLI: 'activo', 'desactivado' or 'falta' (the default). Kept on disk like the real
   // plugin managers, so a new fake over the same HOME sees what an earlier one installed.
   const pluginsFile = path.join(home, '.fake-plugins.json');
-  const plugins = { claude: 'falta', codex: 'falta', agy: 'falta', ...readJson(pluginsFile, {}), ...superpowers };
+  const { mods: storedMods, ...storedPlugins } = readJson(pluginsFile, {});
+  const plugins = { claude: 'falta', codex: 'falta', agy: 'falta', ...storedPlugins, ...superpowers };
+  // nexakit's own Claude Code mods: name -> 'activo' | 'desactivado' | 'actualizable' | 'falta' (the default).
+  const modStates = { ...Object.fromEntries(MOD_NAMES.map((name) => [name, 'falta'])), ...storedMods, ...mods };
+  const savePlugins = () => writeJson(pluginsFile, { ...plugins, mods: modStates });
   const claudeFile = path.join(home, '.claude.json');
   const codexFile = path.join(home, '.codex', 'config.toml');
   const agyFile = path.join(home, '.gemini', 'config', 'mcp_config.json');
@@ -54,7 +63,7 @@ export function createFakeClis(
     )
       return { status: 0, stderr: '', ...reviewOutputs[cli] };
     const [, verb] = args;
-    if (args[0] === 'plugin') return pluginCommand(cli, verb);
+    if (args[0] === 'plugin') return pluginCommand(cli, verb, args);
     if (fail[`${cli} ${verb}`]) return { status: 1, stdout: '', stderr: `${cli} ${verb} falló` };
     const dash = args.indexOf('--');
 
@@ -120,12 +129,40 @@ export function createFakeClis(
     throw new Error(`Orden inesperada: ${command} ${args.join(' ')}`);
   }
 
-  function pluginCommand(cli, verb) {
-    if (fail[`${cli} plugin ${verb}`]) return { status: 1, stdout: '', stderr: `${cli} plugin ${verb} falló` };
+  function pluginCommand(cli, verb, args = []) {
+    const modName = cli === 'claude' ? MOD_NAMES.find((name) => args[2] === `${name}@agent-toolkit`) : undefined;
+    // A mod fails only with its own key ('claude plugin install niveles'), so the generic ones keep meaning Superpowers.
+    if (modName && fail[`${cli} plugin ${verb} ${modName}`])
+      return { status: 1, stdout: '', stderr: `${cli} plugin ${verb} ${modName} falló` };
+    if (!modName && fail[`${cli} plugin ${verb}`]) return { status: 1, stdout: '', stderr: `${cli} plugin ${verb} falló` };
     const state = plugins[cli];
+    if (cli === 'claude' && verb === 'marketplace') {
+      if (fail[`${cli} plugin marketplace ${args[2]}`])
+        return { status: 1, stdout: '', stderr: `${cli} plugin marketplace ${args[2]} falló` };
+      return ok();
+    }
+    if (modName) {
+      if (['install', 'enable', 'update'].includes(verb)) {
+        modStates[modName] = 'activo';
+        savePlugins();
+        return ok();
+      }
+      throw new Error(`Orden inesperada: ${cli} plugin ${verb} ${args[2]}`);
+    }
     if (verb === 'list') {
-      if (cli === 'claude')
-        return ok(JSON.stringify(state === 'falta' ? [] : [{ id: 'superpowers@claude-plugins-official', enabled: state === 'activo' }]));
+      if (cli === 'claude') {
+        const entries = state === 'falta' ? [] : [{ id: 'superpowers@claude-plugins-official', enabled: state === 'activo' }];
+        for (const name of MOD_NAMES) {
+          const mod = modStates[name];
+          if (mod === 'falta') continue;
+          entries.push({
+            id: `${name}@agent-toolkit`,
+            enabled: mod !== 'desactivado',
+            version: mod === 'actualizable' ? '0.0.0' : modVersion(name),
+          });
+        }
+        return ok(JSON.stringify(entries));
+      }
       if (cli === 'codex') {
         const status = { falta: 'not installed', activo: 'installed, enabled', desactivado: 'installed, disabled' }[state];
         return ok(`superpowers@openai-curated-remote   ${status}   7.0.1   id\n`);
@@ -134,7 +171,7 @@ export function createFakeClis(
     }
     if (['install', 'add', 'enable'].includes(verb)) {
       plugins[cli] = 'activo';
-      writeJson(pluginsFile, plugins);
+      savePlugins();
       return ok();
     }
     throw new Error(`Orden inesperada: ${cli} plugin ${verb}`);
@@ -151,7 +188,7 @@ export function createFakeClis(
     }
   }
 
-  return { runCommand, calls, installBin, plugins, files: { claudeFile, codexFile, agyFile } };
+  return { runCommand, calls, installBin, plugins, mods: modStates, files: { claudeFile, codexFile, agyFile } };
 }
 
 // A real child process for review integration tests; no model or user configuration is accessed.

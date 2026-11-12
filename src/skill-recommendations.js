@@ -1146,6 +1146,8 @@ const isNameList = value => Array.isArray(value) && value.every(item => typeof i
 function validSetupAnswers(answers) {
   return Boolean(answers && (answers.cleanProject === undefined || validCleanProject(answers.cleanProject)) && answers.version === 1 &&
     isNameList(answers.skills?.chosen) && isNameList(answers.skills?.discarded) &&
+    // Mods are optional: answers saved before the mods step existed have none.
+    (answers.mods === undefined || (isNameList(answers.mods.chosen) && isNameList(answers.mods.discarded))) &&
     Array.isArray(answers.agents) && answers.agents.every(agent => ['claude', 'codex', 'antigravity'].includes(agent)) &&
     (answers.memory?.decision === 'later' ||
       (answers.memory?.decision === 'path' && typeof answers.memory.path === 'string' && path.isAbsolute(answers.memory.path))));

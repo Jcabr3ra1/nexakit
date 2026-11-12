@@ -28,6 +28,7 @@ import {
   uncoveredSignals,
 } from './skill-recommendations.js';
 import { planStableCommand } from './stable-command.js';
+import { inspectMods } from './mods.js';
 import { inspectSuperpowers } from './superpowers.js';
 import { compareVersions, readActualVersion } from './stable-install.js';
 import {
@@ -263,6 +264,7 @@ export async function gatherSetupState({
 
   const reviewInstructions = await planReviewInstructions({ homeDirectory, environment, codexHome });
   const superpowers = await inspectSuperpowers({ agentsFound, runCommand, environment });
+  const mods = await inspectMods({ agentsFound, runCommand, environment, toolkitRoot });
   return {
     folder:await inspectFolder(start),
     creationRoot:await fs.realpath(start),
@@ -270,6 +272,7 @@ export async function gatherSetupState({
     cleanProject:await readCleanProjectAnswers(project.root),
     reviewInstructions,
     superpowers,
+    mods,
     homeDirectory,
     version,
     project,

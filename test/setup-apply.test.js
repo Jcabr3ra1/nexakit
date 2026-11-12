@@ -35,10 +35,12 @@ test('applies the blocks in the fixed order, reports progress, and a second run 
   const result = await applySetup(w.options, answers, { onProgress: (id, phase) => progress.push(`${id}:${phase}`) });
   assert.equal(result.ok, true, JSON.stringify(result.failed));
   assert.deepEqual(result.done, ['answers', 'stable-command', 'project-skills', 'global-skills:claude', 'global-skills:codex', 'global-skills:antigravity',
-    'superpowers:claude', 'superpowers:codex', 'superpowers:antigravity', 'memory-init', 'memory-connect:claude', 'memory-connect:codex', 'memory-connect:antigravity', 'memory-allow-dir', 'review-instructions', 'final-check']);
+    'superpowers:claude', 'superpowers:codex', 'superpowers:antigravity', 'mod:niveles', 'mod:nexakit-modelo', 'mod:nexakit-ahorro', 'mod:nexakit-lecciones', 'mod:nexakit-sesion',
+    'memory-init', 'memory-connect:claude', 'memory-connect:codex', 'memory-connect:antigravity', 'memory-allow-dir', 'review-instructions', 'final-check']);
   assert.deepEqual(progress.slice(0, 2), ['answers:start', 'answers:done']);
   assert.equal(result.finalCheck.ok, true, result.finalCheck.message);
   assert.deepEqual(w.clis.plugins, { claude: 'activo', codex: 'activo', agy: 'activo' }, 'Superpowers installed in every agent');
+  assert.ok(Object.values(w.clis.mods).every(state => state === 'activo'), 'every mod installed in Claude Code');
 
   const vault = path.join(w.home, 'nexakit-memorias', 'punto-motos');
   assert.equal(await exists(path.join(vault, 'project-memory.json')), true);
@@ -104,6 +106,34 @@ test('a failed Superpowers install is reported but does not stop the memory, the
   assert.deepEqual(w.clis.plugins, { claude: 'falta', codex: 'activo', agy: 'activo' });
   assert.equal(await exists(path.join(w.home, 'nexakit-memorias', 'punto-motos', 'project-memory.json')), true);
   assert.match(result.finalCheck.message, /quedó pendiente.*Superpowers en Claude Code/u);
+});
+
+test('a failed mod install is reported but does not stop the rest, and the run ends as not ready', async t => {
+  const w = await world(t, { fail: { 'claude plugin install nexakit-ahorro': true } });
+  const answers = suggestedAnswers(await gatherSetupState(w.options));
+  const progress = [];
+  const result = await applySetup(w.options, answers, { onProgress: (id, phase, message) => progress.push([id, phase, message]) });
+  assert.equal(result.ok, false);
+  assert.equal(result.failed, undefined, 'it did not stop');
+  assert.deepEqual(result.skipped.map(item => item.id), ['mod:nexakit-ahorro']);
+  assert.match(result.skipped[0].message, /Mod nexakit-ahorro.*Vuelve a ejecutar `npx nexakit`/u);
+  assert.ok(progress.some(([id, phase]) => id === 'mod:nexakit-ahorro' && phase === 'failed'));
+  for (const id of ['mod:nexakit-lecciones', 'mod:nexakit-sesion', 'memory-init', 'final-check']) assert.ok(result.done.includes(id), `${id} still ran`);
+  assert.equal(w.clis.mods['nexakit-ahorro'], 'falta');
+  assert.equal(w.clis.mods.niveles, 'activo');
+  assert.match(result.finalCheck.message, /quedó pendiente.*Mod nexakit-ahorro en Claude Code/u);
+});
+
+test('a mod the person unchecked is not installed, and one that is disabled or outdated is enabled or updated', async t => {
+  const w = await world(t, { mods: { 'nexakit-modelo': 'desactivado', 'nexakit-ahorro': 'actualizable', niveles: 'activo' } });
+  const answers = suggestedAnswers(await gatherSetupState(w.options));
+  answers.mods = { chosen: answers.mods.chosen.filter(name => name !== 'nexakit-sesion'), discarded: ['nexakit-sesion'] };
+  const result = await applySetup(w.options, answers);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(result.done.filter(id => id.startsWith('mod:')), ['mod:nexakit-modelo', 'mod:nexakit-ahorro', 'mod:nexakit-lecciones']);
+  assert.ok(w.clis.calls.some(call => call.join(' ') === 'claude plugin enable nexakit-modelo@agent-toolkit'));
+  assert.ok(w.clis.calls.some(call => call.join(' ') === 'claude plugin update nexakit-ahorro@agent-toolkit'));
+  assert.equal(w.clis.mods['nexakit-sesion'], 'falta', 'discarded: left alone');
 });
 
 test('never registers agent-toolkit-workflow nor writes level agents or the Codex sandbox', async t => {

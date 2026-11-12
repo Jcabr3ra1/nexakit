@@ -20,7 +20,7 @@ import {
 } from './skill-recommendations.js';
 import { formatRecommendationReport } from './recommend-report.js';
 import { applySetup } from './setup-apply.js';
-import { buildConfirmation, suggestedAnswers } from './setup-plan.js';
+import { buildConfirmation, groupLines, joinNames, suggestedAnswers } from './setup-plan.js';
 import { gatherSetupState } from './setup-state.js';
 import { runSetupTui } from './setup-tui.js';
 import { doctorToolkit, setupToolkit } from './toolkit-setup.js';
@@ -318,9 +318,34 @@ export async function runToolkitCli(
 }
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+// The plan under the same headings as the screen; the lines keep their two-space indent below each heading.
+const groupedLines = (lines) =>
+  groupLines(lines)
+    .map((group) => [group.title, ...group.lines.map((line) => `  ${line.mark} ${line.text}`)].join('\n'))
+    .join('\n');
 // Required: missing or disabled fails the check; a list that could not be read is reported but does not fail.
 const superpowersReady = (result) =>
   !Object.values(result.superpowers?.states ?? {}).some((state) => ['falta', 'desactivado'].includes(state));
+
+// nexakit's Claude Code mods: warnings only, a missing mod never fails the check.
+function modsReport(mods) {
+  if (!mods) return [];
+  const names = (state) => Object.keys(mods).filter((name) => mods[name] === state);
+  const missing = names('falta'), outdated = names('actualizable'), disabled = names('desactivado');
+  const active = names('activo');
+  if (names('desconocido').length) return ['! No pude comprobar los mods de Claude Code; revisa /plugin'];
+  const lines = [];
+  const prefix = '! Mods de Claude Code:';
+  const one = (list) => list.length === 1;
+  if (missing.length)
+    lines.push(`${prefix} ${one(missing) ? 'falta' : 'faltan'} ${joinNames(missing)} (ejecuta npx nexakit para ${one(missing) ? 'instalarlo' : 'instalarlos'})`);
+  if (outdated.length)
+    lines.push(`${prefix} hay versión nueva de ${joinNames(outdated)} (ejecuta npx nexakit para ${one(outdated) ? 'actualizarlo' : 'actualizarlos'})`);
+  if (disabled.length)
+    lines.push(`${prefix} ${one(disabled) ? 'desactivado' : 'desactivados'} ${joinNames(disabled)}; ${one(disabled) ? 'actívalo' : 'actívalos'} desde /plugin`);
+  if (!lines.length) lines.push(`✓ Mods de Claude Code activos (${active.length} de ${Object.keys(mods).length})`);
+  return lines;
+}
 
 function formatComprobarReport(result, { homeDirectory }) {
   const short = (value) =>
@@ -385,6 +410,7 @@ function formatComprobarReport(result, { homeDirectory }) {
           : `! No pude comprobar Superpowers en ${name}`,
     );
   }
+  lines.push(...modsReport(result.mods));
   for (const item of result.obsolete ?? []) {
     lines.push(`! ${item.message} ${item.command}`);
   }
@@ -515,13 +541,13 @@ async function runSetup(parsed, { out, err, input, output, isTTY, options }) {
     const title = `nexakit · ${state.project.displayName}${state.project.fromSubfolder ? ' (repositorio completo)' : ''}`;
     if (confirmation.allReady) {
       await out(
-        `${title}\nTodo está listo.\n${confirmation.lines.map((line) => `  ${line.mark} ${line.text}`).join('\n')}\n`,
+        `${title}\nTodo está listo.\n${groupedLines(confirmation.lines)}\n`,
       );
       return 0;
     }
     if (!parsed.yes) {
       await out(
-        `${title}\nCon las respuestas sugeridas prepararía:\n${confirmation.lines.map((line) => `  ${line.mark} ${line.text}`).join('\n')}\n\n` +
+        `${title}\nCon las respuestas sugeridas prepararía:\n${groupedLines(confirmation.lines)}\n\n` +
           'No hay una terminal interactiva para preguntarte.\nPara aplicarlo sin preguntas: npx nexakit --si\n',
       );
       return 2;
