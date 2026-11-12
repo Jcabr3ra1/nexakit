@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { recomendarPorTexto } from '../plugins/nexakit-modelo/hooks/recomendar.js';
-import { filasDeAgentes, medidor, nombreModelo, segmentosDeBarra, tono } from '../plugins/nexakit-modelo/hooks/barra.js';
+import {
+  cacheDeTokens, filasDeAgentes, formatoTokens, medidor, nombreModelo, segmentosDeBarra, sumarTokens, tokensVacios, tono, totalDeTokens,
+} from '../plugins/nexakit-modelo/hooks/barra.js';
 
 const texto = (segmentos) => segmentos.map((s) => s.text).join('');
 
@@ -322,6 +324,89 @@ test('el mod detecta la caché fría y los turnos de rutina seguidos en un model
     await turno();
     await hooks.get('prompt.edit')(api, { text: '' }, async () => ({ text: 'añade un filtro más', cursor: 19 }));
     assert.doesNotMatch(await pinta(), /caché fría/, 'tras un turno la caché vuelve a estar caliente');
+  } finally {
+    delete globalThis.h;
+  }
+});
+
+const PASO_A = { input_tokens: 1000, output_tokens: 500, cache_read_input_tokens: 40000, cache_creation_input_tokens: 2000, model: 'claude-sonnet-5-5' };
+const PASO_B = { input_tokens: 500, output_tokens: 44000, cache_read_input_tokens: 60000, cache_creation_input_tokens: 0, model: 'claude-sonnet-5-5' };
+
+test('los tokens de un subagente se acumulan por paso y separan lo leído de la caché', () => {
+  const t = tokensVacios();
+  assert.equal(cacheDeTokens(t), null, 'sin datos no se inventa un porcentaje');
+  sumarTokens(t, PASO_A);
+  sumarTokens(t, PASO_B);
+  assert.deepEqual(t, { input: 1500, output: 44500, read: 100000, creation: 2000, pasos: 2 });
+  assert.equal(totalDeTokens(t), 148000);
+  assert.equal(Math.round(cacheDeTokens(t)), 97, 'caché frente a todo lo que entró, sin contar la salida');
+});
+
+test('un uso ausente o con valores raros no altera los tokens acumulados', () => {
+  const t = tokensVacios();
+  sumarTokens(t, null);
+  sumarTokens(t, undefined);
+  sumarTokens(t, { input_tokens: -5, output_tokens: 'mucho', cache_read_input_tokens: NaN });
+  assert.deepEqual(t, { input: 0, output: 0, read: 0, creation: 0, pasos: 0 }, 'nada válido: ni siquiera cuenta como paso');
+  sumarTokens(t, { input_tokens: 10, output_tokens: -3, cache_read_input_tokens: Infinity, cache_creation_input_tokens: 4 });
+  assert.deepEqual(t, { input: 10, output: 0, read: 0, creation: 4, pasos: 1 });
+});
+
+test('las cifras de tokens se abrevian sin perder el orden de magnitud', () => {
+  assert.equal(formatoTokens(0), '0');
+  assert.equal(formatoTokens(850), '850');
+  assert.equal(formatoTokens(9500), '9,5k');
+  assert.equal(formatoTokens(12000), '12k');
+  assert.equal(formatoTokens(148000), '148k');
+  assert.equal(formatoTokens(1_200_000), '1,2M');
+});
+
+test('la fila de un subagente añade sus tokens y el porcentaje de caché, y sin datos queda como antes', () => {
+  const con = { type: 'niveles:nivel-exigente', description: 'verificar contrato', status: 'running', model: 'claude-sonnet-5-5', effort: 'high', tokens: { input: 1500, output: 44500, read: 100000, creation: 2000, pasos: 2 } };
+  const sin = { type: 'niveles:nivel-ligero', description: 'correr pruebas', status: 'running', model: 'claude-haiku-5-5', effort: 'low' };
+  const vacio = { ...sin, tokens: tokensVacios() };
+  const [a, b, c] = filasDeAgentes([con, sin, vacio]);
+  assert.match(texto(a), /↳ exigente +Sonnet 5\.5 · high +verificar contrato +… +148k · 97% caché/);
+  assert.equal(a.at(-1).color, 'success', '97 % de caché es buen tono');
+  assert.doesNotMatch(texto(b), /caché|\dk/u);
+  assert.doesNotMatch(texto(c), /caché|\dk/u, 'sin pasos todavía no se muestra nada');
+  const poca = filasDeAgentes([{ ...con, tokens: { input: 90000, output: 1000, read: 5000, creation: 5000, pasos: 2 } }])[0];
+  assert.equal(poca.at(-1).color, 'error', 'poca caché se nota en el tono');
+  const primero = texto(filasDeAgentes([{ ...con, tokens: { input: 90000, output: 1000, read: 0, creation: 9000, pasos: 1 } }])[0]);
+  assert.match(primero, /100k/);
+  assert.doesNotMatch(primero, /caché/, 'el primer paso siempre escribe la caché: no se juzga todavía');
+});
+
+test('el mod suma los tokens de cada paso de un subagente, ignora la sesión principal y no altera la respuesta', async () => {
+  const { register } = await import('../plugins/nexakit-modelo/hooks/register.js?tokens');
+  const hooks = new Map();
+  register((event, ...rest) => { hooks.set(event, rest.at(-1)); });
+  const api = {
+    session: { model: async () => 'claude-opus-5-5', usage: async () => null },
+    agent: { list: async () => [{ id: 'a1', type: 'niveles:nivel-exigente', description: 'verificar contrato', status: 'running' }] },
+    tool: { register: async () => {} },
+    ui: { status() {}, invalidate() {}, resolve: () => ({ Box: 'Box', Text: 'Text' }) },
+  };
+  const paso = (usage) => async function* () { return { turnId: 't', index: 0, answer: '', toolUses: [], stopReason: 'end_turn', usage }; };
+  const correr = async (evento, usage) => {
+    const it = hooks.get('turn.step')(api, evento, paso(usage));
+    for (;;) {
+      const x = await it.next();
+      if (x.done) return x.value;
+    }
+  };
+  globalThis.h = (tag, props, ...children) => ({ tag, props, children });
+  try {
+    await hooks.get('session.start')(api, {}, async (e) => e);
+    await correr({ model: 'claude-opus-5-5', effort: 'medium' }, { ...PASO_A, input_tokens: 999999 });
+    const respuesta = await correr({ model: 'claude-sonnet-5-5', effort: 'high', agentId: 'a1' }, PASO_A);
+    assert.equal(respuesta.usage, PASO_A, 'el hook devuelve la respuesta del paso tal cual');
+    await correr({ model: 'claude-sonnet-5-5', effort: 'high', agentId: 'a1' }, PASO_B);
+    await correr({ model: 'claude-sonnet-5-5', effort: 'high', agentId: 'a1' }, null);
+    const plano = JSON.stringify(await hooks.get('ui.render')(api, { props: { hasSurvey: false } }, async () => 'engine'));
+    assert.match(plano, /148k/);
+    assert.match(plano, /97% caché/);
+    assert.doesNotMatch(plano, /999\d{3}|1000k/u, 'la sesión principal no cuenta como subagente');
   } finally {
     delete globalThis.h;
   }

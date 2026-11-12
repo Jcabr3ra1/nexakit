@@ -38,6 +38,53 @@ export function aciertoDeCache(cache) {
 
 const tonoCache = (p) => (p >= 80 ? 'success' : p >= 50 ? 'warning' : 'error');
 
+// Tokens de un subagente, sumados paso a paso con el uso que la API informó de cada petición. Separan lo que
+// entró nuevo (input), lo que se leyó de la caché (read) y lo que se escribió en ella (creation), porque una
+// cifra total sola asusta: casi todo suele ser lectura barata de caché.
+export const tokensVacios = () => ({ input: 0, output: 0, read: 0, creation: 0, pasos: 0 });
+
+const cuenta = (v) => (esNumero(v) && v > 0 ? v : 0);
+
+export function sumarTokens(acum, usage) {
+  if (!usage || typeof usage !== 'object') return;
+  const input = cuenta(usage.input_tokens);
+  const output = cuenta(usage.output_tokens);
+  const read = cuenta(usage.cache_read_input_tokens);
+  const creation = cuenta(usage.cache_creation_input_tokens);
+  if (input + output + read + creation === 0) return;
+  acum.input += input;
+  acum.output += output;
+  acum.read += read;
+  acum.creation += creation;
+  acum.pasos += 1;
+}
+
+export const totalDeTokens = (t) => t.input + t.output + t.read + t.creation;
+
+// Caché frente a todo lo que entró (la salida no cuenta); null si no entró nada.
+export function cacheDeTokens(t) {
+  const entrada = t.input + t.read + t.creation;
+  return entrada > 0 ? (t.read / entrada) * 100 : null;
+}
+
+export function formatoTokens(n) {
+  if (!esNumero(n) || n <= 0) return '0';
+  if (n < 1000) return String(Math.round(n));
+  if (n < 10_000) return `${(n / 1000).toFixed(1).replace('.', ',')}k`;
+  if (n < 1_000_000) return `${Math.round(n / 1000)}k`;
+  return `${(n / 1_000_000).toFixed(1).replace('.', ',')}M`;
+}
+
+// Tramos de tokens de la fila de un subagente: el total desde el primer paso y el porcentaje de caché desde el
+// segundo (el primero siempre escribe la caché, así que juzgarlo sería engañoso).
+function tramosDeTokens(tokens) {
+  if (!tokens || tokens.pasos < 1) return [];
+  const tramos = [{ text: `  ${formatoTokens(totalDeTokens(tokens))}` }];
+  const acierto = tokens.pasos >= 2 ? cacheDeTokens(tokens) : null;
+  if (acierto !== null) tramos.push({ text: ' · ', dim: true }, { text: `${Math.round(acierto)}% caché`, color: tonoCache(acierto) });
+  return tramos;
+}
+
 // La decisión (mantener, esfuerzo, delegar, cambiar o sesión nueva) la toma decidir.js; aquí solo se pinta.
 function sugerencia(estado) {
   const d = decidir(estado);
@@ -87,6 +134,7 @@ export function filasDeAgentes(agentes) {
       { text: ancho(`${nombreModelo(a.model)}${a.effort ? ` · ${a.effort}` : ''}`, 20), color: 'claude' },
       { text: ` ${ancho(a.description ?? '', 32)} ` },
       { text: icono, color },
+      ...tramosDeTokens(a.tokens),
     ];
   });
 }
