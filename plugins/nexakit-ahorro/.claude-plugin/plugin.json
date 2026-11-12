@@ -1,1 +1,9 @@
-{"name": "nexakit-ahorro", "version": "0.2.1", "description": "Recorta la salida larga de los comandos antes de que entre al contexto y guarda la completa en ~/.nexakit/salidas.", "license": "MIT"}
+{
+  "name": "nexakit-ahorro",
+  "version": "0.2.2",
+  "description": "Recorta la salida larga de los comandos antes de que entre al contexto y guarda la completa en ~/.nexakit/salidas.",
+  "author": {
+    "name": "Juan Jaller"
+  },
+  "license": "MIT"
+}

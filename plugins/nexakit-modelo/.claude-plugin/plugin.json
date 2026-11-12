@@ -1,1 +1,8 @@
-{"name":"nexakit-modelo","version":"0.4.1","description":"Barra sobre el prompt con modelo, esfuerzo, recomendación por mensaje (delegar antes que cambiar de modelo), acierto de caché y uso de contexto y límites, sin cambiar nada."}
+{
+  "name": "nexakit-modelo",
+  "version": "0.4.2",
+  "description": "Barra sobre el prompt con modelo, esfuerzo, recomendación por mensaje (delegar antes que cambiar de modelo), acierto de caché y uso de contexto y límites, sin cambiar nada.",
+  "author": {
+    "name": "Juan Jaller"
+  }
+}

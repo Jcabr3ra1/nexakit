@@ -1,1 +1,9 @@
-{"name":"nexakit-guardarrailes","version":"0.1.0","description":"Frena comandos peligrosos, secretos y commits mal escritos antes de que se ejecuten.","license":"MIT"}
+{
+  "name": "nexakit-guardarrailes",
+  "version": "0.1.1",
+  "description": "Frena comandos peligrosos, secretos y commits mal escritos antes de que se ejecuten.",
+  "author": {
+    "name": "Juan Jaller"
+  },
+  "license": "MIT"
+}

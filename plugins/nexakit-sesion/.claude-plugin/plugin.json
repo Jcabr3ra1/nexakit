@@ -1,1 +1,9 @@
-{"name":"nexakit-sesion","version":"0.2.0","description":"Avisa cuándo conviene cerrar la sesión y abrir otra, sin cerrarla por ti.","license":"MIT"}
+{
+  "name": "nexakit-sesion",
+  "version": "0.2.1",
+  "description": "Avisa cuándo conviene cerrar la sesión y abrir otra, sin cerrarla por ti.",
+  "author": {
+    "name": "Juan Jaller"
+  },
+  "license": "MIT"
+}

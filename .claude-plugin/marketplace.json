@@ -1,5 +1,6 @@
 {
   "name": "agent-toolkit",
+  "description": "Mods y agentes de nexakit para Claude Code: delegar por niveles, barra de modelo, ahorro de tokens, lecciones, aviso de sesión y guardarrailes.",
   "owner": {
     "name": "Juan Jaller"
   },
