@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { recomendarPorTexto } from '../plugins/nexakit-modelo/hooks/recomendar.js';
 import {
-  cacheDeTokens, filasDeAgentes, formatoTokens, medidor, nombreModelo, segmentosDeBarra, sumarTokens, tokensNuevos, tokensVacios, tono, totalDeTokens,
+  cacheDeTokens, filasDeAgentes, formatoReinicio, formatoTokens, medidor, nombreModelo, segmentosDeBarra, sumarTokens, tokensNuevos, tokensVacios, tono, totalDeTokens,
 } from '../plugins/nexakit-modelo/hooks/barra.js';
 
 const texto = (segmentos) => segmentos.map((s) => s.text).join('');
@@ -487,4 +487,48 @@ test('un subagente en marcha no usa el mismo símbolo que el resto de la fila', 
   const fila = texto(filasDeAgentes([{ type: 'niveles:investigador', description: 'encargo largo que no cabe en la fila de la barra de abajo', status: 'running', model: 'claude-sonnet-5-5', effort: 'medium' }])[0]);
   assert.doesNotMatch(fila, /…\s*…/u, 'no hay dos puntos suspensivos seguidos');
   assert.match(fila, /encargo largo que no cabe en la fila de la … ●/u, 'la descripción cabe hasta 44 caracteres, con el corte marcado');
+});
+
+// Fechas en hora local, como las dibuja la barra: así las pruebas no dependen de la zona horaria de quien las corre.
+const AHORA = new Date(2026, 10, 12, 12, 0).getTime();
+const iso = (d, h, m = 0) => new Date(2026, 10, d, h, m).toISOString();
+
+test('el reinicio de un límite se escribe como hora si es hoy y como día y hora si es otro día', () => {
+  assert.equal(formatoReinicio(iso(12, 15, 30), AHORA), '15:30');
+  assert.equal(formatoReinicio(iso(12, 9, 5), AHORA - 3 * 3600_000), '09:05');
+  assert.equal(formatoReinicio(iso(13, 10), AHORA), 'vie 10:00', 'el 13 de noviembre de 2026 es viernes');
+  assert.equal(formatoReinicio(iso(16, 0, 30), AHORA), 'lun 00:30');
+  assert.equal(formatoReinicio(iso(15, 23, 59), AHORA), 'dom 23:59');
+});
+
+test('un reinicio ausente, inválido o que ya pasó no se muestra', () => {
+  for (const valor of [undefined, null, '', 'mañana', 12345, iso(12, 11, 59)]) {
+    assert.equal(formatoReinicio(valor, AHORA), null, String(valor));
+  }
+});
+
+test('la barra muestra cuándo se reinicia un límite solo cuando ya va en ámbar o en rojo', () => {
+  const barra = (rateLimits) => texto(segmentosDeBarra({ model: 'claude-sonnet-5-5', effort: 'medium', usage: { context: { percent: 10 }, rateLimits }, ahora: AHORA }));
+  const alto = barra([{ kind: 'five_hour', percentUsed: 61, resetsAt: iso(12, 15, 30) }, { kind: 'seven_day', percentUsed: 92, resetsAt: iso(13, 10) }]);
+  assert.match(alto, /5h 61% ↻ 15:30/);
+  assert.match(alto, /sem 92% ↻ vie 10:00/);
+  const holgado = barra([{ kind: 'five_hour', percentUsed: 20, resetsAt: iso(12, 15, 30) }, { kind: 'seven_day', percentUsed: 59, resetsAt: iso(13, 10) }]);
+  assert.match(holgado, /5h 20%/);
+  assert.match(holgado, /sem 59%/);
+  assert.doesNotMatch(holgado, /↻/, 'con margen no hay ruido');
+});
+
+test('si el motor no informa del reinicio, el límite se muestra como siempre', () => {
+  const barra = texto(segmentosDeBarra({ model: 'claude-sonnet-5-5', effort: 'medium', usage: { context: { percent: 10 }, rateLimits: [{ kind: 'seven_day', percentUsed: 92 }, { kind: 'five_hour', percentUsed: 80, resetsAt: 'no es una fecha' }] }, ahora: AHORA }));
+  assert.match(barra, /sem 92%/);
+  assert.match(barra, /5h 80%/);
+  assert.doesNotMatch(barra, /↻/);
+});
+
+test('el reinicio va atenuado y el porcentaje conserva su color', () => {
+  const tramos = segmentosDeBarra({ model: 'claude-sonnet-5-5', effort: 'medium', usage: { context: { percent: 10 }, rateLimits: [{ kind: 'seven_day', percentUsed: 92, resetsAt: iso(13, 10) }] }, ahora: AHORA });
+  const i = tramos.findIndex((t) => /92%/u.test(t.text));
+  assert.equal(tramos[i].color, 'error');
+  assert.equal(tramos[i + 1].dim, true);
+  assert.match(tramos[i + 1].text, /↻ vie 10:00/);
 });
