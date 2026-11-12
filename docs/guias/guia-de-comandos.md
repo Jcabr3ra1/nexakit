@@ -51,7 +51,7 @@ npm test
 
 ### 3. Abre el asistente por pasos o revisa qué falta
 
-En una terminal interactiva puedes abrir el asistente: te pregunta por las skills de tu proyecto, la memoria y las IA donde dejarlo listo, y con Claude Code elegido también qué mods instalar (paso 7); termina con una sola confirmación. Las compatibles se eligen manualmente; solo se premarcan recomendaciones con escenarios validados para los agentes destino. En la última pantalla, `e` permite cambiar agentes, modo, Git ignore y núcleo global. El estado del proyecto queda bajo `.agent-toolkit/`; `[d]` y `detach` permiten desacoplarlo con vista previa.
+En una terminal interactiva puedes abrir el asistente: te pregunta por las skills de tu proyecto, la memoria y las IA donde dejarlo listo, y con Claude Code elegido también qué mods instalar (paso 7); termina con una sola confirmación. Las compatibles se eligen manualmente; solo se premarcan recomendaciones con escenarios validados para los agentes destino. En la última pantalla, `←` y `→` cambian entre Sí y No, `d` muestra u oculta el detalle, Enter confirma y Retroceso vuelve. El estado del proyecto queda bajo `.agent-toolkit/`. Para desacoplarlo, elige «Quitar nexakit de este proyecto» en el menú que abre `npx nexakit` cuando el proyecto ya está listo, o ejecuta `npx nexakit quitar` (alias `detach`), que no ejecuta nada hasta que añades `--si` o `--apply`.
 
 ```sh
 npx nexakit                                   # o node bin/nexakit.js (alias: agent-toolkit)

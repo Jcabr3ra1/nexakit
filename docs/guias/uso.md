@@ -1,4 +1,4 @@
-# Guía de uso de Agent Toolkit
+# Guía de uso de NexaKit
 
 Esta guía reúne la información técnica que antes estaba en el README principal.
 Para conocer el propósito sin entrar en comandos, vuelve a la

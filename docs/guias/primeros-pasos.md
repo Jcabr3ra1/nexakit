@@ -1,4 +1,4 @@
-# Tu primera prueba con Agent Toolkit
+# Tu primera prueba con NexaKit
 
 Esta guía te permite comprobar la base local sin conectar cuentas, modificar un
 proyecto ni gastar cuota de IA. Usarás un ejemplo inventado; después podrás
