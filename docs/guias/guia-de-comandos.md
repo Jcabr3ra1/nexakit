@@ -259,7 +259,7 @@ Límites que conviene recordar:
 - Los agentes de solo lectura de Codex lo son por instrucción, no por sandbox.
 - Gemini no participa en la revisión cruzada y no genera vídeo ni audio; el audio no se analiza.
 - Probado en macOS con Node 24, clonando en carpetas distintas. No se ha comprobado en Linux ni en Windows.
-- `nexakit ahorro` estima los tokens recortados (caracteres / 4); todavía no hay una medición controlada del ahorro total.
+- `nexakit ahorro` estima los tokens recortados (caracteres / 4); hay una [medición sin conexión del mod](consolidacion.md#medición-sin-conexión-de-nexakit-ahorro-2026-11-11) (21,8 % menos salida de Bash), pero no una comparación en vivo del ahorro total.
 - La recomendación de modelo lee frases en español; con mensajes en otro idioma muestra el valor por defecto.
 - Nada se fusiona, se sube ni se despliega sin tu autorización.
 
