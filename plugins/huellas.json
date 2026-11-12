@@ -12,15 +12,15 @@
     "huella": "bfd10dcb6cf4b03a"
   },
   "nexakit-modelo": {
-    "version": "0.5.0",
-    "huella": "726f3dfe1a0c2608"
+    "version": "0.5.1",
+    "huella": "e6f7675e2e20e751"
   },
   "nexakit-sesion": {
     "version": "0.2.1",
     "huella": "0c05eb6c094a193a"
   },
   "niveles": {
-    "version": "0.2.1",
-    "huella": "5d7dbd6903916e51"
+    "version": "0.3.0",
+    "huella": "ff786365514dc952"
   }
 }

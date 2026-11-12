@@ -1,7 +1,7 @@
 {
   "name": "niveles",
-  "version": "0.2.1",
-  "description": "Agentes por nivel (ligero, normal, exigente, alto) con modelo y esfuerzo fijos para delegar sin cambiar /model.",
+  "version": "0.3.0",
+  "description": "Agentes por nivel (ligero, normal, exigente, alto) con modelo y esfuerzo fijos para delegar sin cambiar /model, y especialistas por tarea con tope de pasos: investigador, revisor de calidad, cierre de memoria, subir al repo, sincronizador de documentación y cazador de pruebas intermitentes.",
   "author": {
     "name": "Juan Jaller"
   }

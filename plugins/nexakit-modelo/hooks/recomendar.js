@@ -32,6 +32,13 @@ const PETICION = /\b(puedes|podr[ií]as|me (ayudas|haces|creas|pones))\b/iu;
 // Tras un fallo, «tampoco» o «no se arregló» es un segundo intento: ya no falta esfuerzo, falta modelo.
 const REINTENTO = /(tampoco|de nuevo|no se arregl|no qued[oó]|no sirvi[oó]|lo mismo|igual que antes)/iu;
 const SOLO_PREGUNTA = /\b(?:una|otra|tengo una|te hago una) pregunta\b/iu;
+// Buscar o leer algo concreto (dónde se usa, qué archivos lo mencionan, abrir un archivo) es de nivel ligero.
+// Pide un objeto concreto: «busca una forma de mejorar esto» es pensar, no buscar.
+const BUSQUEDA = /(\b(?:busca|encuentra|localiza|lista)\b.{0,50}\b(?:d[oó]nde|usos?|usa(?:n|dos?)?|archivos?|referencias?|menciones?|ocurrencias?)\b|\bd[oó]nde (?:se usa|est[aá]|se define)\b|\b(?:lee|abre|muestra)\b.{0,30}\b(?:archivo|readme|log|carpeta|configuraci[oó]n)\b)/iu;
+// Escribir pruebas o cubrir casos borde (nivel exigente): se verifica más, sin cambiar de modelo. Ejecutarlas
+// es mecánico y un fallo o un diseño ya tienen su propia regla, que va antes.
+const PRUEBAS = /\b(?:pruebas?|tests?|casos? (?:de )?borde|cobertura)\b/iu;
+const ESCRIBIR_PRUEBAS = /\b(?:escrib|a[ñn]ad|agreg|crea|cubr|complet|ampl[ií])\w*/iu;
 
 export function recomendarPorTexto(texto, previa = null) {
   const limpio = String(texto ?? '').trim();
@@ -50,7 +57,10 @@ export function recomendarPorTexto(texto, previa = null) {
   // Seguir con lo que ya estaba en marcha conserva la recomendación de ese trabajo.
   if (CONTINUA.test(limpio)) return previa ?? porDefecto();
   if (DISENO.test(limpio)) return { model: 'opus', effort: 'medium', reason: 'diseño o ambigüedad' };
-  if (MECANICO.test(limpio) && !TRABAJO.test(limpio) && !PREGUNTA.test(limpio)) {
+  if (PRUEBAS.test(limpio) && ESCRIBIR_PRUEBAS.test(limpio) && !PREGUNTA.test(limpio)) {
+    return { model: 'sonnet', effort: 'high', reason: 'pruebas o casos borde: verificar importa' };
+  }
+  if ((MECANICO.test(limpio) || BUSQUEDA.test(limpio)) && !TRABAJO.test(limpio) && !PREGUNTA.test(limpio)) {
     return { model: 'haiku', effort: 'low', reason: 'tarea mecánica: mejor delegarla', delegar: 'nivel-ligero' };
   }
   if (PREGUNTA_SIMPLE.test(limpio) && limpio.length <= MAX_PREGUNTA && !TRABAJO.test(limpio) && !PETICION.test(limpio)) return pregunta();

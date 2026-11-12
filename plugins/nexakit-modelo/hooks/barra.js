@@ -124,13 +124,25 @@ const ICONO = {
 };
 const ancho = (texto, n) => (texto.length >= n ? `${texto.slice(0, n - 1)}…` : texto.padEnd(n));
 
-// Una fila por subagente (los más recientes): nivel, modelo y esfuerzo observados, encargo y estado.
+// Nombre corto de un agente: los de este plugin se muestran sin prefijo («niveles:nivel-alto» como «alto»,
+// «niveles:investigador» como «investigador»).
+export const etiquetaDeAgente = (type) => String(type ?? '?').replace(/^niveles:(?:nivel-)?/u, '');
+
+const MIN_ETIQUETA = 8;
+const MAX_ETIQUETA = 18;
+
+// Una fila por subagente (los más recientes): nombre, modelo y esfuerzo observados, encargo y estado. La
+// columna del nombre se ajusta al más largo (hasta 18 caracteres, lo que mide «revisor-de-calidad») para que
+// el resto de columnas quede alineado y ningún nombre habitual salga cortado.
 export function filasDeAgentes(agentes) {
-  return agentes.slice(-MAX_FILAS).map((a) => {
-    const nivel = String(a.type ?? '?').replace(/^niveles:nivel-/u, '');
+  const recientes = agentes.slice(-MAX_FILAS);
+  const etiquetas = recientes.map((a) => etiquetaDeAgente(a.type));
+  const columna = Math.min(MAX_ETIQUETA, Math.max(MIN_ETIQUETA, ...etiquetas.map((e) => e.length))) + 1;
+  return recientes.map((a, i) => {
+    const nombre = etiquetas[i].length > MAX_ETIQUETA ? `${etiquetas[i].slice(0, MAX_ETIQUETA - 1)}…` : etiquetas[i];
     const [icono, color] = ICONO[a.status] ?? ['?', undefined];
     return [
-      { text: `  ↳ ${ancho(nivel, 9)}`, dim: true },
+      { text: `  ↳ ${nombre.padEnd(columna)}`, dim: true },
       { text: ancho(`${nombreModelo(a.model)}${a.effort ? ` · ${a.effort}` : ''}`, 20), color: 'claude' },
       { text: ` ${ancho(a.description ?? '', 32)} ` },
       { text: icono, color },

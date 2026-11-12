@@ -411,3 +411,60 @@ test('el mod suma los tokens de cada paso de un subagente, ignora la sesión pri
     delete globalThis.h;
   }
 });
+
+test('la fila de un especialista muestra su nombre sin el prefijo del plugin y las columnas se alinean', () => {
+  const filas = filasDeAgentes([
+    { type: 'niveles:nivel-ligero', description: 'correr pruebas', status: 'running', model: 'claude-haiku-5-5', effort: 'low' },
+    { type: 'niveles:investigador', description: 'buscar fuentes', status: 'running', model: 'claude-sonnet-5-5', effort: 'medium' },
+    { type: 'niveles:revisor-de-calidad', description: 'dictamen del cambio', status: 'completed', model: 'claude-sonnet-5-5', effort: 'high' },
+  ]).map(texto);
+  assert.match(filas[0], /↳ ligero +Haiku 5\.5 · low/);
+  assert.match(filas[1], /↳ investigador +Sonnet 5\.5 · medium/);
+  assert.match(filas[2], /↳ revisor-de-calidad +Sonnet 5\.5 · high/, 'un nombre de 18 caracteres no se corta');
+  for (const fila of filas) assert.doesNotMatch(fila, /niveles:|…\s+(Haiku|Sonnet)/u, 'sin prefijo ni nombre cortado');
+  const columna = filas.map((f) => f.search(/(Haiku|Sonnet)/u));
+  assert.equal(new Set(columna).size, 1, 'el modelo empieza en la misma columna en todas las filas');
+});
+
+test('una fila con un tipo muy largo se corta con puntos suspensivos sin descuadrar el resto', () => {
+  const [larga, corta] = filasDeAgentes([
+    { type: 'otro-plugin:un-agente-con-un-nombre-larguisimo', description: 'x', status: 'running', model: 'claude-sonnet-5-5', effort: 'low' },
+    { type: 'niveles:nivel-alto', description: 'y', status: 'running', model: 'claude-opus-5-5', effort: 'high' },
+  ]).map(texto);
+  assert.match(larga, /↳ otro-plugin:un-ag… +Sonnet/u, 'se corta a 18 caracteres con puntos suspensivos');
+  assert.equal(larga.search(/Sonnet/u), corta.search(/Opus/u));
+});
+
+test('con solo los niveles de siempre la fila queda igual que antes', () => {
+  const [fila] = filasDeAgentes([{ type: 'niveles:nivel-normal', description: 'implementar', status: 'running', model: 'claude-sonnet-5-5', effort: 'medium' }]).map(texto);
+  assert.match(fila, /^  ↳ normal +Sonnet 5\.5 · medium +implementar/);
+});
+
+test('buscar o leer algo concreto es trabajo de nivel ligero: Haiku con poco esfuerzo, delegable', () => {
+  for (const mensaje of ['busca dónde se usa zod', 'encuentra los archivos que mencionan el plugin niveles', 'lee el README y dime qué hace', 'muestra el archivo de configuración', '¿dónde se define la barra? búscalo']) {
+    const r = recomendarPorTexto(mensaje);
+    assert.deepEqual([r.model, r.effort, r.delegar], mensaje.startsWith('¿') ? ['sonnet', 'low', undefined] : ['haiku', 'low', 'nivel-ligero'], mensaje);
+  }
+});
+
+test('buscar o leer no se confunde con construir, arreglar o pensar', () => {
+  assert.deepEqual(pick(recomendarPorTexto('busca una forma de mejorar el rendimiento')), ['sonnet', 'medium'], 'sin objeto concreto es trabajo habitual');
+  assert.deepEqual(pick(recomendarPorTexto('lee el error del log y arréglalo')), ['sonnet', 'high'], 'un fallo manda sobre la lectura');
+  assert.deepEqual(pick(recomendarPorTexto('busca dónde se usa zod y migra todo a valibot')), ['opus', 'medium'], 'migrar es diseño');
+  assert.deepEqual(pick(recomendarPorTexto('busca dónde se usa zod y añade un campo nuevo')), ['sonnet', 'medium'], 'construir manda sobre buscar');
+});
+
+test('escribir pruebas o cubrir casos borde pide Sonnet con esfuerzo alto, sin delegar ni cambiar de modelo', () => {
+  for (const mensaje of ['escribe pruebas para el módulo de pagos', 'cubre los casos borde de la validación', 'añade un test para el caso borde de las fechas', 'agrega pruebas de cobertura al parser', 'crea pruebas de regresión del bug anterior']) {
+    const r = recomendarPorTexto(mensaje);
+    assert.deepEqual([r.model, r.effort, r.delegar], ['sonnet', 'high', undefined], mensaje);
+  }
+});
+
+test('hablar de pruebas sin pedir escribirlas sigue las reglas de siempre', () => {
+  assert.deepEqual(pick(recomendarPorTexto('corre las pruebas')), ['haiku', 'low'], 'ejecutar es mecánico');
+  assert.deepEqual(pick(recomendarPorTexto('ejecuta las pruebas del módulo de pagos')), ['haiku', 'low']);
+  assert.deepEqual(pick(recomendarPorTexto('las pruebas fallan en Windows')), ['sonnet', 'high'], 'un fallo ya pide esfuerzo alto');
+  assert.deepEqual(pick(recomendarPorTexto('diseña la estrategia de pruebas del sistema')), ['opus', 'medium'], 'diseñar manda');
+  assert.deepEqual(pick(recomendarPorTexto('¿para qué sirven las pruebas de regresión?')), ['sonnet', 'low'], 'una pregunta es una pregunta');
+});
