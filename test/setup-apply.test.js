@@ -88,6 +88,24 @@ test('stops at the first failing block, keeps what was applied and the answers, 
   assert.equal(healed.calls.filter(call => call[2] === 'add').length, 1, 'only Antigravity is registered');
 });
 
+test('a failed Superpowers install is reported but does not stop the memory, the rules or the other agents', async t => {
+  const w = await world(t, { fail: { 'claude plugin install': true } });
+  const answers = suggestedAnswers(await gatherSetupState(w.options));
+  const progress = [];
+  const result = await applySetup(w.options, answers, { onProgress: (id, phase, message) => progress.push([id, phase, message]) });
+  assert.equal(result.ok, false, 'the person must not read «Listo»');
+  assert.equal(result.failed, undefined, 'it did not stop');
+  assert.deepEqual(result.skipped.map(item => item.id), ['superpowers:claude']);
+  assert.match(result.skipped[0].message, /Superpowers en Claude Code.*Vuelve a ejecutar `npx nexakit`/u);
+  assert.ok(progress.some(([id, phase, message]) => id === 'superpowers:claude' && phase === 'failed' && /falló/u.test(message)));
+  for (const id of ['superpowers:codex', 'superpowers:antigravity', 'memory-init', 'memory-connect:claude', 'review-instructions', 'final-check'])
+    assert.ok(result.done.includes(id), `${id} still ran`);
+  assert.equal(result.done.includes('superpowers:claude'), false);
+  assert.deepEqual(w.clis.plugins, { claude: 'falta', codex: 'activo', agy: 'activo' });
+  assert.equal(await exists(path.join(w.home, 'nexakit-memorias', 'punto-motos', 'project-memory.json')), true);
+  assert.match(result.finalCheck.message, /quedó pendiente.*Superpowers en Claude Code/u);
+});
+
 test('never registers agent-toolkit-workflow nor writes level agents or the Codex sandbox', async t => {
   const w = await world(t);
   await applySetup(w.options, suggestedAnswers(await gatherSetupState(w.options)));

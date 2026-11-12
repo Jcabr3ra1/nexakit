@@ -216,6 +216,7 @@ export async function applySetup(
     throw new Error(`Bloque desconocido: ${id}`);
   };
 
+  const skipped = [];
   for (const { id } of confirmation.blocks) {
     onProgress(id, 'start');
     try {
@@ -226,11 +227,17 @@ export async function applySetup(
         ? `${detail.startsWith('No se pudo') ? detail : `No se pudo conectar la memoria a ${AGENT_NAMES[id.split(':')[1]]}: ${detail}`} ${RETRY}`
         : `Falló «${confirmation.blocks.find((block) => block.id === id).label}»: ${detail} ${RETRY}`;
       onProgress(id, 'failed', message);
-      return { ok: false, done, failed: { id, message }, finalCheck };
+      // Superpowers comes from each agent's own marketplace: when that fails, the memory, the rules and the other
+      // agents are still worth leaving ready. The run ends as not ready and the final check lists it as pending.
+      if (id.startsWith('superpowers:')) {
+        skipped.push({ id, message });
+        continue;
+      }
+      return { ok: false, done, failed: { id, message }, ...(skipped.length && { skipped }), finalCheck };
     }
     done.push(id);
     onProgress(id, 'done');
   }
   // A final check that finds something still pending is a failure: the person must not read «Listo».
-  return { ok: finalCheck?.ok ?? true, done, finalCheck };
+  return { ok: (finalCheck?.ok ?? true) && !skipped.length, done, ...(skipped.length && { skipped }), finalCheck };
 }

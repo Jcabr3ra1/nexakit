@@ -392,7 +392,7 @@ function finalLines(model) {
   if (result?.finalCheck) lines.push(`${result.finalCheck.ok ? '◇' : '!'}  Comprobación final: ${result.finalCheck.message}`);
   if (model.step !== 'done') return { lines, end: [] };
   if (!result.ok) {
-    const reason = result.failed?.message ?? `Comprobación final: ${result.finalCheck?.message ?? ''}`;
+    const reason = result.failed?.message ?? result.skipped?.map(item => item.message).join(' ') ?? `Comprobación final: ${result.finalCheck?.message ?? ''}`;
     return { lines, end: [result.failed ? 'Se detuvo aquí.' : 'Terminó, pero algo no quedó listo.', ...wrapText(reason, 60)] };
   }
   const names = joinNames(answers.agents.map(agent => AGENT_NAMES[agent]));
