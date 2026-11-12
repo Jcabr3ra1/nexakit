@@ -119,6 +119,14 @@ STDIO frente al filesystem instalado como dependencia propia del Toolkit.
 Las versiones candidatas son SDK `1.30.0` y filesystem `2026.8.31`, fijadas
 exactamente en package.json y package-lock. Son las versiones observadas en la
 prueba, no una afirmación de ser las últimas ni una evaluación de vulnerabilidades.
+
+El 2026-11-11 el SDK se subió a `1.32.2`, también fijado exactamente, para cerrar
+el aviso de severidad alta que `npm audit` atribuía a la `1.30.0`; la suite
+completa pasó con esa versión. Quedan tres avisos moderados (`glob` y
+`minimatch`) que dependen de filesystem `2026.8.31` y solo se cierran con su
+línea 2.x. Ese salto se aplazó: la 2.x usa el SDK nuevo, añade las herramientas
+de escritura `append_file` y `copy_file` y ofrece `--read-only`, así que exige
+migrar este guardián y revisar los permisos de Claude Code.
 RG-1 añade dos dependencias directas y su árbol transitivo, actualmente ausentes
 de la biblioteca; deben revisarse antes de instalarlas. No usar rutas de caché
 personales en el código, en la configuración portable o en las pruebas.

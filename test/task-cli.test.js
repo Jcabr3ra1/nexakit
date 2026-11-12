@@ -192,7 +192,7 @@ localTest("TP real local bin uses only fictitious inputs and preserves memory CL
   assert.equal(pkg.bin["project-memory-mcp"], "bin/project-memory-mcp.js");
   assert.equal(lock.packages[""].bin["project-memory-mcp"], "bin/project-memory-mcp.js");
   assert.deepEqual(pkg.dependencies, {
-    "@modelcontextprotocol/sdk": "1.30.0",
+    "@modelcontextprotocol/sdk": "1.32.2",
     "@modelcontextprotocol/server": "^2.4.0",
     "@modelcontextprotocol/server-filesystem": "2026.8.31",
     ajv: "^8.17.1",
