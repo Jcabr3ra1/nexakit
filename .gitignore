@@ -12,3 +12,10 @@ docs/planes/
 docs/superpowers/
 .superpowers/
 .catalog-add-*/
+
+# Copias temporales de trabajo de los subagentes
+.claude/worktrees/
+
+# >>> agent-toolkit (managed) >>>
+.agent-toolkit/
+# <<< agent-toolkit (managed) <<<
