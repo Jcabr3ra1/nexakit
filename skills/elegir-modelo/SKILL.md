@@ -58,7 +58,8 @@ Aplica la primera que resuelva el caso (es el mismo criterio que usa la barra de
 | --- | --- | --- |
 | Pregunta corta o explicación de algo ya en contexto | bajar el esfuerzo a `low` | ninguno; ahorra razonamiento |
 | Fallo normal en código existente | subir el esfuerzo a `high`, mismo modelo | ninguno de caché |
-| Tarea mecánica (commit, push, lint, búsquedas) | delegar en `nivel-ligero` | un subagente pequeño |
+| Escribir pruebas o cubrir casos borde | subir el esfuerzo a `high`, mismo modelo (es el trabajo de `nivel-exigente`) | ninguno de caché |
+| Tarea mecánica (commit, push, lint, búsquedas) | delegar en `nivel-ligero`, solo si lee mucho o devuelve mucho ruido; si es pequeña, hazla en la sesión | un subagente pequeño |
 | Fallo que ya se intentó y sigue, intermitente, de seguridad o concurrencia | con poco contexto o caché fría, cambiar al más capaz; si no, delegar en `nivel-alto` | relectura sin caché, o un subagente |
 | Diseño o arquitectura | el más capaz; con mucho contexto, mejor en sesión nueva | relee todo el contexto si se cambia a mitad |
 | Cinco o más turnos de rutina en un modelo más caro del necesario | sesión nueva en el modelo de uso diario | ninguno; deja de pagar de más en cada turno |
