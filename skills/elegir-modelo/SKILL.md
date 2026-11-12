@@ -31,12 +31,21 @@ La elección se hace por **papel**, no por nombres fijos que caducan:
 | Papel | Cuándo usarlo | Cómo reconocerlo en `modelos.mjs` | Ejemplo con fecha (a 2026-11: usar solo lo que devuelva el script) |
 | --- | --- | --- | --- |
 | **ligero** | Solo comandos y cambios mecánicos, ediciones precisas o preguntas sobre código ya en contexto | `papel: ligero`, descripción *fast and affordable / lightweight / easier tasks* o familias `haiku`, `luna`, `flash` | a 2026-11: Claude `haiku`, Codex `gpt-6-luna`, Antigravity `gemini-3.8-flash-*` |
-| **uso diario** | Implementar con un diseño claro, el trabajo habitual de programación | `papel: uso diario`, descripción *workhorse / everyday / balanced* o familias `sonnet`, `sol`, `terra` | a 2026-11: Claude `sonnet`, Codex `gpt-6.1-sol` o `gpt-6.1-terra` |
-| **el más capaz** | Diseño, bugs sutiles y ambigüedad, dominios nuevos o arquitectura | `papel: el más capaz`, descripción *frontier / most demanding* o familias `opus`, `astra`, `argon` | a 2026-11: Claude `opus` (o `opusplan`), Codex `gpt-6-astra`, Antigravity `gemini-4-argon-*` |
+| **uso diario** | Implementar con un diseño claro, el trabajo habitual de programación | `papel: uso diario`, descripción *workhorse / everyday / balanced* o familias `sonnet`, `sol`, `terra`, `hydrogen` | a 2026-11: Claude `sonnet`, Codex `gpt-6.1-sol` o `gpt-6.1-terra`, Antigravity `gemini-4-hydrogen-*` |
+| **el más capaz** | Diseño, bugs sutiles y ambigüedad, dominios nuevos o arquitectura | `papel: el más capaz`, descripción *frontier / most demanding* o familias `opus`, `astra`, `argon`, `carbon` | a 2026-11: Claude `opus` (o `opusplan`), Codex `gpt-6-astra`, Antigravity `gemini-4-argon-*` o `gemini-4-carbon-*` |
 
 - **Modelos nuevos y clasificación por familia:** entran modelos nuevos con frecuencia (por ejemplo, `gpt-6.1-terra`, que llega sin descripción útil). Si un modelo no tiene una descripción que indique su papel, `modelos.mjs` lo clasifica por su familia (`luna`, `terra`, `sol`, `astra`, `flash`, `argon`, `haiku`, `sonnet`, `opus`…) usando la descripción de la generación anterior de esa misma familia. Si no hay generación anterior ni familia conocida, queda marcado como `sin clasificar`: en ese caso, **pregunta al usuario en vez de adivinar**.
 - **Generaciones pasadas:** los modelos marcados con `papel: anterior` (*older* / *previous generation*) no se recomiendan salvo que el usuario los pida expresamente.
 - **Límites y cuota:** un aviso de límite o de cuota nunca baja el modelo sin decírselo al usuario. Si una cuenta se acerca al límite o agota cuota, informa al usuario y espera su decisión antes de pasar a otro modelo o a otra IA.
+
+### Elegir Gemini en Antigravity
+
+- **Flash 3.8** con `low` para consultas breves o cambios mecánicos y con `medium` para trabajo rutinario si la cuenta ofrece esa variante. [Gemini 3.8 Flash](https://antigravity.google/blog/gemini-3-8-flash-in-google-antigravity/)
+- **Hydrogen** con `low` para iterar rápido, `medium` para implementar con un diseño claro y `high` (el predeterminado del modelo) para depurar, escribir pruebas o verificar cambios. Reserva `xhigh` para una tarea de implementación exigente que requiera más razonamiento dentro de la misma familia. [Gemini 4 Hydrogen](https://antigravity.google/blog/gemini-4-hydrogen-in-google-antigravity)
+- **Argon** con `medium` para investigación o análisis con alcance definido y `high` para arquitectura, migraciones o depuración con dependencias difíciles. [Gemini 4 Argon](https://antigravity.google/blog/gemini-4-argon-in-google-antigravity)
+- **Carbon** para auditorías críticas, problemas abiertos y trabajo largo de alto riesgo. Usa `high` para una verificación profunda y `medium` si la parte a resolver ya está acotada. Comprueba las variantes de la cuenta antes de recomendarlo. [Gemini 4 Carbon](https://antigravity.google/blog/gemini-4-carbon-in-google-antigravity)
+
+Estas son pautas de uso. `agy models` determina qué pares de modelo y esfuerzo están disponibles. [Esfuerzo en Antigravity CLI](https://antigravity.google/docs/cli/commands/effort/)
 
 ## 4. Cambiar a mitad de sesión cuesta caché
 
@@ -86,7 +95,7 @@ Debajo, una línea por IA con cómo cambiarlo y comprobarlo:
 
 - **Claude:** `/model <alias>` y `/effort <nivel>`; se comprueba con `/effort status`. Si el script avisa de `CLAUDE_CODE_EFFORT_LEVEL`, esa variable manda.
 - **Codex:** `/model` (modelo y esfuerzo); se comprueba con `/status`.
-- **Antigravity:** `/model` dentro de agy, o `agy --model <id>`; el esfuerzo va en el id. Solo se comprueba en su selector.
+- **Antigravity:** selecciona con `/model` y `/effort`, o ejecuta `agy --model <id>` con la variante elegida. Comprueba la variante activa en el selector de la sesión.
 
 Si lo guardado ya coincide, dilo en una línea y no pidas cambios. Lo que el script lee de archivos es lo guardado, no la sesión abierta: no lo presentes como comprobado.
 

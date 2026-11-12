@@ -20,8 +20,10 @@ const FAMILY_ROLES = Object.freeze({
   terra: 'uso diario',
   sol: 'uso diario',
   sonnet: 'uso diario',
+  hydrogen: 'uso diario',
   astra: 'el más capaz',
   argon: 'el más capaz',
+  carbon: 'el más capaz',
   opus: 'el más capaz'
 });
 const roleFromDescription = (description = '') => {
@@ -102,7 +104,7 @@ if (missing) {
       out(`- ${id.trim()} · ${label.trim()} · papel: ${role}`);
     }
   }
-  out('El esfuerzo va en el id: -low, -medium, -high. No guarda en archivos el modelo elegido: compruébalo con /model dentro de agy.');
+  out('El id indica el esfuerzo cuando el modelo ofrece variantes: -low, -medium, -high, -xhigh o -max. Comprueba el modelo y el esfuerzo activos con /model y /effort dentro de agy.');
 }
 
 process.stdout.write(lines.join('\n') + '\n');

@@ -45,6 +45,46 @@ llaman a modelos.
 Exit codes: 0 respuesta completada, 1 error, 2 argumentos inválidos, 3 análisis
 parcial o no compatible. La salida normal es una línea JSON.
 
+## Elegir modelo y esfuerzo
+
+Estos son los puntos de partida que recomienda NexaKit para cada tipo de trabajo.
+
+| Modelo | Cuándo elegirlo | Esfuerzo recomendado |
+| --- | --- | --- |
+| Gemini 3.8 Flash | Consultas breves, extracción de datos sencilla y cambios mecánicos. | `low` para una consulta rápida, `medium` para resumir varias entradas y `high` para ordenar las posibles causas de un fallo a partir de registros sencillos. [Flash en Antigravity](https://antigravity.google/blog/gemini-3-8-flash-in-google-antigravity/) |
+| Gemini 4 Hydrogen | Implementación diaria con un objetivo claro, pruebas y refactorizaciones acotadas. | `low` para iterar sobre un cambio pequeño, `medium` para implementar un cambio definido, `high` para comprobar casos borde o resolver una regresión y `xhigh` para explorar varias hipótesis en una implementación exigente. Google usa `high` por defecto. [Hydrogen en Antigravity](https://antigravity.google/blog/gemini-4-hydrogen-in-google-antigravity) |
+| Gemini 4 Argon | Ingeniería compleja, análisis de evidencia e investigación con varias fuentes. | `low` para una aclaración sobre un análisis ya hecho, `medium` para investigar o analizar con alcance definido y `high` para arquitectura, migraciones y fallos que cruzan módulos. [Argon en Antigravity](https://antigravity.google/blog/gemini-4-argon-in-google-antigravity) |
+| Gemini 4 Carbon | Auditorías de seguridad, depuración difícil que sigue abierta y proyectos de largo alcance con varias rondas de verificación. | `low` para comprobar un punto de una auditoría con la evidencia a mano, `medium` para revisar un componente crítico acotado y `high` para auditorías completas o depuración de largo alcance. [Carbon en Antigravity](https://antigravity.google/blog/gemini-4-carbon-in-google-antigravity) |
+
+El esfuerzo controla cuánto razona cada modelo por turno. `low` encaja con un
+paso claro y fácil de comprobar. `medium` sirve cuando hay varios pasos con un
+objetivo definido. `high` da margen para examinar hipótesis, dependencias y casos
+borde. `xhigh` es una opción de Hydrogen cuando conviene agotar varias hipótesis
+dentro del mismo modelo y se puede esperar más. En una sesión interactiva, usa
+`/effort` para ver los niveles que admite el modelo seleccionado.
+[Comando `/effort`](https://antigravity.google/docs/cli/commands/effort/)
+
+`agy models` muestra los identificadores disponibles para tu cuenta. Pasa a
+`--modelo` el identificador completo de la variante que quieres usar. Para
+obtener una recomendación del catálogo local, usa `nexakit modelo --ia antigravity
+--nivel alto`. También admite `ligero`, `normal` y `exigente`. Ejecuta el ejemplo
+de Carbon si aparece en tu catálogo. Google anunció su despliegue para Google AI
+Ultra y planes empresariales elegibles.
+[Selección en modo no interactivo](https://antigravity.google/docs/cli/headless/)
+[Disponibilidad de Carbon](https://antigravity.google/blog/gemini-4-carbon-in-google-antigravity)
+
+```sh
+agy models
+node bin/agent-toolkit-gemini.js consultar --modelo gemini-3.8-flash-low \
+  --prompt "Explica en dos frases qué hace git bisect"
+node bin/agent-toolkit-gemini.js consultar --modelo gemini-4-hydrogen-high \
+  --prompt "Propón casos borde para un parser de fechas ISO 8601"
+node bin/agent-toolkit-gemini.js investigar --modelo gemini-4-argon-medium \
+  --prompt "Compara estrategias de migración de SQLite a PostgreSQL con fuentes primarias"
+node bin/agent-toolkit-gemini.js investigar --modelo gemini-4-carbon-high \
+  --prompt "Compara fallos de aislamiento en CI y cómo verificar las mitigaciones con fuentes primarias"
+```
+
 ## Conservación y consumo
 
 Cada llamada usa una carpeta única bajo `~/.agent-toolkit/gemini/<comando>/`

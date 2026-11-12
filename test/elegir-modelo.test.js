@@ -62,11 +62,21 @@ test('lists the Antigravity ids when agy is installed, and says so when it is no
   assert.match(out, /^- gemini-4-argon-high · Gemini 4 Argon \(High\) · papel: el más capaz$/mu);
   assert.match(out, /^- gemini-3\.8-flash-low · Gemini 3\.8 Flash \(Low\) · papel: ligero$/mu);
   assert.doesNotMatch(out, /Fetching/u);
-  assert.match(out, /No guarda en archivos el modelo elegido/u);
+  assert.match(out, /Comprueba el modelo y el esfuerzo activos con \/model y \/effort/u);
   assert.match((await fixture(t))().out, /^agy no está instalado\.$/mu);
   const failing = (await fixture(t, { agyFails: 'Not signed in.\nRun agy login.\n' }))().out;
   assert.match(failing, /^agy models falló: Not signed in\.$/mu, 'installed but failing is not reported as missing');
   assert.doesNotMatch(failing, /no está instalado/u);
+});
+
+test('classifies Hydrogen and Carbon from the Antigravity catalog', async t => {
+  const run = await fixture(t, { agy: [
+    'gemini-4-hydrogen-xhigh\tGemini 4 Hydrogen (XHigh)',
+    'gemini-4-carbon-high\tGemini 4 Carbon (High)',
+  ].join('\n') });
+  const { out } = run();
+  assert.match(out, /^- gemini-4-hydrogen-xhigh · Gemini 4 Hydrogen \(XHigh\) · papel: uso diario$/mu);
+  assert.match(out, /^- gemini-4-carbon-high · Gemini 4 Carbon \(High\) · papel: el más capaz$/mu);
 });
 
 test('new models without useful description inherit the role of their family or are marked sin clasificar', async t => {
