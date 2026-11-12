@@ -90,7 +90,7 @@ export async function inspectMemorySync(options = {}, context = {}) {
   };
   const inventory = await collectFiles(query, repository, prNumber, maxFiles, raw.changedFiles, warn);
   const checks = await collectChecks(query, repository, raw.headRefOid, safeText, safeUrl, warn);
-  const { candidateAreas, unmappedFiles } = resolveCandidateAreas(doctor.vaultPath, manifest.memory?.layout, inventory.files, warn);
+  const { candidateAreas, unmappedFiles } = resolveCandidateAreas(doctor.vaultPath, manifest.memory?.layout, inventory.files, warn, manifest.automation?.areas);
   const report = {
     command: "sync inspect", status: checks.summary.adverse > 0 ? "blocked" : warnings.length ? "partial" : "ready",
     repository, branch, ledgerPath, alreadyReviewed: reviewed.has(prNumber), pullRequest,
@@ -311,12 +311,18 @@ const RULES = [
   { id: "frontend-path", category: "frontend", test: /(?:^|\/)[^/]*(?:frontend|client|web|ui)[^/]*(?:\/|$)/i, destinations: /(?:FRONTEND|IMPLEMENTACION)$/ },
   { id: "firmware-path", category: "hardware", test: /(?:^|\/)[^/]*(?:firmware|hardware|iot|esp32)[^/]*(?:\/|$)|\.(?:ino)$/i, destinations: /(?:IOT|HARDWARE|IMPLEMENTACION)$/ },
   { id: "docs-path", category: "documentation", test: /(?:^|\/)(?:docs|documentation)(?:\/|$)|\.(?:md|mdx)$/i, destinations: /(?:PRODUCTO|ARQUITECTURA|IMPLEMENTACION)$/ },
-  { id: "operations-path", category: "operations", test: /(?:^|\/)(?:\.github|infra|deploy|docker|scripts)(?:\/|$)|(?:^|\/)(?:Dockerfile|docker-compose[^/]*)$/i, destinations: /(?:OPERACION)$/ },
-  { id: "tests-path", category: "tests", test: /(?:^|\/)(?:test|tests|__tests__)(?:\/|$)|\.(?:test|spec)\.[^/]+$/i, destinations: /(?:IMPLEMENTACION|ENTREGAS|SPRINTS)$/ },
-  { id: "decisions-path", category: "decisions", test: /(?:^|\/)(?:adr|decisions|decisiones)(?:\/|$)/i, destinations: /(?:DECISIONES)$/ }
+  { id: "operations-path", category: "operations", test: /(?:^|\/)(?:\.github|\.claude-plugin|infra|deploy|docker|scripts)(?:\/|$)|(?:^|\/)(?:Dockerfile|docker-compose[^/]*|\.gitignore|\.gitattributes|package(?:-lock)?\.json)$/i, destinations: /(?:OPERACION)$/ },
+  { id: "tests-path", category: "tests", test: /(?:^|\/)(?:test|tests|__tests__|test-support|testing)(?:\/|$)|\.(?:test|spec)\.[^/]+$/i, destinations: /(?:IMPLEMENTACION|ENTREGAS|SPRINTS)$/ },
+  { id: "decisions-path", category: "decisions", test: /(?:^|\/)(?:adr|decisions|decisiones)(?:\/|$)/i, destinations: /(?:DECISIONES)$/ },
+  // Solo carpetas de código en la raíz: así no se solapa con las reglas por nombre de carpeta (frontend/src/...).
+  { id: "source-path", category: "implementation", test: /^(?:src|lib|app|bin|packages|plugins|schemas|templates|examples)\//i, destinations: /(?:IMPLEMENTACION)$/ }
 ];
 
-function resolveCandidateAreas(vault, layout, files, warn) {
+// automation.areas permite al proyecto elegir la carpeta de una categoría que tiene varias candidatas.
+const declaredAreas = (areas) => (areas && typeof areas === "object" && !Array.isArray(areas) ? areas : {});
+
+function resolveCandidateAreas(vault, layout, files, warn, areas) {
+  const declared = declaredAreas(areas);
   const dirs = layout?.profile === "declared" ? layout.requiredDirectories : CANONICAL_DIRS;
   const allowed = [];
   for (const dir of dirs ?? []) {
@@ -339,7 +345,10 @@ function resolveCandidateAreas(vault, layout, files, warn) {
     // Prefer a precise area (e.g. BACKEND), otherwise a single generic match.
     const exact = destinations.filter((dir) => dir.toLowerCase().endsWith(rule.category) || rule.category === "hardware" && /(?:iot|hardware)$/i.test(dir));
     const choices = exact.length ? exact : destinations;
-    const directory = choices.length === 1 ? choices[0] : null;
+    const chosen = declared[rule.category];
+    const usesDeclared = typeof chosen === "string" && allowed.includes(chosen);
+    if (chosen !== undefined && !usesDeclared) warn("area-override-invalid", `El mapeo declarado para ${rule.category} no apunta a una carpeta permitida de la bóveda.`);
+    const directory = usesDeclared ? chosen : choices.length === 1 ? choices[0] : null;
     const notes = [];
     let omittedNotes = 0;
     if (directory === null) warn("area-unresolved", "Una categoría no tiene carpeta inequívoca; requiere revisión manual.");
