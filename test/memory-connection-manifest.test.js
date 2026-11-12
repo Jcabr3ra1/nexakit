@@ -135,7 +135,12 @@ for (const [label, modify] of [
   ["read-write", m => { m.security.mcpAccess = "read-write"; }], ["sensitive-allowed", m => { m.security.sensitiveDataPolicy = "allowed"; }],
   ["implicit-write", m => { m.security.writeRequiresExplicitAuthorization = false; }], ["credentials-allowed", m => { m.security.allowCredentialsInMemory = true; }],
   ["automation-no-merged", m => { m.automation = { enabled: true, requiresMergedChange: false }; }],
-  ["bad-layout", m => { m.memory.layout = { profile: "unknown" }; }]
+  ["bad-layout", m => { m.memory.layout = { profile: "unknown" }; }],
+  ["areas-unknown-category", m => { m.automation = { enabled: true, requiresMergedChange: true, areas: { inventada: "03-IMPLEMENTACION" } }; }],
+  ["areas-path-traversal", m => { m.automation = { enabled: true, requiresMergedChange: true, areas: { documentation: "../fuera" } }; }],
+  ["areas-nested-path", m => { m.automation = { enabled: true, requiresMergedChange: true, areas: { tests: "03-IMPLEMENTACION/sub" } }; }],
+  ["areas-hidden-directory", m => { m.automation = { enabled: true, requiresMergedChange: true, areas: { tests: ".obsidian" } }; }],
+  ["areas-not-string", m => { m.automation = { enabled: true, requiresMergedChange: true, areas: { tests: 3 } }; }]
 ]) test("A1f schema blocks " + label + " without coercion or removing fields", () => {
   const f = fixture(); modify(f.manifest); const input = f.input(), before = Buffer.from(input.manifestBytes);
   blocked(validate(input), "MC_MANIFEST_SCHEMA"); assert.deepEqual(input.manifestBytes, before);
@@ -234,4 +239,10 @@ test("A1f evaluation performs no filesystem, discovery, network, process or envi
   const originalEnv = process.env; process.env = new Proxy(originalEnv, { get: deny, ownKeys: deny }); restore.push(() => { process.env = originalEnv; });
   let result; try { result = validate(input); } finally { for (const fn of restore.reverse()) fn(); }
   assert.equal(result.state, "validated"); facts(result); assert.equal(calls, 0);
+});
+
+test("A1f automation.areas acepta carpetas de primer nivel por categoría", () => {
+  const f = fixture();
+  f.manifest.automation = { enabled: true, requiresMergedChange: true, reviewBranch: "main", areas: { documentation: "03-IMPLEMENTACION", tests: "03-IMPLEMENTACION", implementation: "03-IMPLEMENTACION" } };
+  const r = validate(f.input()); assert.equal(r.state, "validated");
 });

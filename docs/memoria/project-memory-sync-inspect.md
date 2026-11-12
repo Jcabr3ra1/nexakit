@@ -141,6 +141,40 @@ La validación previa de `doctor` conserva sus lecturas y controles habituales.
 Que exista una candidata no implica que deba actualizarse. Si no hay candidatas,
 el resultado es «requiere revisión manual», no «sin cambios documentales».
 
+#### Código fuente y configuración raíz
+
+Además de las reglas por nombre de carpeta, `source-path` (categoría
+`implementation`, destino `IMPLEMENTACION`) reconoce el código de primer nivel
+(`src/`, `lib/`, `app/`, `bin/`, `packages/`, `plugins/`, `schemas/`,
+`templates/`, `examples/`). Solo cuenta en la raíz, para no solaparse con
+`frontend/src/…`. `operations-path` incluye `.claude-plugin/`, `.gitignore`,
+`.gitattributes` y `package.json`/`package-lock.json`, y `tests-path` incluye
+`test-support/` y `testing/`. Lo que ninguna regla reconoce sigue enumerado como
+sin clasificación.
+
+#### Mapeo declarado por el proyecto (`automation.areas`)
+
+Cuando una categoría tiene varias carpetas candidatas (por ejemplo, documentación
+con `PRODUCTO`, `ARQUITECTURA` e `IMPLEMENTACION`), el proyecto puede elegir una en
+el manifiesto, de forma explícita y opcional:
+
+```json
+"automation": {
+  "enabled": true,
+  "reviewBranch": "main",
+  "requiresMergedChange": true,
+  "areas": { "documentation": "03-IMPLEMENTACION", "tests": "03-IMPLEMENTACION" }
+}
+```
+
+Las categorías válidas son `backend`, `frontend`, `hardware`, `documentation`,
+`operations`, `tests`, `decisions` e `implementation`. El valor es el nombre de una
+carpeta de primer nivel de la bóveda, sin barras ni punto inicial. La herramienta
+solo lo usa si esa carpeta existe y figura entre las permitidas del diseño; si no,
+no la usa, emite `area-override-invalid` (sin repetir el valor) y vuelve a la
+resolución automática. Sin `areas` el comportamiento no cambia. El mapeo elige la
+carpeta de las sugerencias; no autoriza editar notas ni acepta advertencias.
+
 ## Contrato de salida
 
 El resultado incluye estos campos estables:

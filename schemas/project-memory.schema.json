@@ -261,8 +261,29 @@
           "type": "string",
           "minLength": 1,
           "description": "Descripción portable; la plataforma decide el formato ejecutable."
+        },
+        "areas": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Carpeta de la bóveda que sync inspect propone para una categoría con varias candidatas. Debe ser una carpeta de primer nivel que exista.",
+          "properties": {
+            "backend": { "$ref": "#/$defs/areaDirectory" },
+            "frontend": { "$ref": "#/$defs/areaDirectory" },
+            "hardware": { "$ref": "#/$defs/areaDirectory" },
+            "documentation": { "$ref": "#/$defs/areaDirectory" },
+            "operations": { "$ref": "#/$defs/areaDirectory" },
+            "tests": { "$ref": "#/$defs/areaDirectory" },
+            "decisions": { "$ref": "#/$defs/areaDirectory" },
+            "implementation": { "$ref": "#/$defs/areaDirectory" }
+          }
         }
       }
+    },
+    "areaDirectory": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[^/\\\\.][^/\\\\]*$"
     },
     "localPath": {
       "type": "string",

@@ -401,3 +401,60 @@ function snapshot(root) {
   walk(root);
   return results;
 }
+
+const withAreas = (f, areas) => fs.writeFileSync(f.manifestPath, JSON.stringify({ ...f.manifest, automation: { ...f.manifest.automation, areas } }));
+
+test("el código fuente y la configuración raíz de un repositorio se clasifican", async (t) => {
+  const files = ["src/index.js", "lib/util.js", "bin/cli.js", "plugins/mod/hooks/register.js", "schemas/a.schema.json", "templates/a.md", "examples/a.json", ".gitignore", "package.json", "package-lock.json", ".claude-plugin/marketplace.json"].map((name) => file(name));
+  const r = await fixture(t, { files }).inspect();
+  assert.deepEqual(r.unmappedFiles, []);
+  assert.equal(r.warnings.some((w) => w.code === "unmapped-files"), false);
+  const implementation = r.candidateAreas.find((a) => a.category === "implementation");
+  assert.equal(implementation.directory, "03-IMPLEMENTACION");
+  assert.equal(implementation.rule, "source-path");
+  assert.equal(r.candidateAreas.find((a) => a.category === "operations").directory, "06-OPERACION");
+});
+
+test("test-support y testing cuentan como pruebas", async (t) => {
+  const r = await fixture(t, { files: [file("test-support/helper.js"), file("testing/caso.js")] }).inspect();
+  assert.deepEqual(r.unmappedFiles, []);
+  assert.equal(r.candidateAreas.find((a) => a.category === "tests").rule, "tests-path");
+});
+
+test("sin mapeo declarado, una categoría con varias carpetas sigue sin resolverse", async (t) => {
+  const r = await fixture(t, { files: [file("docs/guia.md"), file("test/a.test.js")] }).inspect();
+  assert.equal(r.candidateAreas.find((a) => a.category === "documentation").directory, null);
+  assert.equal(r.candidateAreas.find((a) => a.category === "tests").directory, null);
+  assert.equal(r.warnings.some((w) => w.code === "area-unresolved"), true);
+  assert.equal(r.warnings.some((w) => w.code === "area-override-invalid"), false);
+});
+
+test("automation.areas resuelve una categoría ambigua con una carpeta existente", async (t) => {
+  const f = fixture(t, { files: [file("docs/guia.md"), file("test/a.test.js")] });
+  withAreas(f, { documentation: "03-IMPLEMENTACION", tests: "03-IMPLEMENTACION" });
+  const r = await f.inspect();
+  for (const category of ["documentation", "tests"]) {
+    const area = r.candidateAreas.find((a) => a.category === category);
+    assert.equal(area.directory, "03-IMPLEMENTACION");
+    assert.deepEqual(area.notes, ["03-IMPLEMENTACION/Implementación.md"]);
+  }
+  assert.equal(r.warnings.some((w) => w.code === "area-unresolved"), false);
+  assert.equal(r.status, "ready");
+});
+
+test("un mapeo que apunta a una carpeta inexistente se avisa y no se usa", async (t) => {
+  const f = fixture(t, { files: [file("docs/guia.md")] });
+  withAreas(f, { documentation: "99-NADA" });
+  const r = await f.inspect();
+  assert.equal(r.candidateAreas.find((a) => a.category === "documentation").directory, null);
+  assert.equal(r.warnings.some((w) => w.code === "area-override-invalid"), true);
+  assert.equal(r.warnings.some((w) => w.code === "area-unresolved"), true);
+});
+
+test("un mapeo no puede salirse de las carpetas permitidas de la bóveda", async (t) => {
+  const f = fixture(t, { files: [file("docs/guia.md")] });
+  withAreas(f, { documentation: "../fuera" });
+  const r = await f.inspect();
+  assert.equal(r.candidateAreas.find((a) => a.category === "documentation").directory, null);
+  assert.equal(r.warnings.some((w) => w.code === "area-override-invalid"), true);
+});
