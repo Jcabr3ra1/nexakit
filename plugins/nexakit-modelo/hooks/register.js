@@ -1,4 +1,4 @@
-import { familia, filasDeAgentes, segmentosDeBarra } from './barra.js';
+import { familia, filasDeAgentes, segmentosDeBarra, sumarTokens, tokensVacios } from './barra.js';
 import { ajustarPorLimite } from './decidir.js';
 import { recomendarPorTexto } from './recomendar.js';
 
@@ -141,7 +141,22 @@ export function register(on) {
       agentes.set(e.agentId, Object.assign(a, { model: e.model, effort: e.effort ?? null }));
       if (nuevo) await sincronizarAgentes($, agentes);
     }
-    yield* next(e);
+    const respuesta = yield* next(e);
+    // Cada paso de un subagente trae el uso de su petición: se suma a su fila (turn.complete no se usa para
+    // esto, así que nada cuenta doble). La sesión principal ya suma su caché en turn.complete.
+    if (e.agentId) {
+      try {
+        const a = agentes.get(e.agentId);
+        if (a) {
+          a.tokens ??= tokensVacios();
+          sumarTokens(a.tokens, respuesta?.usage);
+          $.ui.invalidate('ui.render');
+        }
+      } catch {
+        // Medir nunca debe romper el turno.
+      }
+    }
+    return respuesta;
   });
 
   on('turn.complete', async ($, e, next) => {
