@@ -1,6 +1,6 @@
 {
   "name": "nexakit-modelo",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Barra sobre el prompt con modelo, esfuerzo, recomendación por mensaje (delegar antes que cambiar de modelo), acierto de caché y uso de contexto y límites, sin cambiar nada; cada subagente muestra sus tokens nuevos y su porcentaje de caché.",
   "author": {
     "name": "Juan Jaller"

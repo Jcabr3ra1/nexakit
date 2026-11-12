@@ -104,7 +104,20 @@ function sugerencia(estado) {
 // El límite de uso más alto de los que informa la API (5 horas o semanal).
 const limiteMasAlto = (usage) => Math.max(-1, ...(usage?.rateLimits ?? []).map((l) => (esNumero(l?.percentUsed) ? l.percentUsed : -1)));
 
-export function segmentosDeBarra({ model, effort, recommendation, usage, cache, cacheFria = false, rutinaSeguidas = 0 }) {
+const DIAS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+
+// Cuándo se reinicia un límite, en la hora local: «15:30» si es hoy y «vie 10:00» si es otro día. null si el
+// motor no lo informa, no es una fecha o ya pasó (un dato viejo no debe mostrarse como si fuera futuro).
+export function formatoReinicio(resetsAt, ahora = Date.now()) {
+  if (typeof resetsAt !== 'string') return null;
+  const t = Date.parse(resetsAt);
+  if (!Number.isFinite(t) || t <= ahora) return null;
+  const f = new Date(t);
+  const hora = `${String(f.getHours()).padStart(2, '0')}:${String(f.getMinutes()).padStart(2, '0')}`;
+  return f.toDateString() === new Date(ahora).toDateString() ? hora : `${DIAS[f.getDay()]} ${hora}`;
+}
+
+export function segmentosDeBarra({ model, effort, recommendation, usage, cache, cacheFria = false, rutinaSeguidas = 0, ahora = Date.now() }) {
   const s = [
     { text: nombreModelo(model), color: 'claude', bold: true },
     effort ? { text: ` · ${effort}` } : { text: ' · esfuerzo ?', dim: true },
@@ -121,7 +134,11 @@ export function segmentosDeBarra({ model, effort, recommendation, usage, cache, 
   for (const l of usage?.rateLimits ?? []) {
     if (!esNumero(l?.percentUsed)) continue;
     const nombre = l.kind === 'five_hour' ? '5h' : l.kind === 'seven_day' ? 'sem' : null;
-    if (nombre) s.push({ text: `   ${nombre} `, dim: true }, { text: `${Math.round(l.percentUsed)}%`, color: tono(l.percentUsed) });
+    if (!nombre) continue;
+    s.push({ text: `   ${nombre} `, dim: true }, { text: `${Math.round(l.percentUsed)}%`, color: tono(l.percentUsed) });
+    // Cuándo se reinicia, solo cuando ya va en ámbar o en rojo: con margen no hace falta y sería ruido.
+    const reinicio = tono(l.percentUsed) === 'success' ? null : formatoReinicio(l.resetsAt, ahora);
+    if (reinicio) s.push({ text: ` ↻ ${reinicio}`, dim: true });
   }
   return s;
 }

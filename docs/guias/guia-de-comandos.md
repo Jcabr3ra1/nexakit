@@ -112,7 +112,7 @@ Se escribe *dentro* de Claude Code, no en la terminal, y se aplica al abrir una 
 | Plugin | Qué hace |
 | --- | --- |
 | `niveles` | Cuatro subagentes con modelo y esfuerzo fijos (ligero, normal, exigente y alto) para delegar sin cambiar `/model`, y seis especialistas por tarea con herramientas limitadas y tope de pasos (`investigador`, `revisor-de-calidad`, `cierre-de-memoria`, `subir-al-repo`, `sincronizador-docs` y `cazador-de-flakes`; ver «Especialistas por tarea»). |
-| `nexakit-modelo` | Barra sobre el prompt: modelo, esfuerzo, recomendación mientras escribes (ajustar esfuerzo, delegar, cambiar de modelo o sesión nueva), acierto de caché, contexto, límites y los subagentes delegados, cada uno con su nombre, su modelo real, su estado y sus tokens (los nuevos, qué porcentaje fue lectura de caché y, atenuado, el total). |
+| `nexakit-modelo` | Barra sobre el prompt: modelo, esfuerzo, recomendación mientras escribes (ajustar esfuerzo, delegar, cambiar de modelo o sesión nueva), acierto de caché, contexto, límites (con la hora de reinicio cuando van en ámbar o en rojo) y los subagentes delegados, cada uno con su nombre, su modelo real, su estado y sus tokens (los nuevos, qué porcentaje fue lectura de caché y, atenuado, el total). |
 | `nexakit-sesion` | Avisos al 60 % y al 80 % de contexto, delegar en serie con la cuota alta y qué conservar al compactar. |
 | `nexakit-ahorro` | Recorta la salida larga de los comandos y guarda la completa en `~/.nexakit/salidas/`. `nexakit ahorro` resume lo recortado. |
 | `nexakit-lecciones` | Frena comandos que repiten un fallo, apunta tus correcciones y recuerda las que quedaron sin guardar. `nexakit lecciones` las resume y `--descartar` da por resueltas las pendientes. |
