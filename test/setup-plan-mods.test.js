@@ -31,12 +31,13 @@ const MOD_STATES = {
   'nexakit-ahorro': 'actualizable',
   'nexakit-lecciones': 'desactivado',
   'nexakit-sesion': 'activo',
+  'nexakit-guardarrailes': 'falta',
 };
 const UNKNOWN = Object.fromEntries(Object.keys(MOD_STATES).map((name) => [name, 'desconocido']));
 
 test('mods: by default every mod that is neither active nor unknown is chosen, and none without Claude Code', () => {
   assert.deepEqual(suggestedAnswers(project({ mods: MOD_STATES })).mods, {
-    chosen: ['nexakit-modelo', 'nexakit-ahorro', 'nexakit-lecciones'],
+    chosen: ['nexakit-modelo', 'nexakit-ahorro', 'nexakit-lecciones', 'nexakit-guardarrailes'],
     discarded: [],
   });
   assert.deepEqual(suggestedAnswers(project({ mods: UNKNOWN })).mods.chosen, []);
@@ -49,11 +50,11 @@ test('mods: a discarded mod is not suggested again, and answers saved before the
   const base = { version: 1, skills: { chosen: [], discarded: [] }, agents: ['claude'], memory: { decision: 'later' } };
   const saved = { ...base, mods: { chosen: [], discarded: ['nexakit-ahorro'] } };
   assert.deepEqual(suggestedAnswers(project({ mods: MOD_STATES, savedAnswers: saved })).mods, {
-    chosen: ['nexakit-modelo', 'nexakit-lecciones'],
+    chosen: ['nexakit-modelo', 'nexakit-lecciones', 'nexakit-guardarrailes'],
     discarded: ['nexakit-ahorro'],
   });
   assert.deepEqual(suggestedAnswers(project({ mods: MOD_STATES, savedAnswers: base })).mods, {
-    chosen: ['nexakit-modelo', 'nexakit-ahorro', 'nexakit-lecciones'],
+    chosen: ['nexakit-modelo', 'nexakit-ahorro', 'nexakit-lecciones', 'nexakit-guardarrailes'],
     discarded: [],
   });
 });
@@ -65,12 +66,13 @@ test('mods: install, update and enable lines, one block per mod, after Superpowe
     '+ Mod nexakit-modelo en Claude Code',
     '↻ Actualizar el mod nexakit-ahorro',
     '↻ Activar el mod nexakit-lecciones',
+    '+ Mod nexakit-guardarrailes en Claude Code',
     '✓ Mods activos en Claude Code: niveles y nexakit-sesion',
   ]);
   const ids = blockIds(confirmation);
-  assert.deepEqual(ids.filter((id) => id.startsWith('mod:')), ['mod:nexakit-modelo', 'mod:nexakit-ahorro', 'mod:nexakit-lecciones']);
+  assert.deepEqual(ids.filter((id) => id.startsWith('mod:')), ['mod:nexakit-modelo', 'mod:nexakit-ahorro', 'mod:nexakit-lecciones', 'mod:nexakit-guardarrailes']);
   assert.ok(ids.indexOf('mod:nexakit-modelo') > ids.indexOf('superpowers:claude'));
-  assert.ok(ids.indexOf('mod:nexakit-lecciones') < ids.indexOf('memory-init'));
+  assert.ok(ids.indexOf('mod:nexakit-guardarrailes') < ids.indexOf('memory-init'));
   assert.equal(confirmation.blocks.find((block) => block.id === 'mod:nexakit-modelo').label, 'Mod nexakit-modelo');
 });
 
@@ -104,7 +106,7 @@ test('every line carries its section, and the existing lines keep their order in
 });
 
 test('saved answers without mods do not count as changed when nothing about the mods changed', () => {
-  const state = project({ mods: { ...MOD_STATES, 'nexakit-modelo': 'activo', 'nexakit-ahorro': 'activo', 'nexakit-lecciones': 'activo' } });
+  const state = project({ mods: { ...MOD_STATES, 'nexakit-modelo': 'activo', 'nexakit-ahorro': 'activo', 'nexakit-lecciones': 'activo', 'nexakit-guardarrailes': 'activo' } });
   const base = { version: 1, skills: { chosen: ['frontend-design'], discarded: [] }, agents: ['claude'], memory: { decision: 'later' } };
   const answers = suggestedAnswers({ ...state, savedAnswers: base });
   const confirmation = buildConfirmation({ ...state, savedAnswers: base }, answers);

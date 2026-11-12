@@ -11,14 +11,15 @@ const versionOf = (name) =>
   JSON.parse(fs.readFileSync(path.join(root, 'plugins', name, '.claude-plugin', 'plugin.json'), 'utf8')).version;
 const list = (entries) => ok(JSON.stringify(entries));
 
-test('MODS lists the five plugins in order with their short labels', () => {
+test('El catálogo muestra los seis mods en orden con sus etiquetas breves', () => {
   assert.deepEqual(
     MODS.map((mod) => mod.name),
-    ['niveles', 'nexakit-modelo', 'nexakit-ahorro', 'nexakit-lecciones', 'nexakit-sesion'],
+    ['niveles', 'nexakit-modelo', 'nexakit-ahorro', 'nexakit-lecciones', 'nexakit-sesion', 'nexakit-guardarrailes'],
   );
   assert.ok(Object.isFrozen(MODS));
   assert.equal(MODS[0].label, 'Subagentes por nivel para delegar');
   assert.equal(MODS[4].label, 'Avisa cuándo abrir una sesión nueva');
+  assert.equal(MODS[5].label, 'Frena comandos peligrosos, secretos y commits mal escritos');
   assert.equal(MODS[0].id, 'niveles@agent-toolkit');
 });
 
@@ -38,6 +39,7 @@ test('parseModsState tells active, disabled, missing and updatable apart', () =>
     'nexakit-ahorro': 'actualizable',
     'nexakit-lecciones': 'falta',
     'nexakit-sesion': 'falta',
+    'nexakit-guardarrailes': 'falta',
   });
 });
 

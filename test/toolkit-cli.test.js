@@ -232,6 +232,7 @@ test('without a terminal the plan is grouped under the same headings as the scre
   assert.deepEqual(headings, ['Proyecto', 'Tus IA', 'Mods de Claude Code', 'Memoria']);
   assert.match(c.io.out, /^Mods de Claude Code\n  \+ Mod niveles en Claude Code$/mu);
   assert.match(c.io.out, /^  \+ Mod nexakit-sesion en Claude Code$/mu);
+  assert.match(c.io.out, /^  \+ Mod nexakit-guardarrailes en Claude Code$/mu);
 });
 
 test('comprobar reports the mods of Claude Code, and missing ones are not an error', async t => {
@@ -240,7 +241,7 @@ test('comprobar reports the mods of Claude Code, and missing ones are not an err
   assert.equal(await runToolkitCli(['--si', '--project', w.repo], { ...capture(), isTTY: false, options: w.options }), 0);
   const ok = capture();
   assert.equal(await runToolkitCli(['comprobar'], { ...ok, options: w.options }), 0, ok.io.err);
-  assert.match(ok.io.out, /^✓ Mods de Claude Code activos \(5 de 5\)$/mu);
+  assert.match(ok.io.out, /^✓ Mods de Claude Code activos \(6 de 6\)$/mu);
 
   w.clis.mods['nexakit-ahorro'] = 'falta';
   w.clis.mods['nexakit-sesion'] = 'falta';
@@ -304,6 +305,7 @@ test('--help lists all Spanish subcommands and guide includes Antigravity and ne
   assert.equal(guide.antigravityActive, true);
   assert.equal(guide.cliCommands.some(item => item.command.includes('comprobar')), true);
   assert.equal(guide.cliCommands.some(item => item.command.includes('memoria')), true);
+  assert.match(guide.cliCommands.find(item => item.command === 'npx nexakit').description, /nexakit-guardarrailes/u);
 });
 
 test('unknown flags show the help and exit 2', async () => {

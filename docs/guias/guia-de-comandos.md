@@ -104,6 +104,7 @@ Codex ejecuta sus comandos en un sandbox que solo deja escribir en el proyecto, 
 /plugin install nexakit-sesion@agent-toolkit
 /plugin install nexakit-ahorro@agent-toolkit
 /plugin install nexakit-lecciones@agent-toolkit
+/plugin install nexakit-guardarrailes@agent-toolkit
 ```
 
 Se escribe *dentro* de Claude Code, no en la terminal, y se aplica al abrir una sesión nueva.
@@ -115,6 +116,9 @@ Se escribe *dentro* de Claude Code, no en la terminal, y se aplica al abrir una 
 | `nexakit-sesion` | Avisos al 60 % y al 80 % de contexto, delegar en serie con la cuota alta y qué conservar al compactar. |
 | `nexakit-ahorro` | Recorta la salida larga de los comandos y guarda la completa en `~/.nexakit/salidas/`. `nexakit ahorro` resume lo recortado. |
 | `nexakit-lecciones` | Frena comandos que repiten un fallo, apunta tus correcciones y recuerda las que quedaron sin guardar. `nexakit lecciones` las resume y `--descartar` da por resueltas las pendientes. |
+| `nexakit-guardarrailes` | Bloquea comandos destructivos de Bash, escrituras de archivos sensibles o de secretos y mensajes de commit fuera del formato Conventional Commits. |
+
+Para autorizar una excepción puntual en Bash, antepón `NEXAKIT_PELIGRO=1`, `NEXAKIT_SECRETO=1` o `NEXAKIT_COMMIT=1` al comando, según el bloqueo. Si el bloqueo ocurre al escribir o editar desde Claude Code, el mod indica que hay que confirmar la operación contigo.
 
 Para actualizarlos después: `/plugin marketplace update agent-toolkit` y reinicia la sesión.
 

@@ -28,6 +28,11 @@
       "name": "nexakit-sesion",
       "source": "./plugins/nexakit-sesion",
       "description": "Avisa al 60 % y al 80 % de contexto que conviene abrir una sesión nueva."
+    },
+    {
+      "name": "nexakit-guardarrailes",
+      "source": "./plugins/nexakit-guardarrailes",
+      "description": "Bloquea comandos destructivos, la escritura de secretos y archivos sensibles, y los commits con mensajes fuera del formato Conventional Commits."
     }
   ]
 }
