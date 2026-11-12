@@ -115,6 +115,13 @@ function policyMatches(tools, expected) {
  * Only these two modules and their tests are part of RG3-A1a: no TOML collector,
  * writer, public CLI dispatch, native MCP test or actual client configuration.
  */
+// The exact direct launches `connect` has registered: the first reviewed one and, since nexakit 0.6.0, the
+// read-only one. Anything else with the same name stays an identity mismatch.
+const LEGACY_DIRECT_LAUNCHES = Object.freeze([
+  ["-y", "@modelcontextprotocol/server-filesystem@2026.8.31"],
+  ["-y", "@modelcontextprotocol/server-filesystem@2.3.0", "--read-only", "--confine-roots"]
+]);
+
 export function createMemoryConnectionPlan(input) {
   const report = blank();
   let data, descriptor;
@@ -171,9 +178,8 @@ export function createMemoryConnectionPlan(input) {
       } else {
         report.components.push(component("policy", "conflict", "MC_POLICY_MISMATCH"));
       }
-    } else if (current.command === "npx" && equal(current.args, [
-      "-y", "@modelcontextprotocol/server-filesystem@2026.8.31", descriptor.identity.vaultPath
-    ]) && (current.cwd === undefined || current.cwd === descriptor.server.cwd)) {
+    } else if (current.command === "npx" && LEGACY_DIRECT_LAUNCHES.some(launch =>
+      equal(current.args, [...launch, descriptor.identity.vaultPath])) && (current.cwd === undefined || current.cwd === descriptor.server.cwd)) {
       report.connectionClass = "legacy-direct";
       if (data.migrateLegacy) {
         report.components.push(component("mcp", "migrate", "MC_LEGACY_MIGRATION_PROPOSED"),

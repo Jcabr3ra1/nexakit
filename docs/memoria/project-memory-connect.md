@@ -25,8 +25,21 @@ También se puede pasar directamente la ruta de `project-memory.json`.
    equivalente para impedir escrituras desde el MCP.
 
 Las conexiones nuevas fijan la versión verificada de
-`@modelcontextprotocol/server-filesystem`; las políticas por cliente evitan que
-una actualización futura exponga herramientas no enumeradas.
+`@modelcontextprotocol/server-filesystem` (`2.3.0`) y lo arrancan con dos opciones:
+
+- `--read-only`: el propio servidor no ofrece ninguna herramienta que escriba,
+  permita lo que permita el cliente.
+- `--confine-roots`: las carpetas (Roots) que anuncia el cliente no sustituyen a
+  la bóveda. Sin esta opción, un cliente que envía su proyecto como Root hace que
+  el servidor sirva el proyecto y deje de leer la bóveda.
+
+Las políticas por cliente se mantienen como segunda barrera, para que una
+actualización futura no exponga herramientas no enumeradas.
+
+Una conexión hecha con una versión anterior de nexakit (otra versión del
+servidor, o sin esas opciones) sigue funcionando. `connect` la muestra como
+`update` y, con `--apply`, la sustituye por la nueva; `npx nexakit` la propone
+como paso pendiente. No es un conflicto.
 
 Herramientas permitidas:
 
@@ -47,6 +60,8 @@ denegación:
 - `write_file`
 - `edit_file`
 - `move_file`
+- `append_file`
+- `copy_file`
 
 ## Adaptadores
 

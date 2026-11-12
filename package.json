@@ -26,16 +26,13 @@
     "node": ">=24"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.32.2",
+    "@modelcontextprotocol/client": "^2.4.0",
     "@modelcontextprotocol/server": "^2.4.0",
-    "@modelcontextprotocol/server-filesystem": "2026.8.31",
+    "@modelcontextprotocol/server-filesystem": "2.3.0",
     "ajv": "^8.17.1",
     "eslint-visitor-keys": "5.0.1",
     "toml-eslint-parser": "1.0.3",
     "zod": "^4.6.7"
-  },
-  "devDependencies": {
-    "@modelcontextprotocol/client": "^2.4.0"
   },
   "license": "MIT",
   "keywords": [

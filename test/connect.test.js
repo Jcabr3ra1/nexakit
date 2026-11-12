@@ -302,6 +302,53 @@ test("un MCP homónimo diferente es conflicto", async (context) => {
   assert.equal(report.summary.conflicts, 1);
 });
 
+for (const [agentId, launch] of [
+  ["claude", "-y @modelcontextprotocol/server-filesystem@2026.8.31"],
+  ["claude", "-y @modelcontextprotocol/server-filesystem"],
+  ["claude", "-y @modelcontextprotocol/server-filesystem@2.3.0"],
+  ["codex", "-y @modelcontextprotocol/server-filesystem@2026.8.31"],
+]) test(`una conexión anterior de ${agentId} (${launch.split("filesystem")[1] || "sin versión"}) se actualiza a solo lectura sin conflicto`, async (context) => {
+  const fixture = createFixture(context);
+  const vault = fs.realpathSync(fixture.memory);
+  const calls = [];
+  let current = launch;
+  const output = () => agentId === "claude" ? claudeServerOutput(vault, current) : codexServerOutput(vault, true, current);
+  const runner = (_command, args) => {
+    calls.push(args.join(" "));
+    if (args[1] === "get") return current === null ? missingServer() : output();
+    if (args[1] === "remove") { current = null; return success(); }
+    if (args[1] === "add") {
+      current = args.slice(args.indexOf("--") + 2, -1).join(" ");
+      if (agentId === "codex") fs.appendFileSync(path.join(fixture.home, ".codex/config.toml"), "\n[mcp_servers.demo-project-memory]\ncommand = \"npx\"\n");
+      return success();
+    }
+    throw new Error(`Comando inesperado: ${args.join(" ")}`);
+  };
+  if (agentId === "codex") {
+    fs.mkdirSync(path.join(fixture.home, ".codex"), { recursive: true });
+    fs.writeFileSync(path.join(fixture.home, ".codex/config.toml"), "");
+  }
+  const options = { targetPath: fixture.memory, agentId };
+  const preview = await connectMemory(options, { homeDirectory: fixture.home, runCommand: runner });
+  assert.equal(preview.status, "preview");
+  assert.equal(preview.components.find((item) => item.id === "mcp").action, "update");
+
+  const report = await connectMemory({ ...options, apply: true }, { homeDirectory: fixture.home, runCommand: runner });
+  assert.equal(report.status, "connected");
+  assert.equal(current, CURRENT_LAUNCH, "la orden nueva fija la versión y arranca en solo lectura");
+  assert.ok(calls.some((call) => call.startsWith("mcp remove demo-project-memory")));
+  assert.equal(calls.filter((call) => call.startsWith("mcp add")).at(-1).endsWith(` ${CURRENT_LAUNCH} ${vault}`), true);
+
+  const again = await connectMemory(options, { homeDirectory: fixture.home, runCommand: runner });
+  assert.equal(again.components.find((item) => item.id === "mcp").action, "unchanged");
+});
+
+test("las herramientas de escritura nuevas del servidor 2.x también se deniegan", () => {
+  for (const tool of ["append_file", "copy_file", "write_file", "edit_file", "create_directory", "move_file"])
+    assert.ok(WRITE_TOOLS.includes(tool), tool);
+  assert.equal(READ_TOOLS.some((tool) => WRITE_TOOLS.includes(tool)), false);
+});
+
 test("la CLI exige seleccionar un agente compatible", async (context) => {
   const fixture = createFixture(context);
   const io = captureIo();
@@ -311,6 +358,8 @@ test("la CLI exige seleccionar un agente compatible", async (context) => {
   assert.equal(exitCode, 1);
   assert.match(io.stderr.join("\n"), /--agent debe ser/);
 });
+
+const CURRENT_LAUNCH = "-y @modelcontextprotocol/server-filesystem@2.3.0 --read-only --confine-roots";
 
 function createFixture(context, memoryName = "memory") {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "project-memory-connect-"));
@@ -337,27 +386,27 @@ function createFixture(context, memoryName = "memory") {
   return { root, source, memory, home };
 }
 
-function codexServerOutput(vaultPath, withPolicy) {
+function codexServerOutput(vaultPath, withPolicy, launch = CURRENT_LAUNCH) {
   return {
     status: 0,
     stdout: [
       "demo-project-memory",
       "  command: npx",
-      `  args: -y @modelcontextprotocol/server-filesystem ${vaultPath}`,
+      `  args: ${launch} ${vaultPath}`,
       withPolicy ? `  enabled_tools: ${READ_TOOLS.join(", ")}` : ""
     ].join("\n"),
     stderr: ""
   };
 }
 
-function claudeServerOutput(vaultPath) {
+function claudeServerOutput(vaultPath, launch = CURRENT_LAUNCH) {
   return {
     status: 0,
     stdout: [
       "demo-project-memory:",
       "  Type: stdio",
       "  Command: npx",
-      `  Args: -y @modelcontextprotocol/server-filesystem ${vaultPath}`
+      `  Args: ${launch} ${vaultPath}`
     ].join("\n"),
     stderr: ""
   };

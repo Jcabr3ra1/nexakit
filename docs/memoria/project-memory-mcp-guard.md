@@ -127,6 +127,18 @@ completa pasó con esa versión. Quedan tres avisos moderados (`glob` y
 línea 2.x. Ese salto se aplazó: la 2.x usa el SDK nuevo, añade las herramientas
 de escritura `append_file` y `copy_file` y ofrece `--read-only`, así que exige
 migrar este guardián y revisar los permisos de Claude Code.
+
+El salto se hizo después: filesystem queda fijado en `2.3.0` y el guardián usa
+`@modelcontextprotocol/server` y `client` 2.x; `@modelcontextprotocol/sdk` 1.x ya
+no es dependencia y `npm audit --omit=dev` no da avisos. Cambios de contrato:
+
+- El guardián arranca el servidor con `--read-only --confine-roots -- <bóveda>`,
+  exige la versión fijada y sigue filtrando el catálogo a las nueve lecturas.
+- Solo atiende el `initialize` de las revisiones `2025-11-25` y anteriores. La
+  revisión `2026-07-28` (`server/discover`, sin `initialize`) se rechaza: una
+  petición `tools/list` sin `initialize` previo devuelve error.
+- `append_file` y `copy_file` se deniegan como el resto de escrituras.
+
 RG-1 añade dos dependencias directas y su árbol transitivo, actualmente ausentes
 de la biblioteca; deben revisarse antes de instalarlas. No usar rutas de caché
 personales en el código, en la configuración portable o en las pruebas.
