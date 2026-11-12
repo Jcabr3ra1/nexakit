@@ -15,6 +15,13 @@ export const SUPERPOWERS = Object.freeze({
     list: ['plugin', 'list', '--json'],
     install: ['plugin', 'install', 'superpowers@claude-plugins-official'],
     enable: ['plugin', 'enable', 'superpowers@claude-plugins-official'],
+    // A HOME where Claude Code never opened only has the built-in directory: the reviewed marketplace has to be
+    // added (or refreshed, when its local copy is old) before the plugin can be found.
+    marketplace: Object.freeze({
+      missing: /not found in marketplace|marketplace\b.*\bnot found/iu,
+      add: ['plugin', 'marketplace', 'add', 'anthropics/claude-plugins-official'],
+      update: ['plugin', 'marketplace', 'update', 'claude-plugins-official'],
+    }),
   }),
   codex: Object.freeze({
     command: 'codex',
@@ -124,9 +131,16 @@ export async function applySuperpowers(agent, state, { runCommand, environment }
   const args = state === 'falta' ? entry.install : entry.enable;
   if (!args) throw new Error(`Superpowers está desactivado en ${AGENT_NAMES[agent]}; actívalo desde ${AGENT_NAMES[agent]} (/plugins).`);
   const run = runCommand ?? (await defaultRunner(entry.command, environment));
-  const result = await run(entry.command, args);
+  const detailOf = (output) => String(output?.stderr || output?.stdout || output?.errorCode || '').trim();
+  let result = await run(entry.command, args);
+  if (result?.status !== 0 && state === 'falta' && entry.marketplace?.missing.test(detailOf(result))) {
+    const prepared =
+      (await run(entry.command, entry.marketplace.add))?.status === 0 ||
+      (await run(entry.command, entry.marketplace.update))?.status === 0;
+    if (prepared) result = await run(entry.command, args);
+  }
   if (result?.status !== 0) {
-    const detail = String(result?.stderr || result?.stdout || result?.errorCode || '').trim();
+    const detail = detailOf(result);
     throw new Error(`No se pudo ${state === 'falta' ? 'instalar' : 'activar'} Superpowers en ${AGENT_NAMES[agent]}.${detail ? ` ${detail}` : ''}`);
   }
   return true;

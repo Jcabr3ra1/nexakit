@@ -72,3 +72,47 @@ test('a failed install stops with the reason', async () => {
     /sin red/u
   );
 });
+
+const MISSING_MARKETPLACE = { status: 1, stdout: '', stderr: '✘ Failed to install plugin "superpowers@claude-plugins-official": Plugin "superpowers" not found in marketplace "claude-plugins-official". Your local copy may be out of date' };
+
+test('Claude on a new HOME: the reviewed marketplace is added and the install retried once', async () => {
+  const calls = [];
+  let added = false;
+  const runCommand = (command, args) => {
+    calls.push([command, ...args].join(' '));
+    if (args[1] === 'marketplace') { added = true; return ok(''); }
+    return added ? ok('') : MISSING_MARKETPLACE;
+  };
+  assert.equal(await applySuperpowers('claude', 'falta', { runCommand }), true);
+  assert.deepEqual(calls, [
+    'claude plugin install superpowers@claude-plugins-official',
+    'claude plugin marketplace add anthropics/claude-plugins-official',
+    'claude plugin install superpowers@claude-plugins-official'
+  ]);
+});
+
+test('Claude with an outdated marketplace copy: add fails, so it is updated before retrying', async () => {
+  const calls = [];
+  let updated = false;
+  const runCommand = (command, args) => {
+    calls.push([command, ...args].join(' '));
+    if (args[2] === 'add') return { status: 1, stdout: '', stderr: 'already exists' };
+    if (args[2] === 'update') { updated = true; return ok(''); }
+    return updated ? ok('') : MISSING_MARKETPLACE;
+  };
+  assert.equal(await applySuperpowers('claude', 'falta', { runCommand }), true);
+  assert.deepEqual(calls.slice(1, 3), [
+    'claude plugin marketplace add anthropics/claude-plugins-official',
+    'claude plugin marketplace update claude-plugins-official'
+  ]);
+});
+
+test('a marketplace that cannot be prepared, or any other install error, fails once with the reason', async () => {
+  const calls = [];
+  const noMarketplace = (command, args) => { calls.push(args.join(' ')); return args[1] === 'marketplace' ? { status: 1, stdout: '', stderr: 'sin red' } : MISSING_MARKETPLACE; };
+  await assert.rejects(applySuperpowers('claude', 'falta', { runCommand: noMarketplace }), /not found in marketplace/u);
+  assert.equal(calls.filter(call => call.startsWith('plugin install')).length, 1, 'no retry without a marketplace');
+  let installs = 0;
+  await assert.rejects(applySuperpowers('claude', 'falta', { runCommand: () => { installs++; return { status: 1, stdout: '', stderr: 'sin red' }; } }), /sin red/u);
+  assert.equal(installs, 1, 'an unrelated error is not retried');
+});
