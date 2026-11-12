@@ -583,6 +583,8 @@ project-memory sync inspect /ruta/a/proyecto-memory --pr 42 --json --strict
 ```
 
 El número `42` es un ejemplo: sustitúyelo por el PR que quieras inspeccionar.
+
+El código de primer nivel (`src/`, `lib/`, `bin/`, `plugins/`, `schemas/`…) y la configuración de la raíz (`package.json`, `.gitignore`, `.claude-plugin/`) se clasifican solos. Si una categoría tiene varias carpetas candidatas en la bóveda, el manifiesto puede elegir una con `automation.areas` (requiere nexakit 0.7.0 o superior); se explica en [Project Memory Sync Inspect](../memoria/project-memory-sync-inspect.md).
 Requiere GitHub CLI (`gh`) disponible y autenticado para ese repositorio.
 No descarga código ni diffs, no ejecuta pruebas y no modifica notas ni el registro.
 Los estados `ready`, `partial` y `blocked` describen la evidencia disponible;

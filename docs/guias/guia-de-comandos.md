@@ -51,7 +51,7 @@ npm test
 
 ### 3. Abre el asistente por pasos o revisa qué falta
 
-En una terminal interactiva puedes abrir el asistente en tres pasos: skills para tu proyecto, opcionales y revisión de la instalación. Las compatibles se eligen manualmente; solo se premarcan recomendaciones con escenarios validados para los agentes destino. En la última pantalla, `e` permite cambiar agentes, modo, Git ignore y núcleo global. El estado del proyecto queda bajo `.agent-toolkit/`; `[d]` y `detach` permiten desacoplarlo con vista previa.
+En una terminal interactiva puedes abrir el asistente: te pregunta por las skills de tu proyecto, la memoria y las IA donde dejarlo listo, y con Claude Code elegido también qué mods instalar (paso 7); termina con una sola confirmación. Las compatibles se eligen manualmente; solo se premarcan recomendaciones con escenarios validados para los agentes destino. En la última pantalla, `e` permite cambiar agentes, modo, Git ignore y núcleo global. El estado del proyecto queda bajo `.agent-toolkit/`; `[d]` y `detach` permiten desacoplarlo con vista previa.
 
 ```sh
 npx nexakit                                   # o node bin/nexakit.js (alias: agent-toolkit)
@@ -111,8 +111,8 @@ Se escribe *dentro* de Claude Code, no en la terminal, y se aplica al abrir una 
 
 | Plugin | Qué hace |
 | --- | --- |
-| `niveles` | Cuatro subagentes con modelo y esfuerzo fijos (ligero, normal, exigente y alto) para delegar sin cambiar `/model`. |
-| `nexakit-modelo` | Barra sobre el prompt: modelo, esfuerzo, recomendación mientras escribes (ajustar esfuerzo, delegar, cambiar de modelo o sesión nueva), acierto de caché, contexto, límites y subagentes delegados. |
+| `niveles` | Cuatro subagentes con modelo y esfuerzo fijos (ligero, normal, exigente y alto) para delegar sin cambiar `/model`, y seis especialistas por tarea con herramientas limitadas y tope de pasos (`investigador`, `revisor-de-calidad`, `cierre-de-memoria`, `subir-al-repo`, `sincronizador-docs` y `cazador-de-flakes`; ver «Especialistas por tarea»). |
+| `nexakit-modelo` | Barra sobre el prompt: modelo, esfuerzo, recomendación mientras escribes (ajustar esfuerzo, delegar, cambiar de modelo o sesión nueva), acierto de caché, contexto, límites y los subagentes delegados, cada uno con su nombre, su modelo real, su estado y sus tokens (el total y qué porcentaje fue lectura de caché). |
 | `nexakit-sesion` | Avisos al 60 % y al 80 % de contexto, delegar en serie con la cuota alta y qué conservar al compactar. |
 | `nexakit-ahorro` | Recorta la salida larga de los comandos y guarda la completa en `~/.nexakit/salidas/`. `nexakit ahorro` resume lo recortado. |
 | `nexakit-lecciones` | Frena comandos que repiten un fallo, apunta tus correcciones y recuerda las que quedaron sin guardar. `nexakit lecciones` las resume y `--descartar` da por resueltas las pendientes. |
@@ -145,7 +145,7 @@ Para actualizar más adelante: `git pull --ff-only` y `npm ci --ignore-scripts` 
 
 1. **Tú:** Abre tu IA en la carpeta del proyecto en el que vas a trabajar (no en NexaKit) y pide la tarea con tus palabras.
 2. **La sesión principal:** Entiende la tarea, la planifica y decide qué hace ella y qué delega. Lo que se resuelve en uno o dos pasos lo hace ella misma.
-3. **Los subagentes de nivel:** Ejecutan lo delegado con su propio modelo y esfuerzo (tabla de abajo) y devuelven un informe breve. En Claude Code la barra de `nexakit-modelo` muestra cada uno con el modelo que usó.
+3. **Los subagentes de nivel:** Ejecutan lo delegado con su propio modelo y esfuerzo (tabla de abajo) y devuelven un informe breve. En Claude Code la barra de `nexakit-modelo` muestra cada uno con el modelo que usó y sus tokens (por ejemplo `148k · 97% caché`).
 4. **La sesión principal:** Comprueba cada informe, integra el resultado y pasa las pruebas antes de darlo por terminado.
 5. **Tú, si quieres:** Escribe `/revisar` para que otra IA lo revise en solo lectura. La primera vez pregunta «¿A dónde mando la revisión?». Nunca se lanza sola.
 6. **Tú:** Pides el commit y el PR, y decides el merge. Si el proyecto tiene memoria de Obsidian, `/cerrar-memoria` la pone al día.
@@ -162,6 +162,21 @@ El modo tutor, en el que tú escribes el código y la IA te guía paso a paso, s
 | Alto | `opus · high` | `gpt-6-astra · high` | Un fallo sutil, seguridad o lo que Exigente no resolvió |
 
 La sesión principal elige el nivel según el tipo de trabajo y sube de nivel solo si la corrección falló. Los nombres de Codex salen de `modelos` y pueden cambiar.
+
+### Especialistas por tarea (Claude Code)
+
+El plugin `niveles` trae además seis subagentes que se dividen por trabajo y no por dificultad. Todos llevan las herramientas limitadas y un tope de pasos para que el gasto no se desboque.
+
+| Especialista | Para qué | Límites |
+| --- | --- | --- |
+| `investigador` | Busca en fuentes oficiales y separa lo verificado de lo que no | Solo lee y busca en la web; máximo 25 pasos |
+| `revisor-de-calidad` | Dictamen con la puerta de calidad antes de un PR | No edita; máximo 30 pasos |
+| `cierre-de-memoria` | Cierra la memoria y registra cada PR de uno en uno | No sube la bóveda; máximo 40 pasos |
+| `subir-al-repo` | Commit, push, PR, espera del CI y fusión | Solo si el encargo trae tu «sube al repo» por escrito; máximo 40 pasos |
+| `sincronizador-docs` | Tras un cambio, señala qué documentación dejó de ser cierta | No edita; máximo 30 pasos |
+| `cazador-de-flakes` | Dice si un fallo del CI es intermitente mirando el historial | Solo lee; no relanza nada; máximo 20 pasos |
+
+Conviene delegar solo cuando la tarea lee mucho o devuelve mucho ruido: lanzar un subagente tiene un coste fijo, y una tarea pequeña sale más barata en la sesión principal. Tras `subir-al-repo`, la sesión principal comprueba que todo quedó bien. Tras actualizar el plugin (`/plugin marketplace update agent-toolkit`) usa `/reload-plugins` para que aparezcan.
 
 ## Comandos de terminal
 
