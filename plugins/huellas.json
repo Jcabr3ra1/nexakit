@@ -12,8 +12,8 @@
     "huella": "bfd10dcb6cf4b03a"
   },
   "nexakit-modelo": {
-    "version": "0.5.0",
-    "huella": "726f3dfe1a0c2608"
+    "version": "0.5.1",
+    "huella": "b5152de7d54dd5ff"
   },
   "nexakit-sesion": {
     "version": "0.2.1",
@@ -21,6 +21,6 @@
   },
   "niveles": {
     "version": "0.3.0",
-    "huella": "20b86c98391f21f8"
+    "huella": "ff786365514dc952"
   }
 }

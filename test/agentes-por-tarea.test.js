@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import { test } from 'node:test';
 
 // Subagentes por tarea del plugin niveles: se dividen por trabajo, no por dificultad.
-const ESPECIALISTAS = ['investigador', 'revisor-de-calidad', 'cierre-de-memoria', 'subir-al-repo'];
+const ESPECIALISTAS = ['investigador', 'revisor-de-calidad', 'cierre-de-memoria', 'subir-al-repo', 'sincronizador-docs', 'cazador-de-flakes'];
 
 async function agente(nombre) {
   const texto = await fs.readFile(new URL(`../plugins/niveles/agents/${nombre}.md`, import.meta.url), 'utf8');
@@ -19,7 +19,7 @@ async function agente(nombre) {
 
 const palabras = (texto) => texto.trim().split(/\s+/u).length;
 
-test('los cuatro especialistas existen, se llaman como su archivo y fijan modelo, esfuerzo y tope de pasos', async () => {
+test('los seis especialistas existen, se llaman como su archivo y fijan modelo, esfuerzo y tope de pasos', async () => {
   for (const nombre of ESPECIALISTAS) {
     const { campos } = await agente(nombre);
     assert.equal(campos.name, nombre);
@@ -93,4 +93,41 @@ test('el plugin niveles anuncia a los especialistas y sube su versión', async (
   const manifiesto = JSON.parse(await fs.readFile(new URL('../plugins/niveles/.claude-plugin/plugin.json', import.meta.url), 'utf8'));
   assert.match(manifiesto.description, /especialistas/iu);
   assert.equal(manifiesto.version, '0.3.0');
+});
+
+test('el sincronizador de documentación solo lee, parte del diff real y señala cada discrepancia con su ubicación', async () => {
+  const { campos, herramientas, cuerpo } = await agente('sincronizador-docs');
+  assert.equal(Number(campos.maxTurns), 30);
+  for (const h of ['Edit', 'Write', 'NotebookEdit', 'WebFetch', 'WebSearch']) assert.equal(herramientas.includes(h), false, `no puede ${h}`);
+  for (const h of ['Read', 'Grep', 'Glob', 'Bash']) assert.ok(herramientas.includes(h), `usa ${h}`);
+  assert.match(cuerpo, /git diff|gh pr diff/u, 'parte del cambio real');
+  assert.match(cuerpo, /archivo:l[ií]nea/iu, 'cada discrepancia lleva ubicación');
+  assert.match(cuerpo, /no edites/iu);
+  assert.match(cuerpo, /no verificado/iu);
+  assert.match(cuerpo, /contadores|cu[aá]ntos/iu, 'busca cifras y contadores que se quedan viejos');
+  assert.match(cuerpo, /300 palabras/u);
+});
+
+test('el cazador de pruebas intermitentes lee el historial del CI, no relanza nada y da un veredicto con pruebas', async () => {
+  const { campos, herramientas, cuerpo } = await agente('cazador-de-flakes');
+  assert.equal(Number(campos.maxTurns), 20);
+  assert.equal(campos.omitClaudeMd, 'true', 'no necesita cargar CLAUDE.md en cada lanzamiento');
+  assert.deepEqual([...herramientas].sort(), ['Bash', 'Grep', 'Read']);
+  assert.match(cuerpo, /gh run list/u);
+  assert.match(cuerpo, /--log-failed/u, 'lee solo la parte fallida del log');
+  assert.match(cuerpo, /no relances|no canceles/iu, 'solo lee: la decisión de relanzar es de quien lo pidió');
+  for (const veredicto of ['INTERMITENTE', 'REGRESIÓN', 'SIN DATOS']) assert.ok(cuerpo.includes(veredicto), `incluye el veredicto ${veredicto}`);
+  assert.match(cuerpo, /200 palabras/u);
+});
+
+test('el investigador tampoco carga CLAUDE.md: no necesita las reglas del proyecto para buscar en la web', async () => {
+  const { campos } = await agente('investigador');
+  assert.equal(campos.omitClaudeMd, 'true');
+});
+
+test('los agentes que no necesitan las reglas del proyecto lo declaran y los demás las siguen cargando', async () => {
+  for (const nombre of ['revisor-de-calidad', 'cierre-de-memoria', 'subir-al-repo', 'sincronizador-docs']) {
+    const { campos } = await agente(nombre);
+    assert.notEqual(campos.omitClaudeMd, 'true', `${nombre} sí necesita las reglas del proyecto`);
+  }
 });

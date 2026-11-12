@@ -4,6 +4,7 @@ description: Investiga en fuentes oficiales y separa lo verificado de lo que no.
 model: sonnet
 effort: medium
 maxTurns: 25
+omitClaudeMd: true
 tools: Read, Grep, Glob, Bash, WebSearch, WebFetch, Skill
 ---
 

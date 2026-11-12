@@ -411,3 +411,31 @@ test('el mod suma los tokens de cada paso de un subagente, ignora la sesión pri
     delete globalThis.h;
   }
 });
+
+test('la fila de un especialista muestra su nombre sin el prefijo del plugin y las columnas se alinean', () => {
+  const filas = filasDeAgentes([
+    { type: 'niveles:nivel-ligero', description: 'correr pruebas', status: 'running', model: 'claude-haiku-5-5', effort: 'low' },
+    { type: 'niveles:investigador', description: 'buscar fuentes', status: 'running', model: 'claude-sonnet-5-5', effort: 'medium' },
+    { type: 'niveles:revisor-de-calidad', description: 'dictamen del cambio', status: 'completed', model: 'claude-sonnet-5-5', effort: 'high' },
+  ]).map(texto);
+  assert.match(filas[0], /↳ ligero +Haiku 5\.5 · low/);
+  assert.match(filas[1], /↳ investigador +Sonnet 5\.5 · medium/);
+  assert.match(filas[2], /↳ revisor-de-calidad +Sonnet 5\.5 · high/, 'un nombre de 18 caracteres no se corta');
+  for (const fila of filas) assert.doesNotMatch(fila, /niveles:|…\s+(Haiku|Sonnet)/u, 'sin prefijo ni nombre cortado');
+  const columna = filas.map((f) => f.search(/(Haiku|Sonnet)/u));
+  assert.equal(new Set(columna).size, 1, 'el modelo empieza en la misma columna en todas las filas');
+});
+
+test('una fila con un tipo muy largo se corta con puntos suspensivos sin descuadrar el resto', () => {
+  const [larga, corta] = filasDeAgentes([
+    { type: 'otro-plugin:un-agente-con-un-nombre-larguisimo', description: 'x', status: 'running', model: 'claude-sonnet-5-5', effort: 'low' },
+    { type: 'niveles:nivel-alto', description: 'y', status: 'running', model: 'claude-opus-5-5', effort: 'high' },
+  ]).map(texto);
+  assert.match(larga, /↳ otro-plugin:un-ag… +Sonnet/u, 'se corta a 18 caracteres con puntos suspensivos');
+  assert.equal(larga.search(/Sonnet/u), corta.search(/Opus/u));
+});
+
+test('con solo los niveles de siempre la fila queda igual que antes', () => {
+  const [fila] = filasDeAgentes([{ type: 'niveles:nivel-normal', description: 'implementar', status: 'running', model: 'claude-sonnet-5-5', effort: 'medium' }]).map(texto);
+  assert.match(fila, /^  ↳ normal +Sonnet 5\.5 · medium +implementar/);
+});
