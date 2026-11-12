@@ -19,7 +19,7 @@ npx nexakit
 ## Inicio en tres pasos
 
 1. **Requisitos.** Instala **Node.js 24 o superior**, Git y al menos uno de los tres clientes de IA (**Claude Code**, **Codex** o **Antigravity CLI**).
-2. **Ejecuta `npx nexakit` en tu proyecto.** Responde tres preguntas breves (skills para el proyecto, memoria en Obsidian e IA donde dejarlo listo) y confirma una sola vez. Con `npx nexakit --si` aplica directamente las opciones sugeridas.
+2. **Ejecuta `npx nexakit` en tu proyecto.** Responde tres preguntas breves (skills para el proyecto, memoria en Obsidian e IA donde dejarlo listo; con Claude Code, una cuarta para elegir los mods) y confirma una sola vez. Con `npx nexakit --si` aplica directamente las opciones sugeridas.
 3. **Reinicia tu agente y trabaja con normalidad.** No necesitas ningún comando especial para empezar a programar:
    - **Orquesta por niveles:** la sesión principal entiende, planifica e integra, y delega la ejecución en subagentes de nivel (ligero, normal, exigente y alto) con su propio modelo y esfuerzo. El plugin `niveles` trae además seis especialistas por tarea, cada uno con su tope de pasos y sus herramientas limitadas: `investigador` (solo lee y busca en fuentes oficiales, máximo 25 pasos), `revisor-de-calidad` (dictamen con la puerta de calidad, sin editar), `cierre-de-memoria` (cierra la memoria y registra cada PR), `subir-al-repo` (commit, push, PR, espera del CI y fusión, solo con tu «sube al repo» escrito en el encargo; la sesión principal verifica después que quedó bien), `sincronizador-docs` (tras un PR, señala qué afirmaciones de la documentación ya no son ciertas) y `cazador-de-flakes` (mira el historial del CI para decir si un fallo es intermitente). Conviene delegar solo cuando la tarea lee mucho o devuelve mucho ruido: lanzar un subagente tiene un coste fijo, y para una tarea pequeña sale más barato hacerla en la sesión principal. En la barra cada uno aparece con su nombre, su modelo real, su estado y sus tokens. El modo tutor, en el que tú escribes el código, solo se activa si lo pides.
    - **Revisión por otra IA, solo cuando la pides:** escribe `/revisar` (o `$revisar`) o di «que lo revise <IA>». La primera vez pregunta `«¿A dónde mando la revisión?»` marcando la recomendada; nunca se lanza sola.
@@ -28,7 +28,7 @@ npx nexakit
 ## Comandos
 
 ```bash
-npx nexakit                                    # Preparar el proyecto (3 preguntas y una confirmación)
+npx nexakit                                    # Preparar el proyecto (3 preguntas, 4 con Claude Code, y una confirmación)
 npx nexakit --si                               # Aplicar directamente las sugerencias
 npx nexakit comprobar                          # Comprobar que todo esté bien conectado
 npx nexakit quitar                             # Ver qué quitaría del proyecto y de tus IA

@@ -205,7 +205,7 @@ git --version</code></pre></div>
       <div class="choice-row"><p>¿Qué agente quieres filtrar en los ejemplos?</p><div class="segmented" role="group" aria-label="Agentes de los comandos"><button type="button" data-agent="all" aria-pressed="true">Todas</button><button type="button" data-agent="claude" aria-pressed="false">Claude</button><button type="button" data-agent="codex" aria-pressed="false">Codex</button><button type="button" data-agent="antigravity" aria-pressed="false">Antigravity</button></div></div>
       <div class="command"><div class="command-top"><span class="command-label">Terminal · asistente interactivo</span><button class="copy" type="button">Copiar</button></div><pre><code data-command="start">cd '/ruta/a/mi-proyecto'
 npx nexakit</code></pre></div>
-      <div class="command"><div class="command-top"><span class="command-label">Lo que verás en pantalla (tres preguntas y una confirmación)</span><button class="copy" type="button">Copiar</button></div><pre><code>1. Skills para tu proyecto (detectadas por archivos y README)
+      <div class="command"><div class="command-top"><span class="command-label">Lo que verás en pantalla (tres preguntas, cuatro con Claude Code, y una confirmación)</span><button class="copy" type="button">Copiar</button></div><pre><code>1. Skills para tu proyecto (detectadas por archivos y README)
    [x] frontend-design — frontend/README menciona React
    [x] supabase-postgres-best-practices — backend/requirements.txt usa PostgreSQL
 
@@ -214,6 +214,14 @@ npx nexakit</code></pre></div>
 
 3. ¿En qué IA quieres dejarlo listo?
    [x] Claude Code   [x] Codex   [x] Antigravity
+
+4. ¿Qué mods de Claude Code quieres? (solo si eliges Claude Code)
+   [x] niveles — Subagentes por nivel para delegar
+   [x] nexakit-modelo — Barra con modelo, esfuerzo y consejo
+   [x] nexakit-ahorro — Recorta la salida larga de comandos
+   [x] nexakit-lecciones — Frena errores y guarda correcciones
+   [x] nexakit-sesion — Avisa cuándo abrir una sesión nueva
+   [x] nexakit-guardarrailes — Frena comandos peligrosos, secretos y commits mal escritos
 
 ¿Aplicar estos cambios? [S/n]</code></pre></div>
       <div class="keys"><span><kbd>↑</kbd> <kbd>↓</kbd> Moverte</span><span><kbd>Espacio</kbd> Marcar</span><span><kbd>Enter</kbd> Siguiente / Confirmar</span><span><kbd>Esc</kbd> Cancelar sin tocar nada</span></div>
@@ -234,7 +242,7 @@ agy</code></pre></div></div>
       </div>
       <ol class="tui-steps">
         <li><div><strong>Programa normalmente, sin comando especial</strong><p>Pide la tarea directamente en el chat. La IA consulta la memoria del proyecto en solo lectura, crea rama, escribe pruebas e implementa sin que tengas que invocar ningún comando previo.</p></div></li>
-        <li><div><strong>Orquesta por niveles</strong><p>La sesión principal entiende, planifica e integra, y delega la ejecución en subagentes de nivel (ligero, normal, exigente y alto), cada uno con su modelo y esfuerzo. El modo tutor, en el que tú escribes el código, solo se activa si lo pides.</p></div></li>
+        <li><div><strong>Orquesta por niveles</strong><p>La sesión principal entiende, planifica e integra, y delega la ejecución en subagentes de nivel (ligero, normal, exigente y alto), cada uno con su modelo y esfuerzo, y en seis especialistas por tarea con herramientas limitadas y tope de pasos (investigador, revisor de calidad, cierre de memoria, subir al repo, sincronizador de documentación y cazador de pruebas intermitentes). El modo tutor, en el que tú escribes el código, solo se activa si lo pides.</p></div></li>
         <li><div><strong>Revisión por otra IA, solo cuando la pides</strong><p>Escribe <code>/revisar</code> (o <code>$revisar</code> en Codex) o di «que lo revise &lt;IA&gt;». La primera vez en la sesión te pregunta <code>«¿A dónde mando la revisión?»</code> marcando la recomendada y conserva tu respuesta el resto de la conversación. Nunca se lanza sola.</p></div></li>
         <li><div><strong>Nota de seguimiento automática y cierre de memoria</strong><p>Si una tarea larga queda a medias (por pausa, cambio de IA, bloqueo o cierre), la IA escribe o actualiza la nota de seguimiento en <code>03-IMPLEMENTACION/Planes/&lt;fecha&gt;-&lt;slug&gt;-seguimiento.md</code> dentro de la bóveda (pidiendo una sola autorización por sesión) y te indica cuándo conviene abrir una sesión nueva. Al fusionar en <code>main</code>, usa <code>/cerrar-memoria</code> (o <code>$cerrar-memoria</code>) para llevar las decisiones a las notas permanentes y marcar el seguimiento como completado.</p></div></li>
       </ol>
@@ -327,7 +335,7 @@ agy</code></pre></div></div>
     return map[key];
   };
   const entries = [
-    ['tui','skills','Abrir el asistente en un proyecto','Inspecciona el proyecto, sugiere skills, prepara la memoria y conecta tus IA.','Terminal · cualquier carpeta'],
+    ['tui','skills','Abrir el asistente en un proyecto','Inspecciona el proyecto, sugiere skills, prepara la memoria, conecta tus IA y ofrece los mods de Claude Code.','Terminal · cualquier carpeta'],
     ['tui-si','skills','Aplicar directamente las sugerencias (--si)','Aplica sin preguntas las skills sugeridas, la memoria y las IA detectadas.','Terminal · cualquier carpeta'],
     ['recommend','skills','Consultar skills compatibles en solo lectura','Añade --profile frontend, backend, mcp o security para afinar la consulta.','Terminal · solo lectura'],
     ['comprobar','maintenance','Comprobar la instalación (comprobar)','Muestra un resumen legible con ✓ y ! sobre tus IA, skills base, enlaces antiguos y elementos obsoletos.','Terminal · solo lectura'],
