@@ -21,6 +21,7 @@ import {
 import { planStableCommand, writeStableCommand } from './stable-command.js';
 import { ensureStableInstall, nexakitDir } from './stable-install.js';
 import { packageVersion, setupToolkit } from './toolkit-setup.js';
+import { applyMod } from './mods.js';
 import { applySuperpowers } from './superpowers.js';
 
 const RETRY = 'Vuelve a ejecutar `npx nexakit` para reintentar.';
@@ -199,6 +200,9 @@ export async function applySetup(
     if (kind === 'superpowers') {
       return applySuperpowers(agent, state.superpowers?.[agent], { environment, ...(runCommand && { runCommand }) });
     }
+    if (kind === 'mod') {
+      return applyMod(agent, state.mods?.[agent], { environment, ...(runCommand && { runCommand }) });
+    }
     if (kind === 'memory-connect') {
       await withLock(homeDirectory, acquire, (lock) =>
         ensureMemoryAgent(memoryPath, agent, state.project.root, lock),
@@ -229,7 +233,8 @@ export async function applySetup(
       onProgress(id, 'failed', message);
       // Superpowers comes from each agent's own marketplace: when that fails, the memory, the rules and the other
       // agents are still worth leaving ready. The run ends as not ready and the final check lists it as pending.
-      if (id.startsWith('superpowers:')) {
+      // The mods come from the same kind of plugin marketplace: one that fails does not stop the rest either.
+      if (id.startsWith('superpowers:') || id.startsWith('mod:')) {
         skipped.push({ id, message });
         continue;
       }

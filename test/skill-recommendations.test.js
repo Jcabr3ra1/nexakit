@@ -793,6 +793,18 @@ test('setup answers round-trip and survive a later skill install', async t => {
   assert.deepEqual(after.answers.agents, ['claude']);
 });
 
+test('setup answers remember the mods chosen and discarded, and reject a malformed mods list', async t => {
+  const { readSetupAnswers, writeSetupAnswers } = await import('../src/skill-recommendations.js');
+  const s = await projectSetup(t);
+  const withMods = { ...ANSWERS, mods: { chosen: ['niveles'], discarded: ['nexakit-sesion'] } };
+  await withLock(s.home, lock => writeSetupAnswers(s.project, withMods, lock));
+  assert.deepEqual(await readSetupAnswers(s.project), withMods);
+  await assert.rejects(
+    withLock(s.home, lock => writeSetupAnswers(s.project, { ...ANSWERS, mods: { chosen: 'todos', discarded: [] } }, lock)),
+    /no válidas/u
+  );
+});
+
 test('an old manifest without answers, or with a malformed one, reads as null', async t => {
   const { readSetupAnswers } = await import('../src/skill-recommendations.js');
   const s = await projectSetup(t);

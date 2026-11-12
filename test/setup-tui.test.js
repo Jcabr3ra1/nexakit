@@ -189,7 +189,7 @@ test('a full run with the suggested answers ends in «Listo», and a second run 
   await tty.waitFor(/¿Proyecto limpio o ya empezado\?/u);
   tty.sendKey('\r');
   await tty.waitFor(/¿Qué skills quieres\?/u);
-  for (const wait of [/¿Crear la memoria/u, /¿Con qué IA trabajas/u, /¿Lo preparo/u]) {
+  for (const wait of [/¿Crear la memoria/u, /¿Con qué IA trabajas/u, /¿Qué mods de Claude Code quieres/u, /¿Lo preparo/u]) {
     tty.sendKey('\r');
     await tty.waitFor(wait);
   }
@@ -231,14 +231,14 @@ test('redraws in place on the alternate screen and leaves only the last frame in
 test('Ctrl+C at any question, or "No" at the confirmation, writes nothing', async t => {
   const w = await world(t);
   const before = { home: snapshot(w.home), repo: snapshot(w.repo) };
-  for (let answered = 0; answered <= 4; answered++) {
+  for (let answered = 0; answered <= 5; answered++) {
     const tty = createFakeTty({ columns: 80 });
     const running = runSetupTui({ input: tty.input, output: tty.output, options: w.options });
     await tty.waitFor(/¿Proyecto limpio o ya empezado\?/u);
   tty.sendKey('\r');
   await tty.waitFor(/¿Qué skills quieres\?/u);
-    for (let i = 0; i < Math.min(answered, 3); i++) tty.sendKey('\r');
-    if (answered === 4) {
+    for (let i = 0; i < Math.min(answered, 4); i++) tty.sendKey('\r');
+    if (answered === 5) {
       await tty.waitFor(/¿Lo preparo/u);
       tty.sendKey('\x1b[C');
       await tty.waitFor(/● No/u);

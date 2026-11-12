@@ -81,7 +81,7 @@ const notFound = () => ({ status: null, stdout: '', stderr: '', errorCode: 'ENOE
 
 // The CLI is looked up in the given environment's PATH, not this process's, so a test HOME never reaches the
 // person's real agents.
-async function defaultRunner(command, environment = process.env) {
+export async function defaultRunner(command, environment = process.env) {
   if (!IS_WINDOWS) {
     for (const folder of (environment.PATH ?? '').split(path.delimiter).filter(Boolean)) {
       const file = path.join(folder, command);

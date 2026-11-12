@@ -8,7 +8,8 @@ import { planCleanProject, checkRequirements } from './clean-project.js';
 import { runCleanCommand } from './clean-command.js';
 import path from 'node:path';
 import { applySetup } from './setup-apply.js';
-import { AGENTS, AGENT_NAMES, buildConfirmation, joinNames, shortPath, suggestedAnswers } from './setup-plan.js';
+import { MODS } from './mods.js';
+import { AGENTS, AGENT_NAMES, buildConfirmation, groupLines, joinNames, shortPath, suggestedAnswers } from './setup-plan.js';
 import { gatherSetupState, inspectMemoryPath, memoryConnections } from './setup-state.js';
 import { applyToolkitDetach, planToolkitDetach } from './skill-recommendations.js';
 import { LOGO_WIDTH, colorLevel, levelOf, paint, renderLogo } from './brand.js';
@@ -19,9 +20,16 @@ const KEYS = Object.freeze({
   back: ['\x7f', '\x08', '\x1b[D'], left: ['\x1b[D'], right: ['\x1b[C'], quit: ['q', 'Q', '\x03']
 });
 const is = (key, name) => KEYS[name].includes(key);
-const MENU = Object.freeze([
-  ['exit', 'No, salir'], ['skills', 'Añadir o quitar skills'], ['agents', 'Cambiar agentes'], ['detach', 'Quitar nexakit de este proyecto']
-]);
+// The mods entry only shows with Claude Code chosen and its plugin list readable.
+const hasModsStep = model => Boolean(model.state.mods && model.answers.agents.includes('claude'));
+const menuEntries = model => [
+  ['exit', 'No, salir'], ['skills', 'Añadir o quitar skills'], ['agents', 'Cambiar agentes'],
+  ...(hasModsStep(model) ? [['mods', 'Mods de Claude Code']] : []), ['detach', 'Quitar nexakit de este proyecto']
+];
+const MOD_STATUS_WORDS = Object.freeze({ activo: 'instalado', falta: 'falta', actualizable: 'hay versión nueva', desactivado: 'desactivado', desconocido: 'sin comprobar' });
+const OFFERED_MOD_STATES = new Set(['falta', 'desactivado', 'actualizable']);
+const modMarked = (model, mod) => model.state.mods[mod.name] === 'activo' || model.answers.mods.chosen.includes(mod.name);
+const MOD_ALREADY_INSTALLED = 'Ya está instalado; se quita desde /plugin en Claude Code';
 const MAX_DETECTED = 4;
 // Languages and generic signals go after the frameworks the person will recognise.
 const GENERIC_SIGNALS = new Set(['nodejs', 'python', 'rust', 'rest-api', 'vitest', 'mcp-sdk']);
@@ -93,6 +101,17 @@ function closeSkills(model) {
   return { ...model.answers, skills: { chosen, discarded: model.state.skills.map(s => s.name).filter(name => discarded.has(name)) } };
 }
 
+// Leaving the mods question: an offered mod left unchecked is remembered as discarded, so it is not offered again.
+function closeMods(model) {
+  const { chosen } = model.answers.mods;
+  const discarded = new Set(model.answers.mods.discarded);
+  for (const mod of MODS) {
+    if (chosen.includes(mod.name)) discarded.delete(mod.name);
+    else if (OFFERED_MOD_STATES.has(model.state.mods[mod.name])) discarded.add(mod.name);
+  }
+  return { ...model.answers, mods: { chosen: MODS.map(mod => mod.name).filter(name => chosen.includes(name)), discarded: MODS.map(mod => mod.name).filter(name => discarded.has(name)) } };
+}
+
 function memoryAnswer(model, choice) {
   const { state } = model;
   if (choice === 'later') return { decision: 'later' };
@@ -104,11 +123,13 @@ function memoryAnswer(model, choice) {
 const go = (model, step, extra = {}) => ({ ...model, step, cursor: 0, info: false, detail: false, message: null, ...extra });
 const nextAfter = (model, step) => {
   if (model.flow === 'menu') return 'confirm';
-  return { skills: 'memory', memory: 'agents', 'memory-path': 'agents', agents: 'confirm' }[step];
+  if (step === 'agents') return hasModsStep(model) ? 'mods' : 'confirm';
+  return { skills: 'memory', memory: 'agents', 'memory-path': 'agents', mods: 'confirm' }[step];
 };
 const previousOf = (model, step) => {
   if (model.flow === 'menu') return step === 'confirm' ? model.menuEntry : 'menu';
-  return { memory: 'skills', 'memory-path': 'memory', agents: 'memory', confirm: 'agents' }[step];
+  if (step === 'confirm') return hasModsStep(model) ? 'mods' : 'agents';
+  return { memory: 'skills', 'memory-path': 'memory', agents: 'memory', mods: 'agents' }[step];
 };
 
 export function handleSetupKey(model, key) {
@@ -180,9 +201,10 @@ export function handleSetupKey(model, key) {
 
   if (step === 'menu') {
     if (is(key, 'up')) return { model: { ...model, cursor: Math.max(0, model.cursor - 1) } };
-    if (is(key, 'down')) return { model: { ...model, cursor: Math.min(MENU.length - 1, model.cursor + 1) } };
+    const entries = menuEntries(model);
+    if (is(key, 'down')) return { model: { ...model, cursor: Math.min(entries.length - 1, model.cursor + 1) } };
     if (is(key, 'enter')) {
-      const [choice] = MENU[model.cursor];
+      const [choice] = entries[model.cursor];
       if (choice === 'exit') return { model, effect: 'exit' };
       if (choice === 'detach') return { model, effect: 'detach-preview' };
       return { model: go(model, choice, { menuEntry: choice, expanded: choice === 'skills' }) };
@@ -245,6 +267,23 @@ export function handleSetupKey(model, key) {
     return { model };
   }
 
+  if (step === 'mods') {
+    if (is(key, 'up')) return { model: { ...model, cursor: Math.max(0, model.cursor - 1), message: null } };
+    if (is(key, 'down')) return { model: { ...model, cursor: Math.min(MODS.length - 1, model.cursor + 1), message: null } };
+    if (is(key, 'toggle')) {
+      const mod = MODS[model.cursor];
+      const status = model.state.mods[mod.name];
+      if (status === 'activo') return { model: { ...model, message: MOD_ALREADY_INSTALLED } };
+      if (status === 'desconocido') return { model: { ...model, message: 'No pude comprobar este mod; revisa /plugin en Claude Code' } };
+      const { chosen } = model.answers.mods;
+      const next = chosen.includes(mod.name) ? chosen.filter(name => name !== mod.name) : [...chosen, mod.name];
+      return { model: { ...model, message: null, answers: { ...model.answers, mods: { ...model.answers.mods, chosen: next } } } };
+    }
+    if (is(key, 'enter')) return { model: go({ ...model, answers: closeMods(model) }, nextAfter(model, 'mods')) };
+    if (is(key, 'back')) return { model: go(model, previousOf(model, 'mods')) };
+    return { model };
+  }
+
   if (step === 'confirm') {
     if (key === 'd') return { model: { ...model, detail: !model.detail } };
     if (is(key, 'left') || is(key, 'right') || is(key, 'toggle')) return { model: { ...model, confirmYes: !model.confirmYes } };
@@ -272,7 +311,7 @@ export function applyMemoryPathCheck(model, target, kind, connections) {
 function folded(model) {
   const { state, answers } = model;
   const lines = [`Proyecto: ${state.project.displayName}${state.project.fromSubfolder ? ' (repositorio completo)' : ''}`];
-  const order = ['skills', 'memory', 'memory-path', 'agents', 'confirm'];
+  const order = ['skills', 'memory', 'memory-path', 'agents', 'mods', 'confirm'];
   const at = order.indexOf(model.step);
   if (model.step === 'skills' || at < 0) {
     if (state.signals.length && model.step === 'skills') {
@@ -287,6 +326,10 @@ function folded(model) {
   }
   if ((model.flow === 'full' && at > order.indexOf('agents')) || model.menuEntry === 'agents' && model.step === 'confirm') {
     lines.push(`IA: ${joinNames(answers.agents.map(agent => AGENT_NAMES[agent]))}`);
+  }
+  if (hasModsStep(model) && ((model.flow === 'full' && at > order.indexOf('mods')) || (model.menuEntry === 'mods' && model.step === 'confirm'))) {
+    const count = MODS.filter(mod => modMarked(model, mod)).length;
+    lines.push(`Mods: ${count} ${count === 1 ? 'elegido' : 'elegidos'}`);
   }
   return lines;
 }
@@ -358,12 +401,25 @@ function question(model) {
       if (model.message) info.push('', model.message);
       return { title: '¿Con qué IA trabajas?', body, info, keys: 'espacio marcar · Enter seguir · ← volver · q salir' };
     }
+    case 'mods': {
+      // The state sits in its own column next to the name, so a long description wraps without splitting it off.
+      const width = Math.max(...MODS.map(mod => mod.name.length));
+      const statusWidth = Math.max(...MODS.map(mod => MOD_STATUS_WORDS[state.mods[mod.name]].length));
+      const body = MODS.map((mod, index) => ({
+        cursor: index === model.cursor,
+        text: `${modMarked(model, mod) ? '◼' : '◻'} ${mod.name.padEnd(width)}  ${MOD_STATUS_WORDS[state.mods[mod.name]].padEnd(statusWidth)}  ${mod.label}`
+      }));
+      const info = ['', 'Los mods cambian cómo trabaja Claude Code en todos tus proyectos.', 'Se instalan con tu cuenta y se quitan desde /plugin.'];
+      if (model.message) info.push('', model.message);
+      return { title: '¿Qué mods de Claude Code quieres?', body, info, keys: 'espacio marcar · Enter seguir · ← volver · q salir' };
+    }
     case 'confirm': {
       const confirmation = buildConfirmation(state, answers);
+      const grouped = () => groupLines(confirmation.lines).flatMap(group => [{ text: group.title, header: true }, ...group.lines.map(line => ({ text: ` ${line.mark} ${line.text}` }))]);
       if (!confirmation.blocks.length) {
-        return { title: 'No hay nada que preparar', body: confirmation.lines.map(line => ({ text: ` ${line.mark} ${line.text}` })), info: [], keys: 'Enter salir · ← volver' };
+        return { title: 'No hay nada que preparar', body: grouped(), info: [], keys: 'Enter salir · ← volver' };
       }
-      const body = model.detail ? detailLines(model, confirmation) : confirmation.lines.map(line => ({ text: ` ${line.mark} ${line.text}` }));
+      const body = model.detail ? detailLines(model, confirmation) : grouped();
       const info = ['', 'No toco archivos tuyos. Se puede deshacer con', '`npx nexakit quitar`.', '',
         `¿Lo preparo?  ${model.confirmYes ? '● Sí / ○ No' : '○ Sí / ● No'}`];
       return { title: 'Voy a preparar:', body, info, keys: 'Enter elegir · ←/→ cambiar · d detalle · Retroceso volver' };
@@ -426,7 +482,7 @@ function renderBody(model, { columns, level }) {
     for (const text of ready) push(`│  ${text}`, c.dim);
     push('│');
     push('◆  ¿Quieres cambiar algo?', c.accent);
-    MENU.forEach(([, label], index) => push(`│ ${index === model.cursor ? '❯' : ' '} ${index === model.cursor ? '●' : '○'} ${label}`, index === model.cursor ? c.accent : undefined));
+    menuEntries(model).forEach(([, label], index) => push(`│ ${index === model.cursor ? '❯' : ' '} ${index === model.cursor ? '●' : '○'} ${label}`, index === model.cursor ? c.accent : undefined));
     push('└  Enter elegir · q salir', c.dim);
     return out.join('\n');
   }
@@ -481,6 +537,7 @@ function renderBody(model, { columns, level }) {
   const q = question(model);
   push(`◆  ${q.title}`, c.accent);
   for (const row of q.body) {
+    if (row.header) { push(`│ ${row.text}`, c.bold); continue; }
     const text = row.text.startsWith(' ') ? row.text.slice(1) : row.text;
     const marker = row.text.startsWith(' ') && /^ [+−↻!✓] /u.test(row.text) ? `│   ${text.slice(0, 2)}` : `│ ${row.cursor ? '❯' : ' '} `;
     const shown = marker.startsWith('│   ') && /^[+−↻!✓] /u.test(text) ? text.slice(2) : text;
@@ -498,8 +555,9 @@ function renderBody(model, { columns, level }) {
 
 // ── Loop ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-const STEP_NUMBER = Object.freeze({ skills: 1, memory: 2, 'memory-path': 2, agents: 3, confirm: 4 });
-const STEP_COUNT = 4;
+const STEP_NUMBER = Object.freeze({ skills: 1, memory: 2, 'memory-path': 2, agents: 3, mods: 4 });
+// The mods question only exists with Claude Code chosen and a readable plugin list: five steps then, four otherwise.
+const stepCount = model => (hasModsStep(model) ? 5 : 4);
 const TAGLINE = 'Tus skills. Tu memoria. Tus IA trabajando juntas.';
 const TAGLINE_SHORT = 'Skills, memoria e IA, juntas.';
 
@@ -508,7 +566,8 @@ function renderHeader(model, { columns, rows, level, bodyRows }) {
   const c = paint(level);
   const width = Math.max(30, columns - 1);
   const version = model.state.version ? ` v${model.state.version}` : '';
-  const number = model.flow === 'full' ? STEP_NUMBER[model.step] : undefined;
+  const STEP_COUNT = stepCount(model);
+  const number = model.flow === 'full' ? (model.step === 'confirm' ? STEP_COUNT : STEP_NUMBER[model.step]) : undefined;
   const steps = number ? `Paso ${number} de ${STEP_COUNT}` : '';
   const dots = number ? Array.from({ length: STEP_COUNT }, (_, index) => (index < number ? '●' : '○')).join('') : '';
   const celebrates = model.step === 'done' && model.result?.ok;

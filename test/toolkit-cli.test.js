@@ -223,6 +223,35 @@ test('comprobar prints a readable Spanish report with obsolete and legacy warnin
   assert.match(warn.io.out, /npx nexakit reparar --desde ~[\\/]viejo-toolkit/u);
 });
 
+test('without a terminal the plan is grouped under the same headings as the screen, in order', async t => {
+  const w = await world(t);
+  const { runToolkitCli } = await import('../src/toolkit-cli.js');
+  const c = capture();
+  assert.equal(await runToolkitCli(['--project', w.repo], { ...c, isTTY: false, options: w.options }), 2);
+  const headings = c.io.out.split('\n').filter(line => ['Proyecto', 'Tus IA', 'Mods de Claude Code', 'Memoria'].includes(line));
+  assert.deepEqual(headings, ['Proyecto', 'Tus IA', 'Mods de Claude Code', 'Memoria']);
+  assert.match(c.io.out, /^Mods de Claude Code\n  \+ Mod niveles en Claude Code$/mu);
+  assert.match(c.io.out, /^  \+ Mod nexakit-sesion en Claude Code$/mu);
+});
+
+test('comprobar reports the mods of Claude Code, and missing ones are not an error', async t => {
+  const w = await world(t);
+  const { runToolkitCli } = await import('../src/toolkit-cli.js');
+  assert.equal(await runToolkitCli(['--si', '--project', w.repo], { ...capture(), isTTY: false, options: w.options }), 0);
+  const ok = capture();
+  assert.equal(await runToolkitCli(['comprobar'], { ...ok, options: w.options }), 0, ok.io.err);
+  assert.match(ok.io.out, /^✓ Mods de Claude Code activos \(5 de 5\)$/mu);
+
+  w.clis.mods['nexakit-ahorro'] = 'falta';
+  w.clis.mods['nexakit-sesion'] = 'falta';
+  w.clis.mods.niveles = 'actualizable';
+  const warn = capture();
+  assert.equal(await runToolkitCli(['comprobar'], { ...warn, options: w.options }), 0, 'missing mods do not change the exit code');
+  assert.match(warn.io.out, /^! Mods de Claude Code: faltan nexakit-ahorro y nexakit-sesion \(ejecuta npx nexakit para instalarlos\)$/mu);
+  assert.match(warn.io.out, /^! Mods de Claude Code: hay versión nueva de niveles \(ejecuta npx nexakit para actualizarlo\)$/mu);
+  assert.doesNotMatch(warn.io.out, /Mods de Claude Code activos/u);
+});
+
 test('memoria forwards subcommands and arguments untouched to project-memory', async t => {
   const w = await world(t);
   const { runToolkitCli } = await import('../src/toolkit-cli.js');

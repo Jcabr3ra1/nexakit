@@ -21,6 +21,7 @@ import {
   relinkIfUnchanged,
 } from './link-states.js';
 import { actualRoot, ensureStableInstall, nexakitDir } from './stable-install.js';
+import { inspectMods } from './mods.js';
 import { inspectSuperpowers } from './superpowers.js';
 
 import packageJson from '../package.json' with { type: 'json' };
@@ -609,6 +610,13 @@ export async function doctorToolkit({
         ...(runCommand && { runCommand }),
       }),
     },
+    // nexakit's own Claude Code plugins (null without Claude Code). Missing ones are reported, never an error.
+    mods: await inspectMods({
+      agentsFound: { claude: clients.claude?.available },
+      environment,
+      toolkitRoot,
+      ...(runCommand && { runCommand }),
+    }),
     nativeConnectionVerified: false,
   };
 }
