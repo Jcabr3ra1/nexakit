@@ -2,10 +2,26 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { getStaticTOMLValue, parseTOML } from 'toml-eslint-parser';
-import { agentModels } from './agent-models.js';
+import { agentModels, familyOfModel } from './agent-models.js';
 import { resolveCliInvocation } from './cli-executable.js';
 import { runRevisionProcess } from './revision-process.js';
 import pkg from '../package.json' with { type: 'json' };
+
+const ANTIGRAVITY_FAMILIES_BY_LEVEL = {
+  Ligero: ['flash', 'hydrogen'],
+  Normal: ['hydrogen', 'flash'],
+  Exigente: ['hydrogen', 'argon', 'flash'],
+  Alto: ['carbon', 'argon'],
+};
+
+function recommendAntigravity(models, { level, effort }) {
+  const variants = models.filter(({ model, efforts }) => model.startsWith('gemini-') && efforts.includes(effort));
+  for (const family of ANTIGRAVITY_FAMILIES_BY_LEVEL[level]) {
+    const match = variants.find(({ model }) => familyOfModel(model) === family);
+    if (match) return { model: match.model, effort };
+  }
+  return null;
+}
 
 export async function inspectModels({
   homeDirectory = os.homedir(),
@@ -126,21 +142,21 @@ export async function runModelCommand(args, { out, err }, options = {}) {
   if (level && !row) return 2;
   for (const ia of client ? [client] : ['claude', 'codex', 'antigravity']) {
     await out(`${ia}: ${data.sources[ia]}\n`);
-    for (const model of data.catalogs[ia])
-      await out(
-        `  ${model.model} · ${model.efforts.join(', ')} · defecto ${model.defaultEffort ?? 'no informado'}\n`,
-      );
+    for (const model of data.catalogs[ia]) {
+      const defaultEffort = ia === 'antigravity' ? '' : ` · defecto ${model.defaultEffort ?? 'no informado'}`;
+      await out(`  ${model.model} · ${model.efforts.join(', ')}${defaultEffort}\n`);
+    }
     const stored = data.stored[ia],
-      wanted = row?.[ia];
+      wanted = row && (ia === 'antigravity' ? recommendAntigravity(data.catalogs[ia], row) : row[ia]);
     const mark =
       !stored?.model || !stored?.effort || !wanted
         ? '?'
         : stored.model === wanted.model && stored.effort === wanted.effort
           ? '✓'
           : '→';
-    await out(
-      `${mark} Guardado: ${stored?.model ?? 'no comprobable'} · ${stored?.effort ?? 'no informado'}${wanted ? ` · recomendado ${wanted.model} · ${wanted.effort}` : ''}\n`,
-    );
+    const recommendation = wanted ? ` · recomendado ${wanted.model} · ${wanted.effort}`
+      : row && ia === 'antigravity' ? ' · sin recomendación disponible' : '';
+    await out(`${mark} Guardado: ${stored?.model ?? 'no comprobable'} · ${stored?.effort ?? 'no informado'}${recommendation}\n`);
   }
   await out('Compara lo guardado; una sesión abierta puede diferir. Compruébalo en /model.\n');
   return 0;
