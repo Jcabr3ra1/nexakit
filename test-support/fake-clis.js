@@ -17,7 +17,9 @@ const writeJson = (file, value) => {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(value, null, 2));
 };
-const MOD_NAMES = ['niveles', 'nexakit-modelo', 'nexakit-ahorro', 'nexakit-lecciones', 'nexakit-sesion'];
+const MOD_NAMES = [
+  'niveles', 'nexakit-modelo', 'nexakit-ahorro', 'nexakit-lecciones', 'nexakit-sesion', 'nexakit-guardarrailes',
+];
 const toolkitRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const modVersion = (name) =>
   readJson(path.join(toolkitRoot, 'plugins', name, '.claude-plugin', 'plugin.json'), {}).version;

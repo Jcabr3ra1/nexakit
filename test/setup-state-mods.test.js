@@ -27,6 +27,7 @@ test('the state carries the mods of Claude Code, all missing by default', async 
   const state = await gatherSetupState(w.options);
   assert.deepEqual(state.mods, {
     niveles: 'falta', 'nexakit-modelo': 'falta', 'nexakit-ahorro': 'falta', 'nexakit-lecciones': 'falta', 'nexakit-sesion': 'falta',
+    'nexakit-guardarrailes': 'falta',
   });
 });
 

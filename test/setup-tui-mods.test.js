@@ -12,6 +12,7 @@ const MOD_STATES = {
   'nexakit-ahorro': 'actualizable',
   'nexakit-lecciones': 'desactivado',
   'nexakit-sesion': 'falta',
+  'nexakit-guardarrailes': 'falta',
 };
 const skill = (name) => ({ name, summary: 'x', reason: null, matchCount: 1, suggested: true, license: 'MIT', links: { claude: 'missing', codex: 'missing' } });
 
@@ -44,7 +45,7 @@ test('the mods step comes after the AI step and the header counts five steps', (
   assert.match(frame(model), /^◆  ¿Qué mods de Claude Code quieres\?$/mu);
   assert.match(frame(model), /^◇  IA: Claude Code$/mu);
   assert.match(frame(press(model, '\r')), /Paso 5 de 5 ●●●●●/u);
-  assert.match(frame(press(model, '\r')), /^◇  Mods: 5 elegidos$/mu, 'the installed one counts as marked');
+  assert.match(frame(press(model, '\r')), /^◇  Mods: 6 elegidos$/mu, 'the installed one counts as marked');
 });
 
 test('without Claude Code or a readable plugin list the assistant keeps four steps', () => {
@@ -63,10 +64,11 @@ test('without Claude Code or a readable plugin list the assistant keeps four ste
 test('each row shows its box, aligned name, label and status in words', () => {
   const text = frame(toMods());
   // The state is a column of its own next to the name: a long description never pushes it to another line.
-  assert.match(text, /^│ ❯ ◼ niveles {12}instalado {10}Subagentes por nivel para delegar$/mu);
-  assert.match(text, /^│   ◼ nexakit-modelo {5}falta {14}Barra con modelo, esfuerzo y consejo$/mu);
-  assert.match(text, /^│   ◼ nexakit-ahorro {5}hay versión nueva {2}Recorta la salida larga de comandos$/mu);
-  assert.match(text, /^│   ◼ nexakit-lecciones {2}desactivado {8}Frena errores y guarda correcciones$/mu);
+  assert.match(text, /^│ ❯ ◼ niveles {16}instalado {10}Subagentes por nivel para delegar$/mu);
+  assert.match(text, /^│   ◼ nexakit-modelo {9}falta {14}Barra con modelo, esfuerzo y consejo$/mu);
+  assert.match(text, /^│   ◼ nexakit-ahorro {9}hay versión nueva {2}Recorta la salida larga de comandos$/mu);
+  assert.match(text, /^│   ◼ nexakit-lecciones {6}desactivado {8}Frena errores y guarda correcciones$/mu);
+  assert.match(text, /^│   ◼ nexakit-guardarrailes {2}falta {14}Frena comandos peligrosos, secretos y commits\n│ {5}mal escritos$/mu);
   assert.match(text, /^│  Los mods cambian cómo trabaja Claude Code en todos tus proyectos\.$/mu);
   assert.match(text, /^│  Se instalan con tu cuenta y se quitan desde \/plugin\.$/mu);
   assert.match(text, /espacio marcar · Enter seguir · ← volver · q salir/u);

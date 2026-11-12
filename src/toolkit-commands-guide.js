@@ -65,7 +65,7 @@ export function getToolkitCommandsGuide({ clients = {} } = {}) {
   const cliCommands = [
     {
       command: 'npx nexakit',
-      description: 'Abre el asistente de tres preguntas y deja listo el proyecto (--si aplica sin preguntar).',
+      description: 'Abre el asistente de instalación, que ofrece mods como nexakit-guardarrailes para Claude Code. Usa --si para aplicar las opciones sugeridas.',
     },
     {
       command: 'npx nexakit comprobar',

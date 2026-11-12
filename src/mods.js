@@ -15,6 +15,7 @@ export const MODS = Object.freeze([
   mod('nexakit-ahorro', 'Recorta la salida larga de comandos'),
   mod('nexakit-lecciones', 'Frena errores y guarda correcciones'),
   mod('nexakit-sesion', 'Avisa cuándo abrir una sesión nueva'),
+  mod('nexakit-guardarrailes', 'Frena comandos peligrosos, secretos y commits mal escritos'),
 ]);
 
 const allUnknown = () => Object.fromEntries(MODS.map((item) => [item.name, 'desconocido']));
