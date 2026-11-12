@@ -1,26 +1,26 @@
 {
   "nexakit-ahorro": {
-    "version": "0.2.1",
-    "huella": "70388f284a8af2f6"
+    "version": "0.2.2",
+    "huella": "09666ef6ae9a9077"
   },
   "nexakit-guardarrailes": {
-    "version": "0.1.0",
-    "huella": "2f43ae10df50dadb"
+    "version": "0.1.1",
+    "huella": "fb302c190b9ae56d"
   },
   "nexakit-lecciones": {
-    "version": "0.3.0",
-    "huella": "e39c0a0493e7ca82"
+    "version": "0.3.1",
+    "huella": "bfd10dcb6cf4b03a"
   },
   "nexakit-modelo": {
-    "version": "0.4.1",
-    "huella": "2088ccd36890a7a4"
+    "version": "0.4.2",
+    "huella": "30a5fd3b8beef56d"
   },
   "nexakit-sesion": {
-    "version": "0.2.0",
-    "huella": "ff0e6127be88f471"
+    "version": "0.2.1",
+    "huella": "0c05eb6c094a193a"
   },
   "niveles": {
-    "version": "0.2.0",
-    "huella": "7514c1fb92432358"
+    "version": "0.2.1",
+    "huella": "5d7dbd6903916e51"
   }
 }

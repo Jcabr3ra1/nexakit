@@ -28,3 +28,8 @@ La detección es local y no llama a ningún modelo. Al compactar, `nexakit-sesio
 ## Pruebas
 
 `node --test test/lecciones.test.js` desde la raíz del repositorio.
+
+## Instalación
+
+Instálalo desde Claude Code con `/plugin marketplace add Jcabr3ra1/nexakit` y
+`/plugin install nexakit-lecciones@agent-toolkit`. También puedes seleccionarlo en el asistente de `npx nexakit`.

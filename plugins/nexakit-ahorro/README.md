@@ -22,3 +22,8 @@ comando) a `~/.nexakit/ahorro.jsonl`, donde se conservan 90 días (y como máxim
 ## Pruebas
 
 `node --test test/ahorro-salida.test.js` desde la raíz del repositorio.
+
+## Instalación
+
+Instálalo desde Claude Code con `/plugin marketplace add Jcabr3ra1/nexakit` y
+`/plugin install nexakit-ahorro@agent-toolkit`. También puedes seleccionarlo en el asistente de `npx nexakit`.

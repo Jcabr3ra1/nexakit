@@ -1,5 +1,8 @@
 {
   "name": "niveles",
-  "version": "0.2.0",
-  "description": "Agentes por nivel (ligero, normal, exigente, alto) con modelo y esfuerzo fijos para delegar sin cambiar /model."
+  "version": "0.2.1",
+  "description": "Agentes por nivel (ligero, normal, exigente, alto) con modelo y esfuerzo fijos para delegar sin cambiar /model.",
+  "author": {
+    "name": "Juan Jaller"
+  }
 }

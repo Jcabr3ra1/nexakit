@@ -10,3 +10,8 @@ respuesta de la API informa un valor nuevo.
 ## Pruebas
 
 `claude plugin test plugins/nexakit-sesion`
+
+## Instalación
+
+Instálalo desde Claude Code con `/plugin marketplace add Jcabr3ra1/nexakit` y
+`/plugin install nexakit-sesion@agent-toolkit`. También puedes seleccionarlo en el asistente de `npx nexakit`.
