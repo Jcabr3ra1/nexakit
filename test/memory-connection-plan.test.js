@@ -42,6 +42,14 @@ const legacyFixture = () => {
   };
   return input;
 };
+test("the direct read-only server that connect registers since 2.3.0 is also a legacy-direct connection; other launches are not", () => {
+  const direct = args => { const input = legacyFixture(); input.observations.configuration.server.args = args; return createMemoryConnectionPlan(input); };
+  const pkg = "@modelcontextprotocol/server-filesystem";
+  assert.equal(direct(["-y", pkg + "@2.3.0", "--read-only", "--confine-roots", "/fictitious/memory"]).connectionClass, "legacy-direct");
+  for (const args of [["-y", pkg + "@2.3.0", "/fictitious/memory"], ["-y", pkg + "@2.3.0", "--read-only", "--confine-roots", "/other"],
+    ["-y", pkg + "@9.9.9", "--read-only", "--confine-roots", "/fictitious/memory"], ["-y", pkg + "@2.3.0", "--read-only", "--confine-roots", "/fictitious/memory", "/other"]])
+    assert.notEqual(direct(args).connectionClass, "legacy-direct", args.join(" "));
+});
 const checkFacts = (result) => {
   assert.deepEqual(result.facts, MEMORY_CONNECTION_FACTS);
   assert.equal(result.facts.evidence, "declared");

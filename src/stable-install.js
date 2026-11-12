@@ -8,7 +8,7 @@ import { IS_WINDOWS } from './platform.js';
 const PACKAGE_NAME = 'nexakit';
 const VERSION_RE = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/u;
 const COMPLETE_MARKER = '.completa';
-const PROBED_IMPORTS = ['ajv', 'zod', '@modelcontextprotocol/sdk/client/index.js'];
+const PROBED_IMPORTS = ['ajv', 'zod', '@modelcontextprotocol/client'];
 const NPM_TIMEOUT_MS = 10 * 60 * 1000;
 const PROBE_TIMEOUT_MS = 30 * 1000;
 

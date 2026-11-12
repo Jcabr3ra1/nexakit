@@ -14,8 +14,12 @@ const DEFAULT_SCHEMA_PATH = path.resolve(
   "../schemas/project-memory.schema.json"
 );
 const FILESYSTEM_PACKAGE = "@modelcontextprotocol/server-filesystem";
-const FILESYSTEM_VERSION = "2026.8.31";
+const FILESYSTEM_VERSION = "2.3.0";
 const FILESYSTEM_SPEC = `${FILESYSTEM_PACKAGE}@${FILESYSTEM_VERSION}`;
+// `--read-only`: the server itself withholds every tool that writes, whatever the client allows.
+// `--confine-roots`: a client's Roots cannot replace the vault with another directory.
+const FILESYSTEM_FLAGS = Object.freeze(["--read-only", "--confine-roots"]);
+const filesystemLaunch = (vaultPath) => ["npx", "-y", FILESYSTEM_SPEC, ...FILESYSTEM_FLAGS, vaultPath];
 
 export const READ_TOOLS = Object.freeze([
   "read_text_file",
@@ -33,7 +37,9 @@ export const WRITE_TOOLS = Object.freeze([
   "create_directory",
   "write_file",
   "edit_file",
-  "move_file"
+  "move_file",
+  "append_file",
+  "copy_file"
 ]);
 
 const ADAPTERS = Object.freeze({
@@ -50,6 +56,7 @@ const ADAPTERS = Object.freeze({
 // The command each agent is driven with.
 const AGENT_COMMANDS = Object.freeze({ codex: "codex", claude: "claude", antigravity: "agy" });
 const MEMORY_SCRIPT = path.join("bin", "project-memory-mcp.js");
+const OUTDATED_MESSAGE = `Actualizar el servidor de la memoria a la versión ${FILESYSTEM_VERSION}, en solo lectura.`;
 
 export async function connectMemory(options, context = {}) {
   const config = loadConfig(options, context);
@@ -246,9 +253,11 @@ function inspectCodex(config, runner) {
   const exists = result.status === 0;
   const matches = exists && outputMatchesFilesystemServer(result.stdout, config);
   const mcp = exists
-    ? matches
+    ? matches === "current"
       ? component("mcp", "unchanged", "Codex ya usa esta bóveda.")
-      : component("mcp", "conflict", "Codex tiene un MCP homónimo diferente.")
+      : matches === "outdated"
+        ? component("mcp", "update", OUTDATED_MESSAGE)
+        : component("mcp", "conflict", "Codex tiene un MCP homónimo diferente.")
     : component("mcp", "create", "Registrar el MCP personal en Codex.");
 
   const currentTools = parseCodexEnabledTools(result.stdout);
@@ -275,23 +284,18 @@ function inspectCodex(config, runner) {
     apply() {
       let serverCreated = false;
       try {
-        if (mcp.action === "create") {
+        if (mcp.action === "update") {
+          requireSuccess(runner("codex", ["mcp", "remove", config.mcpName]), "No se pudo retirar el MCP anterior de Codex.");
+        }
+        if (mcp.action === "create" || mcp.action === "update") {
           requireSuccess(
-            runner("codex", [
-              "mcp",
-              "add",
-              config.mcpName,
-              "--",
-              "npx",
-              "-y",
-              FILESYSTEM_SPEC,
-              config.vaultPath
-            ]),
+            runner("codex", ["mcp", "add", config.mcpName, "--", ...filesystemLaunch(config.vaultPath)]),
             "No se pudo registrar el MCP en Codex."
           );
           serverCreated = true;
         }
-        if (policy.action !== "unchanged") {
+        // Removing the old entry drops its read-only tool list with it.
+        if (policy.action !== "unchanged" || mcp.action === "update") {
           updateCodexPolicy(configPath, config.mcpName);
         }
       } catch (error) {
@@ -313,9 +317,11 @@ function inspectClaude(config, runner) {
   const exists = result.status === 0;
   const matches = exists && outputMatchesFilesystemServer(result.stdout, config);
   const mcp = exists
-    ? matches
+    ? matches === "current"
       ? component("mcp", "unchanged", "Claude ya usa esta bóveda.")
-      : component("mcp", "conflict", "Claude tiene un MCP homónimo diferente.")
+      : matches === "outdated"
+        ? component("mcp", "update", OUTDATED_MESSAGE)
+        : component("mcp", "conflict", "Claude tiene un MCP homónimo diferente.")
     : component("mcp", "create", "Registrar el MCP personal en Claude Code.");
   const settingsPath = path.join(config.homeDirectory, ".claude/settings.json");
   const policyState = inspectClaudePolicy(settingsPath, config.mcpName);
@@ -342,7 +348,13 @@ function inspectClaude(config, runner) {
     apply() {
       let serverCreated = false;
       try {
-        if (mcp.action === "create") {
+        if (mcp.action === "update") {
+          requireSuccess(
+            runner("claude", ["mcp", "remove", config.mcpName, "--scope", "user"]),
+            "No se pudo retirar el MCP anterior de Claude Code."
+          );
+        }
+        if (mcp.action === "create" || mcp.action === "update") {
           requireSuccess(
             runner("claude", [
               "mcp",
@@ -351,10 +363,7 @@ function inspectClaude(config, runner) {
               "user",
               config.mcpName,
               "--",
-              "npx",
-              "-y",
-              FILESYSTEM_SPEC,
-              config.vaultPath
+              ...filesystemLaunch(config.vaultPath)
             ]),
             "No se pudo registrar el MCP en Claude Code."
           );
@@ -508,15 +517,21 @@ function outputMatchesFilesystemServer(output, config) {
   return argsMatchFilesystem(argsMatch[1].trim(), config.vaultPath);
 }
 
+// "current": the pinned version started read-only and confined. "outdated": the same server for the same vault
+// with another version or without those options, which `connect --apply` replaces. false: something else.
 function argsMatchFilesystem(args, vaultPath) {
   const values = Array.isArray(args) ? args : splitCommandArguments(args);
-  if (values.length !== 3 || values[0] !== "-y" || !samePath(values[2], vaultPath)) {
+  if (values.length < 3 || values[0] !== "-y" || !samePath(values.at(-1), vaultPath)) {
     return false;
   }
-  return (
-    values[1] === FILESYSTEM_PACKAGE ||
-    values[1].startsWith(`${FILESYSTEM_PACKAGE}@`)
-  );
+  if (values[1] !== FILESYSTEM_PACKAGE && !values[1].startsWith(`${FILESYSTEM_PACKAGE}@`)) {
+    return false;
+  }
+  const flags = values.slice(2, -1);
+  if (flags.some((flag) => !FILESYSTEM_FLAGS.includes(flag)) || new Set(flags).size !== flags.length) {
+    return false;
+  }
+  return values[1] === FILESYSTEM_SPEC && flags.length === FILESYSTEM_FLAGS.length ? "current" : "outdated";
 }
 
 function isSymbolicLinkTo(candidate, expectedSource) {
@@ -544,8 +559,16 @@ function splitCommandArguments(value) {
     return value.trim().split(/\s+/);
   }
   const before = value.slice(0, packageEnd).trim().split(/\s+/);
-  const vault = value.slice(packageEnd + 1).trim();
-  return [...before, vault];
+  // The vault path may contain spaces: only the known options are split off before it.
+  let vault = value.slice(packageEnd + 1).trim();
+  const flags = [];
+  for (;;) {
+    const flag = FILESYSTEM_FLAGS.find((item) => vault === item || vault.startsWith(`${item} `));
+    if (!flag) break;
+    flags.push(flag);
+    vault = vault.slice(flag.length).trim();
+  }
+  return [...before, ...flags, vault];
 }
 
 function parseCodexEnabledTools(output) {

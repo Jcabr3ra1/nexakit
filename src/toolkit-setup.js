@@ -572,13 +572,13 @@ export async function doctorToolkit({
   const require = createRequire(path.join(toolkitRoot, 'package.json'));
   for (const name of [
     '@modelcontextprotocol/server',
-    '@modelcontextprotocol/sdk',
+    '@modelcontextprotocol/client',
     'zod',
     'ajv',
     'toml-eslint-parser',
   ]) {
     try {
-      require.resolve(name === '@modelcontextprotocol/sdk' ? name + '/client/index.js' : name);
+      require.resolve(name);
       dependencies[name] = true;
     } catch {
       dependencies[name] = false;

@@ -1,4 +1,4 @@
-import { deserializeMessage, serializeMessage } from "@modelcontextprotocol/sdk/shared/stdio.js";
+import { deserializeMessage, serializeMessage } from "@modelcontextprotocol/server";
 import { MEMORY_MCP_LIMITS, MemoryMcpError } from "./memory-mcp-policy.js";
 import { decode, parseEventJson } from "./client-output-json.js";
 

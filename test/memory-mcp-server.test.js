@@ -5,10 +5,9 @@ import path from "node:path";
 import { PassThrough } from "node:stream";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { ListRootsRequestSchema, InitializeResultSchema } from "@modelcontextprotocol/sdk/types.js";
-import { createMemoryGateway, runMemoryMcp } from "../src/memory-mcp-server.js";
+import { Client } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { createMemoryGateway, runMemoryMcp, createFilesystemBackend, filesystemBackendArgs, FILESYSTEM_BACKEND_VERSION } from "../src/memory-mcp-server.js";
 import { MemoryMcpTransport } from "../src/memory-mcp-transport.js";
 import { MEMORY_READ_TOOLS, MEMORY_MCP_LIMITS as LIMIT, MEMORY_TOOL_SCHEMAS } from "../src/memory-mcp-policy.js";
 import { memoryFixture, fakeMemoryBackend } from "../test-support/memory-mcp-fixture.js";
@@ -175,7 +174,7 @@ for (const roots of [undefined, [], "foreign"])
   test("RG CLI host roots cannot change the vault " + JSON.stringify(roots), async t => {
     const f = await memoryFixture(t); let requests = 0;
     const client = new Client({ name: "fixture-host", version: "1.0.0" }, { capabilities: roots === undefined ? {} : { roots: { listChanged: true } } });
-    if (roots !== undefined) client.setRequestHandler(ListRootsRequestSchema, () => {
+    if (roots !== undefined) client.setRequestHandler("roots/list", () => {
       requests++; return { roots: roots === "foreign" ? [{ uri: pathToFileURL(f.source).href }] : [] };
     });
     const transport = new StdioClientTransport({ command: process.execPath, args: [bin, "--manifest", f.manifestPath], cwd: f.source, stderr: "pipe" });
@@ -188,14 +187,36 @@ for (const roots of [undefined, [], "foreign"])
     if (roots !== undefined) await client.notification({ method: "notifications/roots/list_changed" });
     assert.equal(content(await client.callTool({ name: "list_allowed_directories", arguments: {} })), "Allowed directories:\n" + f.root);
     assert.equal(content(await read()), "Fixture note.\n"); assert.equal(requests, 0);
-    const denied = await client.callTool({ name: "write_file", arguments: { path: f.note, content: "DO NOT WRITE" } });
-    assert.equal(denied.isError, true); assert.equal(content(denied), "RG_TOOL_DENIED");
-    await assert.rejects(client.request({ method: "initialize", params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "repeat", version: "1" } } }, InitializeResultSchema), /RG_ALREADY_INITIALIZED/);
+    for (const [name, args] of [["write_file", { path: f.note, content: "DO NOT WRITE" }], ["append_file", { path: f.note, content: "DO NOT WRITE" }],
+      ["copy_file", { source: f.note, destination: path.join(f.root, "copy.md") }]]) {
+      const denied = await client.callTool({ name, arguments: args });
+      assert.equal(denied.isError, true, name); assert.equal(content(denied), "RG_TOOL_DENIED", name);
+    }
+    await assert.rejects(client.request({ method: "initialize", params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "repeat", version: "1" } } }), /RG_ALREADY_INITIALIZED/);
     assert.equal(await fs.readFile(f.note, "utf8"), "Fixture note.\n");
     await client.close(); assert.throws(() => process.kill(pid, 0), e => e.code === "ESRCH");
     assert.equal(stderr, process.platform === 'win32' && process.env.AGENT_TOOLKIT_QUIET_PLATFORM_WARNINGS !== '1'
       ? 'Windows: no se verifican propietario ni modos POSIX; se usan los permisos del usuario.\n' : '');
   });
+
+test("RG packaged backend is the pinned version, read-only by itself and confined to the vault", async t => {
+  assert.deepEqual(filesystemBackendArgs("/x/dist/index.js", "/vault"), ["/x/dist/index.js", "--read-only", "--confine-roots", "--", "/vault"]);
+  const f = await memoryFixture(t), backend = createFilesystemBackend(f.root, () => {});
+  t.after(() => backend.close().catch(() => {}));
+  await backend.start();
+  const tools = (await backend.listTools()).tools;
+  assert.deepEqual(tools.filter(tool => tool.annotations?.readOnlyHint !== true).map(tool => tool.name), [], "no tool that writes is even listed");
+  for (const name of ["write_file", "edit_file", "create_directory", "move_file", "append_file", "copy_file"])
+    assert.equal(tools.some(tool => tool.name === name), false, name);
+  for (const name of MEMORY_READ_TOOLS) assert.equal(tools.some(tool => tool.name === name), true, name);
+  // The backend itself refuses a write, whatever the guard in front of it would do.
+  const written = await backend.call("write_file", { path: f.note, content: "DO NOT WRITE" }).catch(error => ({ isError: true, error }));
+  assert.equal(written.isError, true);
+  assert.equal(await fs.readFile(f.note, "utf8"), "Fixture note.\n");
+  const pkg = JSON.parse(await fs.readFile(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8"));
+  assert.equal(pkg.dependencies["@modelcontextprotocol/server-filesystem"], FILESYSTEM_BACKEND_VERSION);
+  assert.equal(pkg.dependencies["@modelcontextprotocol/sdk"], undefined, "one MCP SDK generation only");
+});
 
 test("RG transport boundary, fragmentation and valid batching", async () => {
   const input = new PassThrough(), output = new PassThrough(), transport = new MemoryMcpTransport(input, output);
@@ -241,6 +262,23 @@ test("RG incompatible host version is rejected without a fallback or second back
   } }) + "\n");
   assert.equal((await response).error.message, "RG_PROTOCOL_UNSUPPORTED");
   input.end(); await pending; assert.equal(b.log.starts, 1); assert.equal(b.log.closes, 1);
+});
+test("RG the 2026 protocol era is refused: no discovery, and no tools without the handshake", async t => {
+  const f = await memoryFixture(t), b = fakeMemoryBackend(f.root), input = new PassThrough(), output = new PassThrough();
+  const replies = []; let wake;
+  output.on("data", bytes => { for (const line of bytes.toString().split("\n").filter(Boolean)) replies.push(JSON.parse(line)); wake?.(); });
+  const reply = async id => { for (;;) { const r = replies.find(x => x.id === id); if (r) return r; await new Promise(r => { wake = r; }); } };
+  const pending = runMemoryMcp(f.manifestPath, { stdin: input, stdout: output, backendFactory: () => b.backend });
+  const meta = { "io.modelcontextprotocol/protocolVersion": "2026-07-28" };
+  input.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "server/discover", params: { _meta: meta } }) + "\n");
+  assert.ok((await reply(1)).error, "server/discover is not answered");
+  input.write(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: { _meta: meta } }) + "\n");
+  const listed = await reply(2);
+  assert.ok(listed.error, "tools are not listed to a client that skipped initialize"); assert.equal(listed.result, undefined);
+  input.write(JSON.stringify({ jsonrpc: "2.0", id: 3, method: "initialize", params: {
+    protocolVersion: "2026-07-28", capabilities: {}, clientInfo: { name: "fixture-host", version: "1" } } }) + "\n");
+  assert.equal((await reply(3)).error.message, "RG_PROTOCOL_UNSUPPORTED");
+  input.end(); await pending;
 });
 test("RG frontend EOF closes a ready backend", async t => {
   const f = await memoryFixture(t), b = fakeMemoryBackend(f.root), input = new PassThrough(), output = new PassThrough();

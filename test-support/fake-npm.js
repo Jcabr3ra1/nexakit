@@ -22,8 +22,8 @@ export async function writeFakeInstall(prefix, { version = '9.9.9', name = 'nexa
   }
   await write(path.join(modules, 'zod/package.json'), JSON.stringify({ name: 'zod', version: '1.0.0' }));
   await write(path.join(modules, 'zod/index.js'), 'module.exports = {};');
-  await write(path.join(modules, '@modelcontextprotocol/sdk/package.json'), JSON.stringify({ name: '@modelcontextprotocol/sdk', version: '1.0.0' }));
-  await write(path.join(modules, '@modelcontextprotocol/sdk/client/index.js'), 'module.exports = {};');
+  await write(path.join(modules, '@modelcontextprotocol/client/package.json'), JSON.stringify({ name: '@modelcontextprotocol/client', version: '1.0.0' }));
+  await write(path.join(modules, '@modelcontextprotocol/client/index.js'), 'module.exports = {};');
   return root;
 }
 
