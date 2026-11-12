@@ -112,7 +112,7 @@ Se escribe *dentro* de Claude Code, no en la terminal, y se aplica al abrir una 
 | Plugin | Qué hace |
 | --- | --- |
 | `niveles` | Cuatro subagentes con modelo y esfuerzo fijos (ligero, normal, exigente y alto) para delegar sin cambiar `/model`, y seis especialistas por tarea con herramientas limitadas y tope de pasos (`investigador`, `revisor-de-calidad`, `cierre-de-memoria`, `subir-al-repo`, `sincronizador-docs` y `cazador-de-flakes`; ver «Especialistas por tarea»). |
-| `nexakit-modelo` | Barra sobre el prompt: modelo, esfuerzo, recomendación mientras escribes (ajustar esfuerzo, delegar, cambiar de modelo o sesión nueva), acierto de caché, contexto, límites y los subagentes delegados, cada uno con su nombre, su modelo real, su estado y sus tokens (el total y qué porcentaje fue lectura de caché). |
+| `nexakit-modelo` | Barra sobre el prompt: modelo, esfuerzo, recomendación mientras escribes (ajustar esfuerzo, delegar, cambiar de modelo o sesión nueva), acierto de caché, contexto, límites y los subagentes delegados, cada uno con su nombre, su modelo real, su estado y sus tokens (los nuevos, qué porcentaje fue lectura de caché y, atenuado, el total). |
 | `nexakit-sesion` | Avisos al 60 % y al 80 % de contexto, delegar en serie con la cuota alta y qué conservar al compactar. |
 | `nexakit-ahorro` | Recorta la salida larga de los comandos y guarda la completa en `~/.nexakit/salidas/`. `nexakit ahorro` resume lo recortado. |
 | `nexakit-lecciones` | Frena comandos que repiten un fallo, apunta tus correcciones y recuerda las que quedaron sin guardar. `nexakit lecciones` las resume y `--descartar` da por resueltas las pendientes. |
@@ -145,7 +145,7 @@ Para actualizar más adelante: `git pull --ff-only` y `npm ci --ignore-scripts` 
 
 1. **Tú:** Abre tu IA en la carpeta del proyecto en el que vas a trabajar (no en NexaKit) y pide la tarea con tus palabras.
 2. **La sesión principal:** Entiende la tarea, la planifica y decide qué hace ella y qué delega. Lo que se resuelve en uno o dos pasos lo hace ella misma.
-3. **Los subagentes de nivel:** Ejecutan lo delegado con su propio modelo y esfuerzo (tabla de abajo) y devuelven un informe breve. En Claude Code la barra de `nexakit-modelo` muestra cada uno con el modelo que usó y sus tokens (por ejemplo `148k · 97% caché`).
+3. **Los subagentes de nivel:** Ejecutan lo delegado con su propio modelo y esfuerzo (tabla de abajo) y devuelven un informe breve. En Claude Code la barra de `nexakit-modelo` muestra cada uno con el modelo que usó y sus tokens (por ejemplo `48k nuevos · 97% caché (148k en total)`: los nuevos son los que informa el sistema y los que más pesan en la cuota).
 4. **La sesión principal:** Comprueba cada informe, integra el resultado y pasa las pruebas antes de darlo por terminado.
 5. **Tú, si quieres:** Escribe `/revisar` para que otra IA lo revise en solo lectura. La primera vez pregunta «¿A dónde mando la revisión?». Nunca se lanza sola.
 6. **Tú:** Pides el commit y el PR, y decides el merge. Si el proyecto tiene memoria de Obsidian, `/cerrar-memoria` la pone al día.

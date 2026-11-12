@@ -75,13 +75,22 @@ export function formatoTokens(n) {
   return `${(n / 1_000_000).toFixed(1).replace('.', ',')}M`;
 }
 
-// Tramos de tokens de la fila de un subagente: el total desde el primer paso y el porcentaje de caché desde el
-// segundo (el primero siempre escribe la caché, así que juzgarlo sería engañoso).
+// Tokens nuevos: todo lo que no es lectura de caché (entrada nueva, escritura en caché y salida). Es lo que
+// informa el sistema al terminar un subagente y lo que más pesa en la cuota; el total, que incluye la lectura
+// de caché, puede ser de millones y asustar sin que cueste lo mismo.
+export const tokensNuevos = (t) => t.input + t.creation + t.output;
+
+// Tramos de tokens de la fila de un subagente: los nuevos desde el primer paso, el porcentaje de caché desde el
+// segundo (el primero siempre escribe la caché, así que juzgarlo sería engañoso) y el total atenuado al final,
+// solo cuando difiere de los nuevos.
 function tramosDeTokens(tokens) {
   if (!tokens || tokens.pasos < 1) return [];
-  const tramos = [{ text: `  ${formatoTokens(totalDeTokens(tokens))}` }];
+  const nuevos = tokensNuevos(tokens);
+  const total = totalDeTokens(tokens);
+  const tramos = [{ text: `  ${formatoTokens(nuevos)} nuevos` }];
   const acierto = tokens.pasos >= 2 ? cacheDeTokens(tokens) : null;
   if (acierto !== null) tramos.push({ text: ' · ', dim: true }, { text: `${Math.round(acierto)}% caché`, color: tonoCache(acierto) });
+  if (total !== nuevos) tramos.push({ text: ` (${formatoTokens(total)} en total)`, dim: true });
   return tramos;
 }
 
@@ -119,9 +128,11 @@ export function segmentosDeBarra({ model, effort, recommendation, usage, cache, 
 
 const MAX_FILAS = 4;
 const ICONO = {
-  pending: ['…', 'warning'], running: ['…', 'warning'], waiting: ['…', 'warning'],
+  // En marcha es un punto: con «…» se confundía con el de una descripción cortada («des… …»).
+  pending: ['●', 'warning'], running: ['●', 'warning'], waiting: ['●', 'warning'],
   idle: ['✓', 'success'], completed: ['✓', 'success'], failed: ['✗', 'error'], killed: ['✗', 'error'],
 };
+const ANCHO_ENCARGO = 44;
 const ancho = (texto, n) => (texto.length >= n ? `${texto.slice(0, n - 1)}…` : texto.padEnd(n));
 
 // Nombre corto de un agente: los de este plugin se muestran sin prefijo («niveles:nivel-alto» como «alto»,
@@ -144,7 +155,7 @@ export function filasDeAgentes(agentes) {
     return [
       { text: `  ↳ ${nombre.padEnd(columna)}`, dim: true },
       { text: ancho(`${nombreModelo(a.model)}${a.effort ? ` · ${a.effort}` : ''}`, 20), color: 'claude' },
-      { text: ` ${ancho(a.description ?? '', 32)} ` },
+      { text: ` ${ancho(a.description ?? '', ANCHO_ENCARGO)} ` },
       { text: icono, color },
       ...tramosDeTokens(a.tokens),
     ];

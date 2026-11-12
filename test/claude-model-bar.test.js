@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { recomendarPorTexto } from '../plugins/nexakit-modelo/hooks/recomendar.js';
 import {
-  cacheDeTokens, filasDeAgentes, formatoTokens, medidor, nombreModelo, segmentosDeBarra, sumarTokens, tokensVacios, tono, totalDeTokens,
+  cacheDeTokens, filasDeAgentes, formatoTokens, medidor, nombreModelo, segmentosDeBarra, sumarTokens, tokensNuevos, tokensVacios, tono, totalDeTokens,
 } from '../plugins/nexakit-modelo/hooks/barra.js';
 
 const texto = (segmentos) => segmentos.map((s) => s.text).join('');
@@ -130,7 +130,7 @@ test('cada subagente delegado es una fila con su nivel, el modelo real y su esta
     { type: 'Explore', description: 'buscar usos', status: 'failed', model: null, effort: null },
   ]).map(texto);
   assert.match(filas[0], /↳ normal +Sonnet 5\.5 · medium +implementar exportación +✓/);
-  assert.match(filas[1], /↳ ligero +Haiku 5\.5 · low +correr pruebas +…/);
+  assert.match(filas[1], /↳ ligero +Haiku 5\.5 · low +correr pruebas +●/);
   assert.match(filas[2], /↳ Explore +modelo \? +buscar usos +✗/);
   assert.equal(filasDeAgentes(Array.from({ length: 7 }, (_, i) => ({ type: 'x', description: String(i), status: 'running' }))).length, 4);
 });
@@ -154,7 +154,7 @@ test('el mod registra el modelo real de cada subagente y lo dibuja bajo la líne
     let plano = JSON.stringify(await hooks.get('ui.render')(api, { props: { hasSurvey: false } }, async () => 'engine'));
     assert.match(plano, /Opus 5\.5/);
     assert.match(plano, /Sonnet 5\.5 · medium/);
-    assert.match(plano, /…/);
+    assert.match(plano, /●/, 'en marcha se dibuja con un punto, no con puntos suspensivos');
     estadoAgente = 'completed';
     await hooks.get('turn.complete')(api, {}, async (e) => e);
     plano = JSON.stringify(await hooks.get('ui.render')(api, { props: { hasSurvey: false } }, async () => 'engine'));
@@ -358,6 +358,7 @@ test('las cifras de tokens se abrevian sin perder el orden de magnitud', () => {
   assert.equal(formatoTokens(9500), '9,5k');
   assert.equal(formatoTokens(12000), '12k');
   assert.equal(formatoTokens(148000), '148k');
+  assert.equal(tokensNuevos({ input: 12, output: 2838, read: 87763, creation: 26628 }), 29478, 'lo que no es lectura de caché: es lo que informa el sistema');
   assert.equal(formatoTokens(1_200_000), '1,2M');
 });
 
@@ -366,12 +367,12 @@ test('la fila de un subagente añade sus tokens y el porcentaje de caché, y sin
   const sin = { type: 'niveles:nivel-ligero', description: 'correr pruebas', status: 'running', model: 'claude-haiku-5-5', effort: 'low' };
   const vacio = { ...sin, tokens: tokensVacios() };
   const [a, b, c] = filasDeAgentes([con, sin, vacio]);
-  assert.match(texto(a), /↳ exigente +Sonnet 5\.5 · high +verificar contrato +… +148k · 97% caché/);
-  assert.equal(a.at(-1).color, 'success', '97 % de caché es buen tono');
+  assert.match(texto(a), /↳ exigente +Sonnet 5\.5 · high +verificar contrato +● +48k nuevos · 97% caché \(148k en total\)/);
+  assert.equal(a.find((t) => /% caché/u.test(t.text)).color, 'success', '97 % de caché es buen tono');
   assert.doesNotMatch(texto(b), /caché|\dk/u);
   assert.doesNotMatch(texto(c), /caché|\dk/u, 'sin pasos todavía no se muestra nada');
   const poca = filasDeAgentes([{ ...con, tokens: { input: 90000, output: 1000, read: 5000, creation: 5000, pasos: 2 } }])[0];
-  assert.equal(poca.at(-1).color, 'error', 'poca caché se nota en el tono');
+  assert.equal(poca.find((t) => /% caché/u.test(t.text)).color, 'error', 'poca caché se nota en el tono');
   const primero = texto(filasDeAgentes([{ ...con, tokens: { input: 90000, output: 1000, read: 0, creation: 9000, pasos: 1 } }])[0]);
   assert.match(primero, /100k/);
   assert.doesNotMatch(primero, /caché/, 'el primer paso siempre escribe la caché: no se juzga todavía');
@@ -404,7 +405,8 @@ test('el mod suma los tokens de cada paso de un subagente, ignora la sesión pri
     await correr({ model: 'claude-sonnet-5-5', effort: 'high', agentId: 'a1' }, PASO_B);
     await correr({ model: 'claude-sonnet-5-5', effort: 'high', agentId: 'a1' }, null);
     const plano = JSON.stringify(await hooks.get('ui.render')(api, { props: { hasSurvey: false } }, async () => 'engine'));
-    assert.match(plano, /148k/);
+    assert.match(plano, /48k nuevos/);
+    assert.match(plano, /148k en total/);
     assert.match(plano, /97% caché/);
     assert.doesNotMatch(plano, /999\d{3}|1000k/u, 'la sesión principal no cuenta como subagente');
   } finally {
@@ -467,4 +469,22 @@ test('hablar de pruebas sin pedir escribirlas sigue las reglas de siempre', () =
   assert.deepEqual(pick(recomendarPorTexto('las pruebas fallan en Windows')), ['sonnet', 'high'], 'un fallo ya pide esfuerzo alto');
   assert.deepEqual(pick(recomendarPorTexto('diseña la estrategia de pruebas del sistema')), ['opus', 'medium'], 'diseñar manda');
   assert.deepEqual(pick(recomendarPorTexto('¿para qué sirven las pruebas de regresión?')), ['sonnet', 'low'], 'una pregunta es una pregunta');
+});
+
+test('la cifra principal de un subagente son sus tokens nuevos, con la caché y el total aparte', () => {
+  // El caso real de sincronizador-docs: 117.241 tokens en total, de los que 29.478 no eran lectura de caché.
+  const real = { type: 'niveles:sincronizador-docs', description: 'detectar qué guías quedaron desactualizadas', status: 'running', model: 'claude-sonnet-5-5', effort: 'medium', tokens: { input: 12, output: 2838, read: 87763, creation: 26628, pasos: 6 } };
+  const fila = texto(filasDeAgentes([real])[0]);
+  assert.match(fila, /29k nuevos · 77% caché \(117k en total\)/);
+  assert.doesNotMatch(fila, /^.*117k nuevos/u, 'el total no se presenta como si fuera lo nuevo');
+  const [primero] = filasDeAgentes([{ ...real, tokens: { input: 9, output: 400, read: 0, creation: 26000, pasos: 1 } }]);
+  assert.match(texto(primero), /26k nuevos$/u, 'en el primer paso no hay caché que juzgar y el total coincide con lo nuevo, así que no se repite');
+  const dim = filasDeAgentes([real])[0].find((t) => /en total/u.test(t.text));
+  assert.equal(dim.dim, true, 'el total va atenuado: es información, no lo que pesa en la cuota');
+});
+
+test('un subagente en marcha no usa el mismo símbolo que el resto de la fila', () => {
+  const fila = texto(filasDeAgentes([{ type: 'niveles:investigador', description: 'encargo largo que no cabe en la fila de la barra de abajo', status: 'running', model: 'claude-sonnet-5-5', effort: 'medium' }])[0]);
+  assert.doesNotMatch(fila, /…\s*…/u, 'no hay dos puntos suspensivos seguidos');
+  assert.match(fila, /encargo largo que no cabe en la fila de la … ●/u, 'la descripción cabe hasta 44 caracteres, con el corte marcado');
 });

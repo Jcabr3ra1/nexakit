@@ -42,9 +42,10 @@ describe('nexakit-modelo API', () => {
     expect(respuestas.map((r) => r.usage?.output_tokens)).toEqual([500, 44000]);
     expect(respuestas[1].answer).toBe('');
     expect(respuestas[1].stopReason).toBe('end_turn');
-    // La barra dibuja la fila del subagente con la suma de sus dos pasos: 148k en total y 97 % de caché.
+    // La barra dibuja la fila del subagente con la suma de sus dos pasos: 48k nuevos, 97 % de caché y 148k en total.
     const barra = JSON.stringify(await $.ui.render({ surface: 'terminal', component: 'AbovePrompt', requestId: 'r1', props: { hasSurvey: false } }));
-    expect(barra).toContain('148k');
+    expect(barra).toContain('48k nuevos');
+    expect(barra).toContain('148k en total');
     expect(barra).toContain('97% caché');
   });
 });
