@@ -77,7 +77,30 @@ explícita; las sesiones existentes de Claude/Codex deben proporcionar medicione
 
 Para evaluar ahorro, compara tareas equivalentes con y sin Toolkit, con la misma
 calidad exigida. Conserva tokens de entrada/caché/salida, tiempo, llamadas, rondas
-y hallazgos válidos. No hay todavía una comparación controlada que pruebe ahorro.
+y hallazgos válidos. No hay todavía una comparación controlada en vivo, con y sin
+NexaKit sobre las mismas tareas, que pruebe el ahorro total.
+
+### Medición sin conexión de `nexakit-ahorro` (2026-11-11)
+
+Se aplicó el recorte del mod a las salidas de Bash guardadas en las
+transcripciones de Claude Code de un solo equipo, del 2026-09-12 al 2026-11-12:
+las mismas salidas con y sin recorte, sin gastar cuota.
+
+| Dato | Valor |
+| --- | --- |
+| Salidas de Bash analizadas | 10.765, en 33 transcripciones |
+| Salidas que el mod habría recortado | 544 (5,1 %) |
+| Caracteres en esas salidas, antes y después | 4.710.147 y 1.650.018 |
+| Ahorro en las salidas recortadas | 65,0 % |
+| Ahorro sobre toda la salida de Bash | 21,8 % |
+| Ahorro en caracteres | 3.060.129 (unos 765.000 tokens, caracteres / 4) |
+| Ahorro mediano por recorte | 4.304 caracteres |
+
+Límites: los tokens son una estimación, no un conteo; son datos de una persona y
+siete proyectos, y uno aporta el 36 % del ahorro; quedaron fuera 26 salidas que ya
+llevaban la marca del mod. No mide las relecturas de cada salida en los turnos
+siguientes (el ahorro real es mayor), ni si el recorte obligó a repetir un comando
+para ver la salida entera, ni el efecto de delegar por niveles o de la caché.
 
 ## Cierre y recuperación
 
