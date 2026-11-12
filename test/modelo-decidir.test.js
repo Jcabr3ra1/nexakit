@@ -47,7 +47,16 @@ test('con el límite de uso alto no se propone subir a Opus para diseñar; un fa
   assert.match(tope.reason, /límite de uso al 85/u);
   assert.equal(ajustarPorLimite(diseno, 60), diseno);
   assert.equal(ajustarPorLimite(dificil, 95), dificil);
-  assert.equal(d({ recommendation: diseno, limite: 85 }).texto, 'Sonnet · high');
+  assert.equal(d({ recommendation: diseno, limite: 85 }).texto, 'Sonnet · high (límite 85 %)');
+});
+
+test('cuando el límite rebaja la recomendación, la barra dice por qué; sin rebaja no añade nada', () => {
+  const enOpus = { model: 'claude-opus-5-5', effort: 'high', ctx: 5, tokens: 10_000 };
+  assert.match(decidir({ ...enOpus, recommendation: diseno, limite: 91.6 }).texto, /^Sonnet · high.* \(límite 92 %\)$/u);
+  assert.doesNotMatch(d({ recommendation: diseno, limite: 60 }).texto, /límite/u);
+  assert.doesNotMatch(d({ recommendation: dificil, limite: 95 }).texto, /límite/u);
+  // Ya en el modelo y esfuerzo propuestos no hay nada que explicar.
+  assert.equal(decidir({ model: 'claude-sonnet-5-5', effort: 'high', recommendation: diseno, limite: 85 }).texto, '✓');
 });
 
 test('el texto relaciona el mensaje con el anterior y baja el esfuerzo en preguntas', () => {

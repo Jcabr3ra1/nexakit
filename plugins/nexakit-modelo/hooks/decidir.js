@@ -24,9 +24,17 @@ export function ajustarPorLimite(recommendation, limite) {
 
 const etiqueta = (r) => `${nombreModelo(r.model)} · ${r.effort}`;
 
-export function decidir({ model, effort, recommendation, ctx, tokens, cacheFria = false, limite, rutinaSeguidas = 0 }) {
+// Una recomendación rebajada por el límite de uso lo dice en la barra: nunca se baja de modelo sin explicarlo.
+export function decidir(entrada) {
+  const { recommendation, limite } = entrada;
   const r = ajustarPorLimite(recommendation, limite);
   if (!r) return null;
+  const decision = decidirCon(r, entrada);
+  if (r === recommendation || decision.accion === 'mantener') return decision;
+  return { ...decision, texto: `${decision.texto} (límite ${Math.round(limite)} %)` };
+}
+
+function decidirCon(r, { model, effort, ctx, tokens, cacheFria = false, rutinaSeguidas = 0 }) {
   const mismaFamilia = familia(model) === familia(r.model);
   if (r.delegar === 'nivel-ligero') {
     return mismaFamilia && effort === r.effort
