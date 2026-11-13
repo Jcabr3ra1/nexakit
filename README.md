@@ -41,6 +41,7 @@ npx nexakit setup --reponer <skill> --apply  # Devolver una skill global que qui
 ~/.nexakit/nexakit modelo                      # Ver catálogo real de modelos y esfuerzos
 ~/.nexakit/nexakit ahorro                      # Cuánta salida de comandos recortó nexakit-ahorro
 ~/.nexakit/nexakit codex auditar               # Revisar contexto y recomendaciones de Codex
+~/.nexakit/nexakit codex agentes               # Ver los cuatro niveles y seis especialistas de Codex
 ~/.nexakit/nexakit codex consumo               # Contadores registrados por los hooks de Codex
 ~/.nexakit/nexakit codex recomendar --tarea "Escribe pruebas para el parser" # Modelo y esfuerzo sugeridos
 ~/.nexakit/nexakit lecciones                   # Correcciones, lecciones guardadas y pendientes
@@ -73,6 +74,10 @@ medición y recomendaciones visibles, recorta salidas con un ejecutor explícito
 y compara muestras de consumo. La preparación
 muestra una vista previa; la activación se revisa por separado y respeta tu
 configuración. [Guía de ahorro y consumo](docs/guias/codex-ahorro.md).
+
+`nexakit codex agentes` prepara el equipo nativo: cuatro niveles y seis
+especialistas con modelos del catálogo local, vista previa y actualización
+con respaldos. [Equipo y delegación en Codex](docs/guias/codex-agentes.md).
 
 Los mods de Claude Code se instalan *dentro* de Claude Code: `/plugin marketplace add Jcabr3ra1/nexakit` y luego `/plugin install <nombre>@agent-toolkit` para `niveles`, `nexakit-modelo`, `nexakit-sesion`, `nexakit-ahorro`, `nexakit-lecciones` y `nexakit-guardarrailes` ([paso 7 de la guía](docs/guias/guia-de-comandos.md#7-instala-los-plugins-y-mods-solo-claude-code)).
 

@@ -88,6 +88,8 @@ async function recommendationFixture(t, withCatalog = true) {
   await fs.mkdir(codexHome);
   await fs.writeFile(path.join(codexHome, 'config.toml'), 'model = "diario"\nmodel_reasoning_effort = "medium"\n');
   if (withCatalog) await fs.writeFile(path.join(codexHome, 'models_cache.json'), JSON.stringify({ models: [
+    { slug: 'rapido', description: 'Fast and affordable model', priority: 0, default_reasoning_level: 'low',
+      supported_reasoning_levels: ['low', 'medium', 'high'].map(effort => ({ effort })) },
     { slug: 'diario', description: 'Latest workhorse model for coding', priority: 0, default_reasoning_level: 'medium',
       supported_reasoning_levels: ['low', 'medium', 'high'].map(effort => ({ effort })) },
     { slug: 'frontera', description: 'Frontier intelligence for the most demanding work', priority: 1, default_reasoning_level: 'high',
@@ -191,4 +193,145 @@ test('prompt stdin returns JSON only, keeps confirmations silent and never store
   assert.equal(await fs.readFile(path.join(options.codexHome, 'config.toml'), 'utf8'), config);
   assert.deepEqual(await fs.readdir(options.homeDirectory), ['codex']);
   assert.deepEqual((await fs.readdir(options.codexHome)).sort(), ['config.toml', 'models_cache.json']);
+});
+
+const TEAM_NAMES = ['nivel_ligero', 'nivel_normal', 'nivel_exigente', 'nivel_alto', 'investigador',
+  'revisor_de_calidad', 'cierre_de_memoria', 'subir_al_repo', 'sincronizador_docs', 'cazador_de_flakes'];
+async function installTeamFixture(options) {
+  const directory = path.join(options.codexHome, 'agents');
+  await fs.mkdir(directory, { recursive: true });
+  for (const name of TEAM_NAMES) await fs.writeFile(path.join(directory, `${name}.toml`),
+    `name = "${name}"\ndescription = "Perfil de prueba"\nmodel = "diario"\nmodel_reasoning_effort = "medium"\ndeveloper_instructions = "Ejecuta un encargo acotado y verifica el resultado."\n`);
+}
+
+test('team parser requires apply for update and rejects duplicate unknown and positional flags', async () => {
+  for (const args of [['--actualizar'], ['--actualizar', '--json'], ['--apply', '--apply'],
+    ['--json', '--json'], ['--apply', '--actualizar', '--actualizar'], ['--other'], ['extra'], ['--apply=true']]) {
+    assert.equal((await run(['agentes', ...args])).code, 2, args.join(' '));
+  }
+  assert.match((await run(['--help'])).stdout, /agentes.*--apply.*--actualizar.*--json/);
+});
+
+test('team preview shows ten roles without contents snapshots or writes', async t => {
+  const options = await recommendationFixture(t);
+  const before = await fs.readdir(options.codexHome);
+  const result = await run(['agentes', '--json'], options);
+  assert.equal(result.code, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.deepEqual(report.files.map(file => file.name).sort(), [...TEAM_NAMES].sort());
+  for (const file of report.files) {
+    assert.equal(file.state, 'nuevo');
+    assert.ok(file.model);
+    assert.equal('content' in file, false);
+    assert.equal('snapshot' in file, false);
+  }
+  assert.deepEqual(await fs.readdir(options.codexHome), before);
+  const text = await run(['agentes'], options);
+  assert.match(text.stdout, /Nombre.*Modelo.*Esfuerzo.*Estado/);
+  assert.match(text.stdout, /Limitaciones/);
+  assert.match(text.stdout, /nivel_normal/);
+  assert.match(text.stdout, /Vista previa.*no se escrib/);
+  const cli = spawnSync(process.execPath, ['bin/nexakit.js', 'codex', 'agentes', '--json'], {
+    encoding: 'utf8', env: { ...process.env, HOME: options.homeDirectory, CODEX_HOME: options.codexHome },
+  });
+  assert.equal(cli.status, 0, cli.stderr);
+  assert.equal(JSON.parse(cli.stdout).files.length, 10);
+  assert.deepEqual(await fs.readdir(options.codexHome), before);
+});
+
+test('team apply installs ten valid profiles, leaves existing files and updates with backups', async t => {
+  const options = await recommendationFixture(t);
+  const { parseTOML } = await import('toml-eslint-parser');
+  const result = await run(['agentes', '--apply', '--json'], options);
+  assert.equal(result.code, 0, result.stderr);
+  const directory = path.join(options.codexHome, 'agents');
+  for (const name of TEAM_NAMES) {
+    const raw = await fs.readFile(path.join(directory, `${name}.toml`), 'utf8');
+    assert.doesNotThrow(() => parseTOML(raw));
+    assert.match(raw, /developer_instructions/);
+  }
+  const target = path.join(directory, 'nivel_normal.toml');
+  const old = 'name = "nivel_normal"\ndescription = "Anterior"\nmodel = "diario"\ndeveloper_instructions = "Anterior"\n';
+  await fs.writeFile(target, old);
+  assert.equal((await run(['agentes', '--apply'], options)).code, 1);
+  assert.equal(await fs.readFile(target, 'utf8'), old);
+  const updated = await run(['agentes', '--apply', '--actualizar', '--json'], options);
+  assert.equal(updated.code, 0, updated.stderr);
+  const profile = JSON.parse(updated.stdout).files.find(file => file.name === 'nivel_normal');
+  assert.ok(profile.backupPath);
+  assert.equal('content' in profile, false);
+  assert.equal('snapshot' in profile, false);
+  assert.equal(await fs.readFile(profile.backupPath, 'utf8'), old);
+  assert.notEqual(await fs.readFile(target, 'utf8'), old);
+  const backups = (await fs.readdir(directory)).filter(name => name.startsWith('nivel_normal.toml.') && !name.endsWith('.toml'));
+  assert.ok(backups.length);
+  assert.equal(await fs.readFile(path.join(directory, backups[0]), 'utf8'), old);
+});
+
+test('team absent catalog is honest in preview and incomplete apply exits one', async t => {
+  const options = await recommendationFixture(t, false);
+  for (const apply of [false, true]) {
+    const result = await run(['agentes', '--json', ...(apply ? ['--apply'] : [])], options);
+    assert.equal(result.code, apply ? 1 : 0, result.stderr);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.files.length, 10);
+    assert.ok(report.files.every(file => file.state === 'sin-catalogo' || file.state === 'sin-modelo'));
+  }
+  assert.equal((await fs.readdir(options.codexHome)).includes('agents'), false);
+});
+
+test('team symlinks are preserved and rejected privately', async t => {
+  const options = await recommendationFixture(t);
+  const outside = path.join(options.homeDirectory, 'PRIVATE');
+  await fs.mkdir(outside);
+  try { await fs.symlink(outside, path.join(options.codexHome, 'agents'), 'dir'); }
+  catch (error) { if (process.platform === 'win32' && error.code === 'EPERM') return t.skip('Symlink privileges required'); throw error; }
+  const result = await run(['agentes', '--apply', '--json'], options);
+  assert.equal(result.code, 1);
+  assert.doesNotMatch(result.stdout + result.stderr, /PRIVATE/);
+  assert.deepEqual(await fs.readdir(outside), []);
+  assert.equal((await fs.lstat(path.join(options.codexHome, 'agents'))).isSymbolicLink(), true);
+});
+
+test('prompt stdout combines recommendation and installed routing in one JSON object', async t => {
+  const options = await recommendationFixture(t);
+  await installTeamFixture(options);
+  const result = await run(['hook'], options, JSON.stringify({ hook_event_name: 'UserPromptSubmit', prompt: 'Investiga la documentación oficial para resolver esta integración PRIVADO' }));
+  assert.equal(result.code, 0);
+  assert.equal(result.stderr, '');
+  assert.equal(result.stdout.trim().split('\n').length, 1);
+  const response = JSON.parse(result.stdout);
+  const { recommendCodexTask } = await import('../src/codex-recommendation.js');
+  const recommendation = await recommendCodexTask('Investiga la documentación oficial para resolver esta integración PRIVADO', options);
+  assert.equal(response.systemMessage, recommendation.message);
+  assert.equal(response.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
+  assert.match(response.hookSpecificOutput.additionalContext, /investigador/);
+  assert.doesNotMatch(result.stdout, /PRIVADO/);
+});
+
+test('team reports unsupported roles as not installed and partial apply fails honestly', async t => {
+  const options = await recommendationFixture(t);
+  const file = path.join(options.codexHome, 'models_cache.json');
+  const catalog = JSON.parse(await fs.readFile(file, 'utf8'));
+  catalog.models = catalog.models.filter(model => model.slug === 'rapido');
+  await fs.writeFile(file, JSON.stringify(catalog));
+  const preview = await run(['agentes'], options);
+  assert.equal(preview.code, 0, preview.stderr);
+  assert.match(preview.stdout, /investigador.*sin-modelo.*no instalado/);
+  const applied = await run(['agentes', '--apply', '--json'], options);
+  assert.equal(applied.code, 1, applied.stderr);
+  const report = JSON.parse(applied.stdout);
+  assert.equal(report.files.find(file => file.name === 'nivel_ligero').state, 'igual');
+  assert.equal(report.files.find(file => file.name === 'investigador').state, 'sin-modelo');
+  assert.deepEqual(await fs.readdir(path.join(options.codexHome, 'agents')), ['nivel_ligero.toml']);
+});
+
+test('team unexpected errors return a generic private diagnostic', async () => {
+  const result = await run(['agentes', '--apply', '--json'], {
+    get codexHome() { throw new Error('PRIVATE'); },
+  });
+  assert.equal(result.code, 1);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /No se pudo completar/);
+  assert.doesNotMatch(result.stderr, /PRIVATE/);
 });

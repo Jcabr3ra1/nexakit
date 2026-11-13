@@ -48,14 +48,18 @@ export async function prepareCodex({ outputDirectory, apply = false, homeDirecto
     await assertNoSymlinkAncestors(destination);
   }
   const command = buildCodexHookCommand();
-  const events = ['PostModelRequest', 'SessionStart', 'PreCompact', 'PostCompact', 'UserPromptSubmit'];
+  const events = ['PostModelRequest', 'SessionStart', 'PreCompact', 'PostCompact', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'SubagentStart', 'SubagentStop'];
   const statusLine = ['model-with-reasoning', 'context-remaining', 'five-hour-limit', 'weekly-limit',
     'total-input-tokens', 'total-output-tokens', 'git-branch'];
-  const config = 'tool_output_token_limit = 4000\n\n[skills]\nmax_context_tokens = 2000\n\n[agents]\nmax_concurrent_threads_per_session = 2\n'
+  const config = 'tool_output_token_limit = 4000\n\n[agents]\nmax_concurrent_threads_per_session = 2\n'
     + `\n[tui]\nstatus_line = ${JSON.stringify(statusLine)}\n`;
-  const hooks = { hooks: Object.fromEntries(events.map(event => [event, [{ hooks: [{ type: 'command', command }] }]])) };
+  const hooks = { hooks: Object.fromEntries(events.map(event => [event, [{
+    ...(['PreToolUse', 'PostToolUse'].includes(event) ? { matcher: '^Bash$' } : {}),
+    hooks: [{ type: 'command', command }],
+  }]])) };
   const readme = `# Paquete Codex: activación manual\n\nVista previa de configuración; no se activa automáticamente.\nRevisa y fusiona config.toml y hooks.json manualmente en tu CODEX_HOME.\nVerifica primero que tu versión de Codex admite estos eventos y claves.\nConfía los hooks mediante /hooks; no omitas sus confirmaciones.\nNo se garantiza compatibilidad de todos los clientes ni se cambian modelos.\nLa barra nativa muestra modelo/esfuerzo, contexto, límites y tokens cuando están disponibles.\nUsa /statusline para ordenar campos; en terminales estrechas Codex recorta los últimos.\nUserPromptSubmit recomienda localmente según la tarea mediante avisos; no cambia el modelo.\nUsa /model para aplicar una recomendación y /status para verificar el estado activo.\nEl comando del hook usa rutas absolutas: regenera el paquete si mueves NexaKit o Node.\n\nCompara muestras JSON con task, quality: { passed: true } y measurements\n(normalizeMeasurement: id, agent, phase, model, source y contadores).\nSolo se calculan porcentajes con cobertura completa y procedencia comparable.\n`;
-  const files = { 'config.toml': config, 'hooks.json': JSON.stringify(hooks, null, 2) + '\n', 'README.md': readme };
+  const liveHooks = '\n## Salidas y subagentes\n\nPreToolUse envuelve comandos simples POSIX de pruebas/build/lint con el wrapper de salida.\nNo interpreta comandos compuestos ni shell general, no eleva permisos y no ejecuta el comando desde el hook.\nPostToolUse mantiene cobertura adicional; su sustitución depende del cliente.\nSin estado explícito informa exit_code desconocido; no acredita éxito.\nNEXAKIT_SALIDA=completa evita la reescritura y el recorte. Los logs privados pueden contener datos sensibles.\nSubagentStart/Stop registran solo metadatos; consulta nexakit codex actividad.\nAl combinar una instalación existente, agrega solo los eventos que falten y conserva los demás.\nRevisa y confía los hooks nuevos con /hooks: el paquete no modifica la confianza.\n';
+  const files = { 'config.toml': config, 'hooks.json': JSON.stringify(hooks, null, 2) + '\n', 'README.md': readme + liveHooks };
   if (apply) {
     // mkdir is exclusive; no recursive creation and no overwrites of an existing destination.
     await fs.mkdir(destination, { mode: 0o700 });

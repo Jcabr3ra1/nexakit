@@ -252,3 +252,59 @@ test('invalid and unwritable hook payloads fail open with a generic private diag
   assert.equal(result.stderr.includes('PRIVATE'), false);
   assert.equal(result.stderr.includes(options.homeDirectory), false);
 });
+
+test('session guidance distinguishes installed team UI and model selection from actual delegation', async t => {
+  const options = fixture(t);
+  const missing = await runCodexHook({ hook_event_name: 'SessionStart' }, options);
+  assert.match(missing.hookSpecificOutput.additionalContext, /\/subagents/);
+  assert.match(missing.hookSpecificOutput.additionalContext, /principal.*orquesta/i);
+  assert.match(missing.hookSpecificOutput.additionalContext, /pequeñas.*direct/i);
+  assert.doesNotMatch(missing.hookSpecificOutput.additionalContext, /investigador|nivel_normal/);
+  const directory = path.join(options.codexHome, 'agents');
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(path.join(directory, 'investigador.toml'), 'name = "investigador"\ndescription = "Investiga"\nmodel = "fixture"\nmodel_reasoning_effort = "medium"\ndeveloper_instructions = "Investiga y cita fuentes."\n');
+  const installed = await runCodexHook({ hook_event_name: 'SessionStart' }, options);
+  assert.match(installed.hookSpecificOutput.additionalContext, /investigador/);
+  assert.match(installed.hookSpecificOutput.additionalContext, /\/model/);
+  assert.match(installed.hookSpecificOutput.additionalContext, /perfiles instalados.*abrir sesión.*registrados en tus herramientas/i);
+});
+
+test('routing inspection failures retain the computed warning and confirmations skip inspection', async t => {
+  const options = fixture(t);
+  fs.mkdirSync(options.codexHome);
+  fs.writeFileSync(path.join(options.codexHome, 'agents'), 'PRIVATE blocked directory');
+  const lstat = fs.promises.lstat;
+  let inspections = 0, diagnostic = '';
+  t.mock.method(fs.promises, 'lstat', async (file, ...args) => {
+    if (String(file) === path.join(options.codexHome, 'agents')) {
+      inspections++;
+      throw new Error('PRIVATE inspection failure');
+    }
+    return lstat(file, ...args);
+  });
+  t.mock.method(process.stderr, 'write', text => { diagnostic += text; return true; });
+  for (const prompt of ['ok', 'sí', 'gracias']) {
+    assert.deepEqual(await runCodexHook({ hook_event_name: 'UserPromptSubmit', prompt }, options), {});
+  }
+  assert.equal(inspections, 0);
+  const response = await runCodexHook({ hook_event_name: 'UserPromptSubmit', prompt: 'Investiga la documentación oficial PRIVADO' }, options);
+  assert.ok(inspections > 0);
+  assert.ok(response.systemMessage);
+  assert.equal('hookSpecificOutput' in response, false);
+  assert.doesNotMatch(JSON.stringify(response), /PRIVADO|PRIVATE/);
+  const session = await runCodexHook({ hook_event_name: 'SessionStart' }, options);
+  assert.match(session.hookSpecificOutput.additionalContext, /\/subagents/);
+  assert.ok(diagnostic.length > 0);
+  assert.doesNotMatch(diagnostic, /PRIVATE|PRIVADO/);
+});
+
+test('prompt routing never names absent or malformed agents', async t => {
+  const options = fixture(t);
+  const directory = path.join(options.codexHome, 'agents');
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(path.join(directory, 'investigador.toml'), 'INVALID PRIVATE');
+  const response = await runCodexHook({ hook_event_name: 'UserPromptSubmit', prompt: 'Investiga documentación oficial PRIVADO' }, options);
+  assert.ok(response.systemMessage);
+  assert.equal('hookSpecificOutput' in response, false);
+  assert.doesNotMatch(JSON.stringify(response), /investigador|PRIVADO|PRIVATE/);
+});

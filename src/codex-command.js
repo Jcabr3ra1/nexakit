@@ -4,14 +4,17 @@ import { compareCodexSamples, readCodexSample } from './codex-compare.js';
 
 const HELP = `Uso: nexakit codex auditar [--project ruta] [--json]
      nexakit codex preparar [--salida carpeta] [--apply] [--json]
+     nexakit codex agentes [--apply] [--actualizar] [--json]
      nexakit codex consumo [--json]
+     nexakit codex actividad [--json]
      nexakit codex recomendar --tarea texto [--json]
      nexakit codex hook
      nexakit codex ejecutar -- programa argumentos
      nexakit codex comparar --antes archivo --despues archivo [--json]\n`;
 const FLAGS = { auditar: { '--project': 'value', '--json': 'bool' },
   preparar: { '--salida': 'value', '--apply': 'bool', '--json': 'bool' },
-  consumo: { '--json': 'bool' }, recomendar: { '--tarea': 'value', '--json': 'bool' }, hook: {}, comparar: { '--antes': 'value', '--despues': 'value', '--json': 'bool' } };
+  agentes: { '--apply': 'bool', '--actualizar': 'bool', '--json': 'bool' },
+  consumo: { '--json': 'bool' }, actividad: { '--json': 'bool' }, recomendar: { '--tarea': 'value', '--json': 'bool' }, hook: {}, comparar: { '--antes': 'value', '--despues': 'value', '--json': 'bool' } };
 function parse(command, argv) {
   if (!Object.hasOwn(FLAGS, command)) throw new Error('Uso inválido.');
   const result = {};
@@ -27,6 +30,7 @@ function parse(command, argv) {
   }
   if (command === 'comparar' && (!result['--antes'] || !result['--despues'])) throw new Error('Faltan muestras.');
   if (command === 'recomendar' && !result['--tarea']?.trim()) throw new Error('Falta la tarea.');
+  if (command === 'agentes' && result['--actualizar'] && !result['--apply']) throw new Error('Actualizar requiere apply.');
   return result;
 }
 async function readHookInput(input) {
@@ -72,6 +76,37 @@ function formatConsumption(report) {
     'Limitaciones:', ...report.limitations, ''].join('\n');
 }
 
+// Explicit allowlist: profile instructions and concurrency snapshots stay local.
+function publicTeam(plan) {
+  return {
+    codexHome: plan.codexHome,
+    files: plan.files.map(({ name, kind, path, model, effort, state, backupPath }) => ({
+      name, kind, path, model, effort, state, ...(backupPath ? { backupPath } : {}),
+    })),
+    limitations: plan.limitations,
+  };
+}
+function formatTeam(report, apply) {
+  const rows = [['Nombre', 'Modelo', 'Esfuerzo', 'Estado'],
+    ...report.files.map(file => [file.name, file.model ?? 'no disponible', file.effort ?? 'no disponible',
+      `${file.state}${['sin-modelo', 'sin-catalogo', 'bloqueado'].includes(file.state) ? ' (no instalado)' : ''}`])];
+  const widths = rows[0].map((_, index) => Math.max(...rows.map(row => row[index].length)));
+  return [apply ? 'Equipo de Codex: resultado de la aplicación.' : 'Vista previa: no se escribió ningún perfil.',
+    ...rows.map(row => row.map((value, index) => value.padEnd(widths[index])).join('  ').trimEnd()),
+    ...report.files.filter(file => file.backupPath).map(file => `Respaldo ${file.name}: ${file.backupPath}`),
+    'Limitaciones:', ...report.limitations, ''].join('\n');
+}
+async function teamCommand(flags, io, options) {
+  const { teamPlan, writeTeam } = await import('./codex-team.js');
+  let plan = await teamPlan(options);
+  if (flags['--apply']) plan = await writeTeam(plan, { update: Boolean(flags['--actualizar']) });
+  const report = publicTeam(plan);
+  await io.out(flags['--json'] ? JSON.stringify(report) + '\n' : formatTeam(report, Boolean(flags['--apply'])));
+  const blocked = plan.files.some(file => file.state === 'bloqueado');
+  const incomplete = plan.files.some(file => file.state !== 'igual');
+  return blocked || (flags['--apply'] && incomplete) ? 1 : 0;
+}
+
 function formatRecommendation(report) {
   return [report.message,
     report.recommendation ? `Recomendación: ${report.recommendation.model}; esfuerzo: ${report.recommendation.effort ?? 'no fijado'}.` : 'Recomendación no disponible.',
@@ -99,6 +134,19 @@ export async function runCodexCommand(argv, io, options = {}) {
   catch { await io.err(HELP); return 2; }
   if (command === 'hook') return hook(io, options);
   try {
+    if (command === 'actividad') {
+      const { readCodexAgentEvents } = await import('./codex-events.js');
+      const events = await readCodexAgentEvents(options);
+      const limitations = ['Eventos locales recibidos; no acreditan cobertura completa, éxito de la tarea ni consumo del subagente.'];
+      const report = { events, limitations };
+      await io.out(flags['--json'] ? JSON.stringify(report) + '\n' : [
+        'Actividad local de subagentes (últimos 50 eventos):',
+        ...events.slice(-50).map(event => `${event.recorded_at} ${event.hook_event_name} ${event.agent_type} id=${event.agent_id} modelo=${event.model ?? 'desconocido'}`),
+        ...limitations, '',
+      ].join('\n'));
+      return 0;
+    }
+    if (command === 'agentes') return await teamCommand(flags, io, options);
     let report;
     if (command === 'recomendar') {
       const { recommendCodexTask } = await import('./codex-recommendation.js');

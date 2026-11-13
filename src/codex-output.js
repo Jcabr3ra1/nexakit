@@ -74,7 +74,10 @@ function directory(target, create = false) {
       if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Directorio inseguro');
     } catch (error) {
       if (error.code !== 'ENOENT' || !create) throw error;
-      fs.mkdirSync(current, { mode: 0o700 });
+      try { fs.mkdirSync(current, { mode: 0o700 }); }
+      catch (created) { if (created.code !== 'EEXIST') throw created; }
+      const stat = fs.lstatSync(current);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Directorio inseguro');
     }
   }
   return absolute;
@@ -127,7 +130,11 @@ export async function runCodexOutput(argv, { out, err, input }, options = {}) {
   const liveDecoders = [new StringDecoder('utf8'), new StringDecoder('utf8')];
   let fd, ruta, home, saved = 0, fallback = false;
   try {
-    const root = directory(options.homeDirectory ?? os.homedir());
+    // Automatic wrapping runs inside the tool sandbox. Its private temporary
+    // store requires no additional access to the real user home.
+    const root = env.NEXAKIT_CODEX_TEMP_OUTPUT === '1'
+      ? privateDirectory(path.join(directory(fs.realpathSync(options.tempDirectory ?? os.tmpdir())), `nexakit-codex-${process.getuid?.() ?? 'user'}`))
+      : directory(options.homeDirectory ?? os.homedir());
     home = privateDirectory(path.join(root, '.nexakit'));
     const folder = privateDirectory(path.join(home, 'salidas'));
     ruta = path.join(folder, `${Date.now()}-${randomUUID()}.log`);

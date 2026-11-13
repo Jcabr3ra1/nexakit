@@ -14,7 +14,7 @@ async function fixture(t) {
   t.after(() => fs.rm(home, { recursive: true, force: true }));
   let stdout = '', stderr = '';
   return { home, io: { out: { write: x => { stdout += x; } }, err: { write: x => { stderr += x; } } },
-    out: () => stdout, err: () => stderr, options: { homeDirectory: home } };
+    out: () => stdout, err: () => stderr, options: { homeDirectory: home, tempDirectory: home } };
 }
 const node = code => [process.execPath, '-e', code];
 async function logs(f) {
@@ -23,6 +23,21 @@ async function logs(f) {
 }
 
 test('exports the executor contract', () => assert.equal(typeof runCodexOutput, 'function'));
+test('automatic mode stores privately in allowed temporary storage without touching the user home', async t => {
+  const f = await fixture(t);
+  const temporary = path.join(f.home, 'temporary');
+  await fs.mkdir(temporary);
+  const expected = 'automatic output\n'.repeat(400);
+  assert.equal(await runCodexOutput(node(`process.stdout.write(${JSON.stringify(expected)})`), f.io, {
+    ...f.options, tempDirectory: temporary, env: { NEXAKIT_CODEX_TEMP_OUTPUT: '1' },
+  }), 0);
+  assert.match(f.out(), /líneas omitidas/u);
+  const privateRoot = path.join(temporary, `nexakit-codex-${process.getuid?.() ?? 'user'}`, '.nexakit', 'salidas');
+  const [name] = await fs.readdir(privateRoot);
+  assert.equal(await fs.readFile(path.join(privateRoot, name), 'utf8'), expected);
+  await assert.rejects(fs.stat(path.join(f.home, '.nexakit')), { code: 'ENOENT' });
+  if (process.platform !== 'win32') assert.equal((await fs.stat(path.join(privateRoot, name))).mode & 0o777, 0o600);
+});
 test('spools >10MiB, keeps head/tail/errors and exit 7 with bounded summary and private metrics', async t => {
   const f = await fixture(t);
   const code = `process.stdout.write('HEAD\\n'); for(let i=0;i<12000;i++) process.stdout.write('x'.repeat(1024)+'\\n'); process.stdout.write('ERROR middle\\n'); for(let i=0;i<300;i++) process.stdout.write('later\\n'); process.stderr.write('stderr failure\\n'); process.stdout.write('TAIL\\n'); process.exitCode=7;`;

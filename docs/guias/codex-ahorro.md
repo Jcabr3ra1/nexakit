@@ -24,6 +24,33 @@ no valores oficiales óptimos. Reducir mucho el catálogo puede ocultar skills;
 recortar mucho una salida puede obligar a leer el log completo. No se eliminan
 skills ni se cambia el modelo por una recomendación.
 
+### Presupuesto del catálogo de skills
+
+El paquete generado deja `skills.max_context_tokens` sin fijar: Codex calcula
+su presupuesto nativo según el contexto del modelo. Las versiones anteriores
+de NexaKit proponían `2000`; ese límite puede eliminar descripciones y dejar
+skills fuera de la lista inicial. Regenerar el paquete no migra tu configuración
+activa: revisa ese valor si ya lo habías copiado.
+
+Antes de recortar, compara la lista y los avisos de una sesión nueva. En clientes
+con el comando de diagnóstico disponible puedes inspeccionar el prompt sin
+inferencia, usando una sustitución temporal:
+
+```sh
+codex debug prompt-input -c 'skills.max_context_tokens=6000'
+```
+
+La salida contiene instrucciones y rutas locales: consérvala en privado.
+El número del ejemplo no es una recomendación universal. Comprueba los nombres
+disponibles, sus descripciones y las advertencias de omisión. Si necesitas
+ajustar el límite, respalda primero `config.toml`; Codex admite como máximo
+`10000`. No desactives skills únicamente para quitar un aviso.
+
+Este presupuesto cubre la lista inicial; las instrucciones completas de una
+skill se leen al utilizarla. Aumentarlo puede recuperar capacidades, pero no
+demuestra ahorro neto de tokens. Consulta la [documentación oficial de
+skills](https://learn.chatgpt.com/docs/build-skills).
+
 ## Preparar los hooks
 
 ```sh
@@ -58,6 +85,93 @@ Al **enviar** un mensaje sustantivo aparece un aviso breve con la recomendación
 local de NexaKit: modelo, esfuerzo, razón y comando `/model`, o delegación a un
 nivel. No aparece mientras escribes y no es texto insertado en el pie de la
 barra. Confirmaciones como «sí» y «listo» quedan en silencio.
+
+Cuando el [equipo de agentes](codex-agentes.md) está instalado, ese mismo hook
+puede añadir al principal orientación de selección de perfiles disponibles.
+El aviso visible y la orientación no lanzan agentes por sí solos.
+
+## Recorte automático y actividad
+
+### Antes de ejecutar: comandos simples
+
+`PreToolUse` con matcher `^Bash$` envuelve automáticamente comandos literales
+de pruebas, build y lint con `nexakit codex ejecutar`. Así el proceso ya devuelve
+el resumen, incluso cuando se llama desde modo de código. El hook no ejecuta
+el comando: Codex ejecuta la entrada reescrita una sola vez, bajo los permisos
+de la sesión. No se instala ningún hook `PermissionRequest`.
+
+El modo automático usa una carpeta temporal privada del usuario para guardar
+logs y métricas, sin necesitar acceso adicional a su carpeta personal desde el
+sandbox. El aviso contiene la ruta exacta; el sistema operativo puede limpiar
+estos temporales. El wrapper explícito mantiene su almacenamiento habitual.
+`nexakit ahorro` consulta ambos registros sin duplicar una misma ruta, con
+lecturas acotadas y sin seguir enlaces. Si el sistema limpia los temporales,
+sus métricas dejan de estar disponibles en ese resumen local.
+
+El alcance es POSIX y deliberadamente limitado: gestores de paquetes con tareas
+conocidas y `node --test`. No interpreta shell general: comillas, variables,
+globs, pipes, redirecciones, comandos compuestos, watch, terminal interactiva
+y solicitudes explícitas de escalación quedan sin modificar. Windows mantiene
+el wrapper explícito. `NEXAKIT_SALIDA=completa` omite la reescritura.
+
+Para verificarlo, ejecuta un comando elegible que produzca salida larga y
+comprueba el aviso de líneas omitidas y la ruta del log. Una salida corta
+permanece completa. El wrapper conserva cwd, argumentos literales y código
+de salida; un resumen no convierte una prueba fallida en aprobada.
+
+Comprobación nativa del 13 de noviembre de 2026: `PreToolUse` confiado devolvió
+el resumen también a la llamada anidada de código. Una ejecución produjo
+15.626 caracteres originales y 2.343 en el resultado, con las 400 líneas
+conservadas en el log privado. Se comprobaron además ejecución única, error
+con exit 1 visible, continuación posterior y bypass completo. Son caracteres
+de ese caso, no tokens ni un porcentaje de ahorro garantizado.
+
+### Después de ejecutar: cobertura adicional
+
+El paquete incluye `PostToolUse` con matcher `^Bash$`. Tras revisar y confiar
+este hook con `/hooks`, NexaKit puede sustituir salidas largas por un resumen
+con ruta al original privado. No reescribe ni vuelve a ejecutar el comando.
+Los fallos con estado explícito, el texto con señales de error cuando falta
+estado, las respuestas desconocidas y los procesos activos se conservan.
+Codex puede entregar solo texto sin código de salida: en ese caso el resumen
+indica `exit_code: desconocido` y no acredita éxito. Si no puede guardar el original, no
+sustituye la salida. Las herramientas alojadas y algunos caminos especializados
+no están cubiertos por este hook.
+
+El original se conserva en `~/.nexakit/codex/salidas/`, con permisos privados.
+Puede contener datos sensibles de la salida del comando; no se sube al repositorio
+ni se elimina automáticamente. `NEXAKIT_SALIDA=completa` permite omitir el recorte.
+El wrapper `codex ejecutar` continúa disponible cuando se necesita control
+explícito o el cliente no admite el hook.
+
+Los hooks `SubagentStart` y `SubagentStop` guardan metadatos locales, sin prompt,
+respuesta ni transcripción. Consulta:
+
+```sh
+nexakit codex actividad
+nexakit codex actividad --json
+```
+
+Un inicio y un fin con el mismo `agent_id` acreditan eventos recibidos del
+subagente; no prueban por sí solos que su tarea fue correcta. Comprueba también
+el resultado y `/subagents`. Un modelo ausente se muestra como desconocido.
+Los registros no prueban cobertura completa ni ahorro de tokens. En modo de
+código, un script puede conservar el resultado original de una herramienta;
+no supongas que un log guardado prueba por sí solo que todo camino redujo el
+contexto del modelo.
+
+En la comprobación local con Codex CLI `0.167.2`, `PostToolUse` guardó el original
+exacto, pero el resultado del comando siguió llegando completo al script de
+modo de código. Ese caso no acredita ahorro automático de contexto. El wrapper
+`nexakit codex ejecutar -- programa argumentos` sí devolvió el resumen y
+conservó el original. Por eso los comandos elegibles usan ahora `PreToolUse`
+para insertar ese wrapper antes de ejecutarse. Para los demás, úsalo de forma
+explícita si necesitas un recorte comprobable.
+
+Si ya tenías hooks instalados, regenera el paquete y agrega los eventos nuevos
+que falten, incluido `PreToolUse`, sin reemplazar otros hooks. Respalda `hooks.json` antes
+de combinarlo; Codex exige revisar y confiar las definiciones nuevas con `/hooks`.
+Una sesión abierta puede requerir reinicio para cargar perfiles y hooks.
 
 ```sh
 node bin/nexakit.js codex recomendar --tarea "Escribe pruebas para el parser"

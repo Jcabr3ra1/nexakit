@@ -41,7 +41,7 @@ export function auditCodex({ projectRoot = process.cwd(), codexHome, homeDirecto
     },
     summary: { skills: 0, skillBytes: 0, metadataBytes: 0, instructionFiles: 0, instructionBytes: 0, mcpServers: 0, plugins: 0, omitted: 0 },
     recommendations: [
-      { code: 'CATALOG_BUDGET', setting: 'skills.max_context_tokens', proposedValue: 2000, officialDefault: false, message: 'Propuesta local: evaluar 2000 tokens para el catálogo de skills; no es un valor predeterminado oficial.' },
+      { code: 'CATALOG_BUDGET', setting: 'skills.max_context_tokens', message: 'Usar el presupuesto nativo del catálogo de skills; antes de reducirlo, comprobar advertencias, descripciones y omisiones.' },
       { code: 'OUTPUT_BUDGET', setting: 'tool_output_token_limit', proposedValue: 4000, officialDefault: false, message: 'Propuesta local: evaluar 4000 tokens por salida y recuperar el log completo cuando haga falta; no es un valor predeterminado oficial.' },
       { code: 'EFFORT', message: 'Elegir esfuerzo proporcional a la tarea y comprobar calidad antes de reducirlo; no se modifica la configuración.' },
       { code: 'DELEGATION', message: 'Delegar tareas independientes con encargos breves y limitar la concurrencia según la tarea; no se modifica la configuración.' },
