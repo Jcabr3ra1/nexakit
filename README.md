@@ -40,6 +40,9 @@ npx nexakit setup --reponer <skill> --apply  # Devolver una skill global que qui
 ~/.nexakit/nexakit revision --disponibles --principal <ia>  # Ver IA revisoras certificadas
 ~/.nexakit/nexakit modelo                      # Ver catálogo real de modelos y esfuerzos
 ~/.nexakit/nexakit ahorro                      # Cuánta salida de comandos recortó nexakit-ahorro
+~/.nexakit/nexakit codex auditar               # Revisar contexto y recomendaciones de Codex
+~/.nexakit/nexakit codex consumo               # Contadores registrados por los hooks de Codex
+~/.nexakit/nexakit codex recomendar --tarea "Escribe pruebas para el parser" # Modelo y esfuerzo sugeridos
 ~/.nexakit/nexakit lecciones                   # Correcciones, lecciones guardadas y pendientes
 npx nexakit memoria allow-dir <bóveda> --apply # Permitir a Claude Code abrir la memoria desde el proyecto
 ```
@@ -64,6 +67,12 @@ NexaKit inspecciona la raíz y las subcarpetas inmediatas del proyecto (`package
 El catálogo incluido contiene **10 skills** con revisión de origen y hashes SHA-256. NexaKit muestra el motivo concreto de cada sugerencia (por ejemplo, qué archivo o `README.md` la activó). Consulta las [fuentes y licencias](docs/skills/fuentes-de-skills.md) o aprende a [ampliar el catálogo](docs/skills/ampliar-catalogo.md).
 
 ## Más herramientas
+
+**Codex:** `nexakit codex` audita contexto, prepara la barra nativa y los hooks de
+medición y recomendaciones visibles, recorta salidas con un ejecutor explícito
+y compara muestras de consumo. La preparación
+muestra una vista previa; la activación se revisa por separado y respeta tu
+configuración. [Guía de ahorro y consumo](docs/guias/codex-ahorro.md).
 
 Los mods de Claude Code se instalan *dentro* de Claude Code: `/plugin marketplace add Jcabr3ra1/nexakit` y luego `/plugin install <nombre>@agent-toolkit` para `niveles`, `nexakit-modelo`, `nexakit-sesion`, `nexakit-ahorro`, `nexakit-lecciones` y `nexakit-guardarrailes` ([paso 7 de la guía](docs/guias/guia-de-comandos.md#7-instala-los-plugins-y-mods-solo-claude-code)).
 
