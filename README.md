@@ -42,6 +42,7 @@ npx nexakit setup --reponer <skill> --apply  # Devolver una skill global que qui
 ~/.nexakit/nexakit ahorro                      # Cuánta salida de comandos recortó nexakit-ahorro
 ~/.nexakit/nexakit codex auditar               # Revisar contexto y recomendaciones de Codex
 ~/.nexakit/nexakit codex consumo               # Contadores registrados por los hooks de Codex
+~/.nexakit/nexakit codex recomendar --tarea "Escribe pruebas para el parser" # Modelo y esfuerzo sugeridos
 ~/.nexakit/nexakit lecciones                   # Correcciones, lecciones guardadas y pendientes
 npx nexakit memoria allow-dir <bóveda> --apply # Permitir a Claude Code abrir la memoria desde el proyecto
 ```
@@ -67,8 +68,9 @@ El catálogo incluido contiene **10 skills** con revisión de origen y hashes SH
 
 ## Más herramientas
 
-**Codex:** `nexakit codex` audita contexto, prepara hooks de medición, recorta
-salidas con un ejecutor explícito y compara muestras de consumo. La preparación
+**Codex:** `nexakit codex` audita contexto, prepara la barra nativa y los hooks de
+medición y recomendaciones visibles, recorta salidas con un ejecutor explícito
+y compara muestras de consumo. La preparación
 muestra una vista previa; la activación se revisa por separado y respeta tu
 configuración. [Guía de ahorro y consumo](docs/guias/codex-ahorro.md).
 

@@ -5,12 +5,13 @@ import { compareCodexSamples, readCodexSample } from './codex-compare.js';
 const HELP = `Uso: nexakit codex auditar [--project ruta] [--json]
      nexakit codex preparar [--salida carpeta] [--apply] [--json]
      nexakit codex consumo [--json]
+     nexakit codex recomendar --tarea texto [--json]
      nexakit codex hook
      nexakit codex ejecutar -- programa argumentos
      nexakit codex comparar --antes archivo --despues archivo [--json]\n`;
 const FLAGS = { auditar: { '--project': 'value', '--json': 'bool' },
   preparar: { '--salida': 'value', '--apply': 'bool', '--json': 'bool' },
-  consumo: { '--json': 'bool' }, hook: {}, comparar: { '--antes': 'value', '--despues': 'value', '--json': 'bool' } };
+  consumo: { '--json': 'bool' }, recomendar: { '--tarea': 'value', '--json': 'bool' }, hook: {}, comparar: { '--antes': 'value', '--despues': 'value', '--json': 'bool' } };
 function parse(command, argv) {
   if (!Object.hasOwn(FLAGS, command)) throw new Error('Uso inválido.');
   const result = {};
@@ -25,6 +26,7 @@ function parse(command, argv) {
     }
   }
   if (command === 'comparar' && (!result['--antes'] || !result['--despues'])) throw new Error('Faltan muestras.');
+  if (command === 'recomendar' && !result['--tarea']?.trim()) throw new Error('Falta la tarea.');
   return result;
 }
 async function readHookInput(input) {
@@ -70,6 +72,18 @@ function formatConsumption(report) {
     'Limitaciones:', ...report.limitations, ''].join('\n');
 }
 
+function formatRecommendation(report) {
+  return [report.message,
+    report.recommendation ? `Recomendación: ${report.recommendation.model}; esfuerzo: ${report.recommendation.effort ?? 'no fijado'}.` : 'Recomendación no disponible.',
+    `Configuración guardada: ${report.stored ? `${report.stored.model}; esfuerzo: ${report.stored.effort ?? 'no fijado'}` : 'no comprobable'}. No acredita el estado activo; consulta /status.`,
+    `Razón: ${report.reason}`,
+    `Fuente: ${report.source}`,
+    `Acción: ${report.action ?? 'sin acción'}`,
+    ...(report.delegate ? [`Subagente: ${report.delegate}`] : []),
+    ...(report.command ? [`Comando: ${report.command}`] : []),
+    'Sin cambios automáticos.', ''].join('\n');
+}
+
 export async function runCodexCommand(argv, io, options = {}) {
   const [command, ...rest] = argv;
   if (argv.length === 1 && ['--help', '-h'].includes(command)) { await io.out(HELP); return 0; }
@@ -86,7 +100,10 @@ export async function runCodexCommand(argv, io, options = {}) {
   if (command === 'hook') return hook(io, options);
   try {
     let report;
-    if (command === 'preparar') report = await prepareCodex({ ...options, outputDirectory: flags['--salida'], apply: Boolean(flags['--apply']) });
+    if (command === 'recomendar') {
+      const { recommendCodexTask } = await import('./codex-recommendation.js');
+      report = await recommendCodexTask(flags['--tarea'], { ...options, includeAntigravity: false });
+    } else if (command === 'preparar') report = await prepareCodex({ ...options, outputDirectory: flags['--salida'], apply: Boolean(flags['--apply']) });
     else if (command === 'comparar') {
       const before = await readCodexSample(flags['--antes']);
       const after = await readCodexSample(flags['--despues']);
@@ -99,7 +116,7 @@ export async function runCodexCommand(argv, io, options = {}) {
       report = summarizeCodexUsage(await readCodexUsage(options));
     }
     await io.out(flags['--json'] ? JSON.stringify(report) + '\n' :
-      command === 'comparar' ? formatComparison(report) : command === 'consumo' ? formatConsumption(report) : JSON.stringify(report, null, 2) + '\n');
+      command === 'recomendar' ? formatRecommendation(report) : command === 'comparar' ? formatComparison(report) : command === 'consumo' ? formatConsumption(report) : JSON.stringify(report, null, 2) + '\n');
     return 0;
   } catch {
     await io.err('No se pudo completar el comando Codex. Revisa formato, calidad, rutas y permisos.\n');

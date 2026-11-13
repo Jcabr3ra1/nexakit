@@ -12,7 +12,8 @@ export function buildCodexHookCommand({ executable = process.execPath,
   if (platform === 'win32') {
     // cmd expands percent variables and delayed ! expansions even inside quotes.
     if ([executable, entrypoint].some(value => /[%!"\r\n]/u.test(value))) throw new Error('Ruta incompatible con quoting seguro en Windows.');
-    return `""${executable}" "${entrypoint}" codex hook"`;
+    // Return shell command text; the runner owns cmd.exe's outer /s /c quotes.
+    return `"${executable}" "${entrypoint}" codex hook`;
   }
   const quote = value => `'${value.replaceAll("'", "'\\''")}'`;
   return `${quote(executable)} ${quote(entrypoint)} codex hook`;
@@ -47,10 +48,13 @@ export async function prepareCodex({ outputDirectory, apply = false, homeDirecto
     await assertNoSymlinkAncestors(destination);
   }
   const command = buildCodexHookCommand();
-  const events = ['PostModelRequest', 'SessionStart', 'PreCompact', 'PostCompact'];
-  const config = 'tool_output_token_limit = 4000\n\n[skills]\nmax_context_tokens = 2000\n\n[agents]\nmax_concurrent_threads_per_session = 2\n';
+  const events = ['PostModelRequest', 'SessionStart', 'PreCompact', 'PostCompact', 'UserPromptSubmit'];
+  const statusLine = ['model-with-reasoning', 'context-remaining', 'five-hour-limit', 'weekly-limit',
+    'total-input-tokens', 'total-output-tokens', 'git-branch'];
+  const config = 'tool_output_token_limit = 4000\n\n[skills]\nmax_context_tokens = 2000\n\n[agents]\nmax_concurrent_threads_per_session = 2\n'
+    + `\n[tui]\nstatus_line = ${JSON.stringify(statusLine)}\n`;
   const hooks = { hooks: Object.fromEntries(events.map(event => [event, [{ hooks: [{ type: 'command', command }] }]])) };
-  const readme = `# Paquete Codex: activación manual\n\nVista previa de configuración; no se activa automáticamente.\nRevisa y fusiona config.toml y hooks.json manualmente en tu CODEX_HOME.\nVerifica primero que tu versión de Codex admite estos eventos y claves.\nConfía los hooks con el flujo normal del cliente; no omitas sus confirmaciones.\nNo se garantiza compatibilidad de todos los clientes ni se cambian modelos.\nUserPromptSubmit se omite: no se ha confirmado soporte del módulo.\nEl comando del hook usa rutas absolutas: regenera el paquete si mueves NexaKit o Node.\n\nCompara muestras JSON con task, quality: { passed: true } y measurements\n(normalizeMeasurement: id, agent, phase, model, source y contadores).\nSolo se calculan porcentajes con cobertura completa y procedencia comparable.\n`;
+  const readme = `# Paquete Codex: activación manual\n\nVista previa de configuración; no se activa automáticamente.\nRevisa y fusiona config.toml y hooks.json manualmente en tu CODEX_HOME.\nVerifica primero que tu versión de Codex admite estos eventos y claves.\nConfía los hooks mediante /hooks; no omitas sus confirmaciones.\nNo se garantiza compatibilidad de todos los clientes ni se cambian modelos.\nLa barra nativa muestra modelo/esfuerzo, contexto, límites y tokens cuando están disponibles.\nUsa /statusline para ordenar campos; en terminales estrechas Codex recorta los últimos.\nUserPromptSubmit recomienda localmente según la tarea mediante avisos; no cambia el modelo.\nUsa /model para aplicar una recomendación y /status para verificar el estado activo.\nEl comando del hook usa rutas absolutas: regenera el paquete si mueves NexaKit o Node.\n\nCompara muestras JSON con task, quality: { passed: true } y measurements\n(normalizeMeasurement: id, agent, phase, model, source y contadores).\nSolo se calculan porcentajes con cobertura completa y procedencia comparable.\n`;
   const files = { 'config.toml': config, 'hooks.json': JSON.stringify(hooks, null, 2) + '\n', 'README.md': readme };
   if (apply) {
     // mkdir is exclusive; no recursive creation and no overwrites of an existing destination.

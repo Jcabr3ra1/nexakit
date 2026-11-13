@@ -178,6 +178,9 @@ test('session hook emits bounded additionalContext guidance without storing payl
   assert.ok(JSON.stringify(response).length < 1200);
   assert.equal(JSON.stringify(response).includes('PRIVATE'), false);
   assert.match(response.hookSpecificOutput.additionalContext, /nexakit codex ejecutar/u);
+  for (const command of ['/statusline', '/model', '/status']) {
+    assert.ok(response.hookSpecificOutput.additionalContext.includes(command));
+  }
   assert.deepEqual(await readCodexUsage(options), []);
 });
 
@@ -195,9 +198,38 @@ test('compact hooks use only common output fields and preserve authorization to 
 test('prompt hook never infers context occupancy from tokens or previous requests', async (t) => {
   const options = fixture(t);
   await recordCodexUsage(event({ token_usage: { input_tokens: 2000000 } }), options);
-  for (const payload of [{ hook_event_name: 'UserPromptSubmit', prompt: 'PRIVATE' }, { hook_event_name: 'UserPromptSubmit', total_tokens: 2000000 }, { hook_event_name: 'Other' }]) {
+  for (const payload of [{ hook_event_name: 'UserPromptSubmit', prompt: '' }, { hook_event_name: 'UserPromptSubmit', total_tokens: 2000000 }, { hook_event_name: 'Other' }]) {
     assert.deepEqual(await runCodexHook(payload, options), {});
   }
+});
+
+test('prompt hook shows one private recommendation using local catalog without changing files', async (t) => {
+  const options = { ...fixture(t), includeAntigravity: false };
+  options.environment = { CODEX_HOME: options.codexHome, CLAUDE_CONFIG_DIR: path.join(options.homeDirectory, 'claude') };
+  fs.mkdirSync(options.codexHome);
+  const config = 'model = "diario"\nmodel_reasoning_effort = "medium"\n';
+  fs.writeFileSync(path.join(options.codexHome, 'config.toml'), config);
+  const catalog = JSON.stringify({ models: [
+    { slug: 'diario', description: 'Latest workhorse model for coding', priority: 0, default_reasoning_level: 'medium',
+      supported_reasoning_levels: ['low', 'medium', 'high'].map(effort => ({ effort })) },
+    { slug: 'frontera', description: 'Frontier intelligence for the most demanding work', priority: 1, default_reasoning_level: 'high',
+      supported_reasoning_levels: ['medium', 'high', 'xhigh'].map(effort => ({ effort })) },
+  ] });
+  fs.writeFileSync(path.join(options.codexHome, 'models_cache.json'), catalog);
+  const response = await runCodexHook({ hook_event_name: 'UserPromptSubmit', prompt: 'Investiga una vulnerabilidad de seguridad sutil en autenticación PRIVADO' }, options);
+  assert.deepEqual(Object.keys(response), ['systemMessage']);
+  assert.equal(typeof response.systemMessage, 'string');
+  assert.ok(response.systemMessage.length > 0 && response.systemMessage.length <= 500);
+  assert.match(response.systemMessage, /frontera/);
+  assert.match(response.systemMessage, /nivel_alto/);
+  assert.doesNotMatch(response.systemMessage, /PRIVADO|ocupación|2000000/u);
+  for (const prompt of [undefined, '', '  ', 'ok', 'sí', 'gracias']) {
+    assert.deepEqual(await runCodexHook({ hook_event_name: 'UserPromptSubmit', prompt }, options), {});
+  }
+  assert.deepEqual(fs.readdirSync(options.homeDirectory), ['custom-codex']);
+  assert.deepEqual(fs.readdirSync(options.codexHome).sort(), ['config.toml', 'models_cache.json']);
+  assert.equal(fs.readFileSync(path.join(options.codexHome, 'config.toml'), 'utf8'), config);
+  assert.equal(fs.readFileSync(path.join(options.codexHome, 'models_cache.json'), 'utf8'), catalog);
 });
 
 test('invalid and unwritable hook payloads fail open with a generic private diagnostic', async (t) => {

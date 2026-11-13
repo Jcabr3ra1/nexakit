@@ -36,8 +36,8 @@ ni los hooks existentes. Revisa y combina los fragmentos con tu configuración;
 Codex requiere confiar en los hooks antes de ejecutarlos. No uses opciones que
 salten esa revisión. Respeta `CODEX_HOME` cuando la instalación lo personaliza.
 
-El paquete incluye un observador `PostModelRequest` y orientación breve de
-sesión/compactación. El observador guarda solo metadatos seleccionados y
+El paquete incluye un observador `PostModelRequest`, recomendaciones mediante
+`UserPromptSubmit` y orientación breve de sesión/compactación. El observador guarda solo metadatos seleccionados y
 contadores disponibles. No guarda prompts, argumentos de herramientas,
 transcripciones ni mensajes de error del proveedor. Un contador ausente sigue
 siendo desconocido. Su cobertura depende de que el cliente emita esos eventos.
@@ -45,6 +45,38 @@ siendo desconocido. Su cobertura depende de que el cliente emita esos eventos.
 Las configuraciones gestionadas y la orquestación en la nube pueden tener
 soporte diferente. Probar el comando con un fixture no demuestra que una sesión
 abierta haya cargado el hook.
+
+## Barra y recomendaciones en Codex de terminal
+
+La configuración preparada incluye la barra nativa con modelo y esfuerzo,
+contexto restante, límites de 5 horas y semanal, tokens de entrada y salida y
+rama Git. Codex omite los datos que no estén disponibles. En terminales
+estrechas recorta los últimos campos: usa `/statusline` para elegir el orden.
+Estos datos vienen del cliente, no de estimaciones de NexaKit.
+
+Al **enviar** un mensaje sustantivo aparece un aviso breve con la recomendación
+local de NexaKit: modelo, esfuerzo, razón y comando `/model`, o delegación a un
+nivel. No aparece mientras escribes y no es texto insertado en el pie de la
+barra. Confirmaciones como «sí» y «listo» quedan en silencio.
+
+```sh
+node bin/nexakit.js codex recomendar --tarea "Escribe pruebas para el parser"
+node bin/nexakit.js codex recomendar --tarea "Ejecuta las pruebas" --json
+```
+
+El recomendador lee el catálogo local que Codex ya descargó. Clasifica la tarea
+con reglas locales; no consulta otro modelo ni gasta cuota para recomendar.
+Si falta un modelo o esfuerzo soportado, lo informa. La configuración guardada
+se etiqueta como tal: solo la barra y `/status` acreditan lo activo en la sesión.
+
+Para aplicar una sugerencia usa el comando mostrado, por ejemplo
+`/model <modelo-disponible> --reasoning=<esfuerzo-soportado>`. NexaKit nunca lo
+ejecuta por ti. Para trabajos mecánicos puede recomendar un subagente ligero
+manteniendo el modelo principal; por eso seguir viendo Sol no demuestra que
+todos los subagentes estén usando Sol.
+
+Tras combinar la configuración, abre Codex y confía los cinco hooks con
+`/hooks`. Si no confías `UserPromptSubmit`, no aparecerán las recomendaciones.
 
 ## Ejecutar comandos con salida acotada
 
