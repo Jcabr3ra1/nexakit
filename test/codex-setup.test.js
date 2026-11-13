@@ -22,16 +22,16 @@ test('preview is immutable and apply requires explicit new directory', async t =
   assert.equal(result.applied, true);
   assert.deepEqual((await fs.readdir(outputDirectory)).sort(), ['README.md', 'config.toml', 'hooks.json']);
   const config = await fs.readFile(path.join(outputDirectory, 'config.toml'), 'utf8');
-  assert.match(config, /max_context_tokens = 2000/);
   assert.match(config, /tool_output_token_limit = 4000/);
   assert.match(config, /max_concurrent_threads_per_session = 2/);
   const settings = getStaticTOMLValue(parseTOML(config));
+  assert.equal(Object.hasOwn(settings, 'skills'), false);
   assert.equal(Object.hasOwn(settings, 'model'), false);
   assert.equal(Object.hasOwn(settings, 'model_reasoning_effort'), false);
   assert.deepEqual(settings.tui.status_line, ['model-with-reasoning', 'context-remaining',
     'five-hour-limit', 'weekly-limit', 'total-input-tokens', 'total-output-tokens', 'git-branch']);
   const hooks = JSON.parse(await fs.readFile(path.join(outputDirectory, 'hooks.json'), 'utf8'));
-  assert.deepEqual(Object.keys(hooks.hooks).sort(), ['PostCompact', 'PostModelRequest', 'PreCompact', 'SessionStart', 'UserPromptSubmit'].sort());
+  assert.deepEqual(Object.keys(hooks.hooks).sort(), ['PostCompact', 'PostModelRequest', 'PreCompact', 'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'SubagentStart', 'SubagentStop'].sort());
   assert.match(await fs.readFile(path.join(outputDirectory, 'README.md'), 'utf8'), /manual/i);
   if (process.platform !== 'win32') {
     assert.equal((await fs.stat(outputDirectory)).mode & 0o777, 0o700);

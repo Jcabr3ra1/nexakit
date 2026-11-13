@@ -28,6 +28,7 @@ Para una reorganización, utiliza la skill
 - [Tu primera prueba con Agent Toolkit](guias/primeros-pasos.md)
 - [Instalación, consumo y recuperación](guias/consolidacion.md)
 - [Ahorro y consumo en Codex](guias/codex-ahorro.md)
+- [Equipo de agentes en Codex](guias/codex-agentes.md)
 - [Guía de uso de Agent Toolkit](guias/uso.md)
 
 ## Memoria de proyectos

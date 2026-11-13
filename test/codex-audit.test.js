@@ -15,13 +15,18 @@ async function fixture(t) {
   return { root, options, put, skill, auditCodex };
 }
 
-test('missing inputs produce serializable diagnostics and fixed proposals', async t => {
+test('missing inputs produce serializable diagnostics without a fixed skills budget', async t => {
   const { options, auditCodex } = await fixture(t);
   const report = await auditCodex(options);
   assert.deepEqual(report.settings, {});
   assert.equal(report.summary.skills, 0);
   assert.ok(report.findings.some(f => f.code === 'CONFIG_MISSING'));
-  assert.ok(report.recommendations.some(r => r.setting === 'skills.max_context_tokens' && r.proposedValue === 2000 && r.officialDefault === false));
+  const catalogBudget = report.recommendations.find(r => r.setting === 'skills.max_context_tokens');
+  assert.ok(catalogBudget);
+  assert.equal(Object.hasOwn(catalogBudget, 'proposedValue'), false);
+  assert.match(catalogBudget.message, /presupuesto nativo/i);
+  assert.match(catalogBudget.message, /advertencias|descripciones/i);
+  assert.match(catalogBudget.message, /omisiones/i);
   assert.ok(report.recommendations.some(r => r.setting === 'tool_output_token_limit' && r.proposedValue === 4000));
   assert.doesNotThrow(() => JSON.stringify(report));
 });
