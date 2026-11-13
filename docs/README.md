@@ -27,6 +27,7 @@ Para una reorganización, utiliza la skill
 - [Herramientas de Gemini](guias/herramientas-gemini.md)
 - [Tu primera prueba con Agent Toolkit](guias/primeros-pasos.md)
 - [Instalación, consumo y recuperación](guias/consolidacion.md)
+- [Ahorro y consumo en Codex](guias/codex-ahorro.md)
 - [Guía de uso de Agent Toolkit](guias/uso.md)
 
 ## Memoria de proyectos

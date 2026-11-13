@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { agentModels } from "./agent-models.js";
 
-// Codex has no plugins, so its level agents are files. Claude's come from the `niveles` plugin.
+// Codex level agents use local TOML files; Claude's come from the `niveles` plugin.
 // The top level is "alto"; xhigh is asked per spawn, only after high failed.
 const LEVELS = [["Ligero", "ligero"], ["Normal", "normal"], ["Exigente", "exigente"], ["Alto", "alto"]];
 const USES = { ligero: "comandos, búsquedas, lecturas y cambios mecánicos", normal: "implementar con un diseño claro", exigente: "pruebas, casos borde o un fallo acotado", alto: "un fallo sutil, seguridad o lo que exigente no resolvió" };

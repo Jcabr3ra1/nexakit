@@ -52,7 +52,7 @@ export async function runAhorroCommand(argv, { out, err }, options = {}) {
   }
   if (registros.length === 0) {
     await out(
-      'Aún no hay recortes registrados. El registro lo escribe el mod nexakit-ahorro cuando recorta una salida larga de Bash.\n',
+      'Aún no hay recortes registrados. Los escriben el mod nexakit-ahorro de Claude y nexakit codex ejecutar al recortar salidas largas.\n',
     );
     return 0;
   }
