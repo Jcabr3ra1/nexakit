@@ -1,6 +1,6 @@
 {
   "name": "nexakit",
-  "version": "0.8.3",
+  "version": "0.9.0",
   "description": "Asistente por pasos de skills verificadas por SHA-256, coordinación entre agentes y memoria por proyecto para Claude Code y Codex.",
   "type": "module",
   "bin": {
