@@ -74,6 +74,7 @@
     "scripts/validate-skill-catalog.js"
   ],
   "devDependencies": {
+    "@types/node": "^24.19.2",
     "typescript": "^7.0.2"
   }
 }

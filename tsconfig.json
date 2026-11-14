@@ -9,7 +9,8 @@
     "rootDir": "src/fabrica",
     "outDir": "dist/fabrica",
     "declaration": false,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "types": ["node"]
   },
   "include": ["src/fabrica/**/*.ts"]
 }
