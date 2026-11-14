@@ -14,11 +14,14 @@
     "agent-toolkit-gemini": "bin/agent-toolkit-gemini.js"
   },
   "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pretest": "npm run build",
     "test": "node --test --import ./test-support/git-quiet.js \"test/*.test.js\"",
     "catalog:validate": "node scripts/validate-skill-catalog.js",
     "catalog:files": "node scripts/validate-skill-catalog.js --files",
     "catalog:add": "node scripts/add-catalog-skill.js",
-    "prepack": "node scripts/prepare-package.js",
+    "prepack": "npm run build && node scripts/prepare-package.js",
     "test:mod": "claude plugin test plugins/nexakit-modelo",
     "plugins:huellas": "node scripts/plugin-huellas.js"
   },
@@ -54,6 +57,7 @@
   "files": [
     "bin/",
     "src/",
+    "dist/",
     "skills/",
     "catalogs/",
     "agents/",
@@ -68,5 +72,8 @@
     "assets/runtime/",
     "scripts/prepare-package.js",
     "scripts/validate-skill-catalog.js"
-  ]
+  ],
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
 }

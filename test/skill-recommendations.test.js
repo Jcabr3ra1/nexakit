@@ -53,7 +53,7 @@ test('Node-only and Node+MCP fixtures do not invent frontend, HTTP frameworks or
 
   // Inspecting Agent Toolkit itself detects Node.js and MCP SDK without inventing React/Next/Hono
   const toolkitInspection = await inspectSkillProject(TOOLKIT_ROOT, { toolkitRoot: TOOLKIT_ROOT });
-  assert.deepEqual(toolkitInspection.signals.map(s => s.id).sort(), ['mcp-sdk', 'nodejs']);
+  assert.deepEqual(toolkitInspection.signals.map(s => s.id).sort(), ['mcp-sdk', 'nodejs', 'typescript']);
   const toolkitRec = recommendSkills({ catalog, inspection: toolkitInspection });
   assert.equal(toolkitRec.recommended.length, 0);
   assert.deepEqual(toolkitRec.candidates.map(c => c.name), ['mcp-builder']);

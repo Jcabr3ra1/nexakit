@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "erasableSyntaxOnly": true,
+    "noUncheckedIndexedAccess": true,
+    "rootDir": "src/fabrica",
+    "outDir": "dist/fabrica",
+    "declaration": false,
+    "skipLibCheck": true
+  },
+  "include": ["src/fabrica/**/*.ts"]
+}
