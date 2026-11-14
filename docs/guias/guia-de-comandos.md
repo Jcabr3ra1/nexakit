@@ -199,10 +199,15 @@ Conviene delegar solo cuando la tarea lee mucho o devuelve mucho ruido: lanzar u
 | `node bin/agent-toolkit-inbox.js avisar --project-root /ruta --task <id> --review <id>` | Avisa a Codex de un encargo ya aprobado. Lo ejecuta la skill, no tú. |
 | `node bin/agent-toolkit-inbox.js cierre --project-root /ruta --task <id> --salida /ruta/traspaso.md` | Cierra una colaboración y deja un borrador de traspaso. Exige que no haya encargos activos. |
 
-### Gemini (opcional, requiere agy) (`agent-toolkit-gemini`)
+### Gemini (opcional, requiere agy) (`agent-toolkit-gemini` y barra `agy`)
 
 | Comando | Para qué |
 | --- | --- |
+| `nexakit antigravity preparar [--salida carpeta] [--apply]` | Genera un plugin válido de Antigravity CLI (`plugin.json`, `hooks.json`, los 10 `agents/*.md`, `settings.statusline.json` y `README.md`) con barra `statusLine`, `guardarrailes`, `ahorro`, `lecciones`, avisos de sesión y comando directo para `/statusline`. |
+| `nexakit antigravity agentes [--proyecto] [--salida carpeta] [--apply] [--actualizar]` | Previsualiza, instala o actualiza con respaldo `.bak` los 10 agentes por nivel y especialistas para `agy` (`flash_lite`, `flash`, `pro`). |
+| `nexakit antigravity barra [--sin-color] [--json]` | Renderiza la barra `statusLine` de `agy` (modelo, esfuerzo, recomendación, caché si está disponible, contexto, cuota con hora de reinicio desde el 60 % y subagentes activos). |
+| `nexakit antigravity recomendar --tarea "..." [--json]` | Recomienda nivel y familia de modelo Antigravity de forma local sin cambios automáticos. |
+| `nexakit antigravity ejecutar -- <programa> [args...]` | Ejecuta el comando conservando el código de salida y compacta salidas largas en `~/.nexakit/ahorro.jsonl`. |
 | `node bin/agent-toolkit-gemini.js estado` | Versión de `agy` y modelos disponibles. |
 | `node bin/agent-toolkit-gemini.js consultar --prompt "tu pregunta"` | Una explicación o respuesta directa. |
 | `node bin/agent-toolkit-gemini.js investigar --prompt "tu pregunta"` | Búsqueda web con resumen y fuentes. |
