@@ -1,0 +1,27 @@
+{
+  "seguridad": [
+    { "ia": "codex", "modelo": "gpt-6.1-sol", "esfuerzo": "high" },
+    { "ia": "codex", "modelo": "gpt-6-sol", "esfuerzo": "high" }
+  ],
+  "arquitectura": [
+    { "ia": "antigravity", "modelo": "gemini-4-argon-high", "esfuerzo": null },
+    { "ia": "codex", "modelo": "gpt-6.1-sol", "esfuerzo": "high" }
+  ],
+  "pruebas": [
+    { "ia": "codex", "modelo": "gpt-6.1-terra", "esfuerzo": "medium" }
+  ],
+  "codigo": [
+    { "ia": "claude", "modelo": "revisor-de-calidad", "esfuerzo": null }
+  ],
+  "interfaz": [
+    { "ia": "claude", "modelo": "impeccable-finish-reviewer", "esfuerzo": null },
+    { "ia": "antigravity", "modelo": "gemini-4-hydrogen-high", "esfuerzo": null }
+  ],
+  "rendimiento": [
+    { "ia": "antigravity", "modelo": "gemini-4-hydrogen-high", "esfuerzo": null }
+  ],
+  "documentacion": [
+    { "ia": "antigravity", "modelo": "gemini-3.8-flash-medium", "esfuerzo": null },
+    { "ia": "codex", "modelo": "gpt-6-luna", "esfuerzo": "medium" }
+  ]
+}

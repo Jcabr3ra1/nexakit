@@ -6,6 +6,7 @@
     "strict": true,
     "erasableSyntaxOnly": true,
     "noUncheckedIndexedAccess": true,
+    "resolveJsonModule": true,
     "rootDir": "src/fabrica",
     "outDir": "dist/fabrica",
     "declaration": false,
