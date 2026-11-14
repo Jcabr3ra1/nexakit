@@ -13,8 +13,8 @@ const NODE_VALUES = new Map([
   ['--test-skip-pattern', /^[A-Za-z0-9_./:@%+=,-]+$/u],
 ]);
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
-export const quoteShell = token => `'${token.replaceAll("'", "'\"'\"'")}'`;
-export const safeAbsolutePath = value => typeof value === 'string' && posix.isAbsolute(value) &&
+const quoteShell = token => `'${token.replaceAll("'", "'\"'\"'")}'`;
+const safeAbsolutePath = value => typeof value === 'string' && posix.isAbsolute(value) &&
   value.length <= 4096 && !/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u.test(value);
 
 function nodeTests(argv) {
@@ -36,7 +36,7 @@ function nodeTests(argv) {
   return true;
 }
 
-export function approvedOutputCommand(argv) {
+function approvedOutputCommand(argv) {
   // Conservative bypass: preserve interactive and structured-output commands intact.
   if (argv.some(token => /watch|inspect|interactive|tty|background/iu.test(token) ||
       /^(?:-w|-i|-t|-it|-ti|--ui|--open|--debug)(?:=|$)/u.test(token) ||

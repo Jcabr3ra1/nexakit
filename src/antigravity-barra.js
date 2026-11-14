@@ -1,4 +1,4 @@
-import { etiquetaDeAgente, formatoReinicio, medidor, tono } from '../plugins/nexakit-modelo/hooks/barra.js';
+import { etiquetaDeAgente, formatoReinicio, medidor, tono, tonoCache } from '../plugins/nexakit-modelo/hooks/barra.js';
 import { LIMITE_ALTO } from '../plugins/nexakit-modelo/hooks/decidir.js';
 import { parseAntigravityModel } from './antigravity-recommendation.js';
 
@@ -28,7 +28,6 @@ const ANSI = Object.freeze({
 
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
 const clampPercent = (v) => Math.min(100, Math.max(0, v));
-const tonoCache = (p) => (p >= 80 ? 'success' : p >= 50 ? 'warning' : 'error');
 const fitText = (text, width) => (text.length > width ? `${text.slice(0, width - 1)}…` : text.padEnd(width));
 
 /** Extract highest active quota bucket usage percentage and ISO reset timestamp. */

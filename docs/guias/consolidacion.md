@@ -31,7 +31,8 @@ los perfiles que encuentra y avisa de que no los evaluó.
 Que algo esté configurado no demuestra que una sesión nueva lo haya cargado.
 Superpowers es obligatorio: `npx nexakit` lo instala o activa con el gestor de
 plugins de cada IA, y `doctor` informa su estado por IA. Para agentes por nivel, usa
-`agent-toolkit-inbox agentes` y la guía de revisión cruzada.
+`agent-toolkit-inbox agentes`. La revisión por otra IA es opcional: solo con `/revisar`
+o si la pides.
 
 ## Medir sin inventar ahorro
 
@@ -170,7 +171,7 @@ separados para código, commits, publicación y sincronización. Un registro blo
 permanece pendiente; se retiró el antiguo fallback de marcarlo manualmente como
 revisado. También hay un flujo para eventos estables sin PR ni automatización.
 
-La plantilla de memoria nueva y la revisión cruzada remiten al cierre global.
+La plantilla de memoria nueva y la revisión por otra IA (opcional, con `/revisar`) remiten al cierre global.
 `cerrar-avisens` conserva compatibilidad como alias del mismo flujo. Esta mejora
 no actualiza notas de las bóvedas reales ni modifica sus reglas de proyecto.
 

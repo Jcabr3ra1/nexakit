@@ -34,7 +34,7 @@ const FAMILY_ROLES = Object.freeze({
   opus: "el más capaz"
 });
 
-export function roleFromDescription(description = "") {
+function roleFromDescription(description = "") {
   if (/\b(fast and (affordable|efficient)|easier tasks|lightweight)\b/iu.test(description)) return "ligero";
   if (/\b(frontier|most demanding)\b/iu.test(description)) return "el más capaz";
   if (/\b(workhorse|everyday|balanced|straightforward work)\b/iu.test(description)) return "uso diario";
@@ -49,7 +49,7 @@ export function familyOfModel(slug = "") {
   return family ? family[1].toLowerCase() : null;
 }
 
-export function classifyModelRole(slug = "", description = "", familyRoles = new Map(Object.entries(FAMILY_ROLES))) {
+function classifyModelRole(slug = "", description = "", familyRoles = new Map(Object.entries(FAMILY_ROLES))) {
   if (/\b(older|previous)\b/iu.test(description)) return "anterior";
   const direct = roleFromDescription(description);
   if (direct) return direct;
@@ -58,7 +58,7 @@ export function classifyModelRole(slug = "", description = "", familyRoles = new
   return "sin clasificar";
 }
 
-export function buildFamilyRoleMap(items = []) {
+function buildFamilyRoleMap(items = []) {
   const map = new Map(Object.entries(FAMILY_ROLES));
   for (const item of items) {
     const family = familyOfModel(item.slug ?? item.model ?? "");

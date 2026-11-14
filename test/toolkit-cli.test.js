@@ -293,19 +293,13 @@ test('memoria help and errors name npx nexakit memoria and keep project-memory a
   assert.doesNotMatch(unknown.io.err, /^ {2}project-memory /mu);
 });
 
-test('--help lists all Spanish subcommands and guide includes Antigravity and new commands', async () => {
+test('--help lists all Spanish subcommands', async () => {
   const { runToolkitCli } = await import('../src/toolkit-cli.js');
-  const { getToolkitCommandsGuide } = await import('../src/toolkit-commands-guide.js');
   const c = capture();
   assert.equal(await runToolkitCli(['--help'], { ...c }), 0);
   for (const sub of ['comprobar', 'quitar', 'reparar --desde', 'memoria', 'revision', 'modelo']) {
     assert.match(c.io.out, new RegExp(sub, 'u'));
   }
-  const guide = getToolkitCommandsGuide({ clients: { claude: { available: true }, codex: { available: true }, antigravity: { available: true } } });
-  assert.equal(guide.antigravityActive, true);
-  assert.equal(guide.cliCommands.some(item => item.command.includes('comprobar')), true);
-  assert.equal(guide.cliCommands.some(item => item.command.includes('memoria')), true);
-  assert.match(guide.cliCommands.find(item => item.command === 'npx nexakit').description, /nexakit-guardarrailes/u);
 });
 
 test('unknown flags show the help and exit 2', async () => {

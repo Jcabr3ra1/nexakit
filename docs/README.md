@@ -47,27 +47,6 @@ Para una reorganización, utiliza la skill
 - [Project Memory Sync](memoria/project-memory-sync.md)
 - [Sistema de memorias de proyecto](memoria/project-memory-system.md)
 
-## Clientes de IA
-
-- [Adaptadores locales de clientes de IA](agentes/clientes/agent-client-adapters.md)
-- [AD — Diagnóstico de autenticación sin inferencia](agentes/clientes/agent-client-auth-diagnostic.md)
-- [IA-2-N0 — Viabilidad previa sin arrancar el cliente](agentes/clientes/agent-client-isolated-native-feasibility.md)
-- [IA-1 — Base offline de una variante textual aislada](agentes/clientes/agent-client-isolated-variant.md)
-- [IA-2 — Plan de verificación de la variante aislada](agentes/clientes/agent-client-isolated-verification-plan.md)
-- [N1-I — Invocación controlada del helper](agentes/clientes/agent-client-managed-preferences-invocation.md)
-- [N1 — Consulta selectiva de preferencias macOS](agentes/clientes/agent-client-managed-preferences-plan.md)
-- [C3.1 — Expediente de evaluación de clientes nativos](agentes/clientes/agent-client-native-evaluation.md)
-- [C3.1b — Primer lote de inspección de Claude](agentes/clientes/agent-client-native-inspection-plan.md)
-- [C3.1c — Procedencia y viabilidad del primer cliente](agentes/clientes/agent-client-native-provenance-plan.md)
-- [Interpretación offline de salidas de clientes](agentes/clientes/agent-client-output.md)
-- [C2: reservas persistentes y supervisión local](agentes/clientes/agent-client-runtime-local.md)
-- [Admisión y ejecución controlada de clientes](agentes/clientes/agent-client-runtime.md)
-- [SC-1 — Proyección selectiva de configuración local](agentes/clientes/agent-client-selective-config.md)
-- [S2 — Registro y supervisión local con procesos ficticios](agentes/clientes/agent-client-supervised-local.md)
-- [S3 — Preparación del primer piloto nativo por suscripción](agentes/clientes/agent-client-supervised-native.md)
-- [S3.2 — Revisión previa de acceso, controles y economía](agentes/clientes/agent-client-supervised-preflight.md)
-- [S1 — Participación textual supervisada por suscripción](agentes/clientes/agent-client-supervised-subscription.md)
-
 ## Modelos
 
 - [Evaluación inicial de modelos por rol](agentes/modelos/agent-model-evaluation.md)
@@ -79,7 +58,6 @@ Para una reorganización, utiliza la skill
 
 ## Coordinación y encargos
 
-- [Aprobaciones declaradas por encargo (RA-A)](agentes/coordinacion/agent-task-approvals.md)
 - [Verificador externo](agentes/coordinacion/agent-task-external-verifier.md)
 - [TP — Preparar un encargo manual desde el selector](agentes/coordinacion/agent-task-prepare.md)
 - [TV-1 — Comprobar huellas y alcance de una entrega manual](agentes/coordinacion/agent-task-verify.md)

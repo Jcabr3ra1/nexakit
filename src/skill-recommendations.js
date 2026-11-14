@@ -30,7 +30,7 @@ const COARSE_STATE = Object.freeze({
   'otra-copia': 'installed', conflicto: 'conflict', 'roto-ajeno': 'conflict'
 });
 
-export const PROJECT_TOOLKIT_DIR = '.agent-toolkit';
+const PROJECT_TOOLKIT_DIR = '.agent-toolkit';
 const PROJECT_MANIFEST_FILE = 'manifest.json';
 const PROJECT_LOCKFILE_NAME = 'skills-lock.json';
 const IGNORE_BLOCK_START = '# >>> agent-toolkit (managed) >>>';
@@ -220,7 +220,7 @@ export async function inspectSkillProject(projectRoot, { client, toolkitRoot = T
   };
 }
 
-export function upsertManagedIgnoreBlock(existingContent, relativePaths) {
+function upsertManagedIgnoreBlock(existingContent, relativePaths) {
   const normalized = (existingContent ?? '').replace(/\r\n/gu, '\n');
   const uniquePaths = ['.agent-toolkit/', ...new Set(relativePaths.map(p => p.replaceAll('\\', '/')))];
   const block = [IGNORE_BLOCK_START, ...uniquePaths, IGNORE_BLOCK_END].join('\n');
@@ -240,7 +240,7 @@ export function upsertManagedIgnoreBlock(existingContent, relativePaths) {
   return `${trimmedEnd}\n\n${block}\n`;
 }
 
-export function removeManagedIgnoreBlock(existingContent) {
+function removeManagedIgnoreBlock(existingContent) {
   const normalized = (existingContent ?? '').replace(/\r\n/gu, '\n');
   const startIdx = normalized.indexOf(IGNORE_BLOCK_START);
   const endIdx = startIdx >= 0 ? normalized.indexOf(IGNORE_BLOCK_END, startIdx) : -1;
@@ -1130,14 +1130,6 @@ async function applyProjectSkillInstallLocked(plan, { registryEntries, lock, wri
       (plan.lockfileConflict ? 1 : 0) +
       (plan.gitIgnoreConflict ? 1 : 0)
   };
-}
-
-export async function planProjectSkillLinks(options = {}) {
-  return planProjectSkillInstall({ ...options, mode: 'symlink' });
-}
-
-export async function applyProjectSkillLinks(plan) {
-  return applyProjectSkillInstall({ ...plan, mode: 'symlink' });
 }
 
 // The answers given to `npx nexakit` (skills chosen and discarded, agents, memory), kept in the project manifest

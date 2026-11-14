@@ -1,8 +1,7 @@
 import { inspectModels } from './model-command.js';
-import { recomendarPorTexto } from '../plugins/nexakit-modelo/hooks/recomendar.js';
+import { CONFIRMACION as CONFIRMATION, recomendarPorTexto } from '../plugins/nexakit-modelo/hooks/recomendar.js';
 
 const ROLES = { haiku: 'ligero', sonnet: 'uso diario', opus: 'el más capaz' };
-const CONFIRMATION = /^(?:¡?)(?:s[ií]|ok|okay|dale|listo|vale|perfecto|bien|contin[uú]a|sigue|hazlo|adelante|gracias|de una|claro|no)(?:[\s.!,¡]+(?:s[ií]|ok|okay|dale|listo|vale|perfecto|bien|contin[uú]a|sigue|hazlo|adelante|gracias|de una|claro|no))*[\s.!,]*$/iu;
 const validModel = (value) => typeof value === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/u.test(value)
   && !/(?:claude|haiku|sonnet|opus)/iu.test(value);
 const validEffort = (value) => typeof value === 'string' && /^[a-z][a-z0-9_-]{0,23}$/u.test(value);

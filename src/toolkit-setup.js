@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { shellQuote as quote } from './shell-quote.js';
 import { parseTOML, getStaticTOMLValue } from 'toml-eslint-parser';
 import { IS_WINDOWS } from './platform.js';
 import { acquireLock } from './install-lock.js';
@@ -60,7 +61,6 @@ async function clientsFor(agent, environment, home) {
     Boolean(await stat(path.join(home, '.gemini', 'antigravity-cli')));
   return antigravity ? ['codex', 'claude', 'antigravity'] : ['codex', 'claude'];
 }
-const quote = (value) => "'" + value.replaceAll("'", "'\\''") + "'";
 const stat = (file) =>
   fs.lstat(file).catch((e) => {
     if (e.code === 'ENOENT') return null;

@@ -196,7 +196,6 @@ localTest("TP real local bin uses only fictitious inputs and preserves memory CL
     "@modelcontextprotocol/server": "^2.4.0",
     "@modelcontextprotocol/server-filesystem": "2.3.0",
     ajv: "^8.17.1",
-    "eslint-visitor-keys": "5.0.1",
     "toml-eslint-parser": "1.0.3",
     zod: "^4.6.7"
   });

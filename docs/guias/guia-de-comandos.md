@@ -24,10 +24,10 @@ Opcionales:
 
 | Herramienta | Para qué | Comprueba con |
 | --- | --- | --- |
-| Antigravity CLI (agy) | Solo para la skill gemini (investigar, analizar, imágenes) | `agy --version` |
+| Antigravity CLI (agy) | Barra, agentes y hooks de Antigravity; también las skills gemini (investigar, analizar, imágenes) | `agy --version` |
 | GitHub CLI (gh) | Solo para actualizar la memoria con project-memory sync | `gh --version` |
 
-Necesitas la sesión iniciada en Claude Code y en Codex. La revisión cruzada necesita los dos.
+Necesitas la sesión iniciada en el cliente con el que trabajes. La revisión por otra IA es opcional y puede hacerla Codex, Claude o Antigravity.
 
 ## Instalar (una sola vez)
 
@@ -281,7 +281,7 @@ Límites que conviene recordar:
 - El esfuerzo de un agente lo fija su archivo, pero una variable como `CLAUDE_CODE_EFFORT_LEVEL` puede imponerse. El modelo sí se comprobó.
 - El aviso directo a Codex se probó contra una sesión inactiva, no con un encargo real de principio a fin.
 - Los agentes de solo lectura de Codex lo son por instrucción, no por sandbox.
-- Gemini no participa en la revisión cruzada y no genera vídeo ni audio; el audio no se analiza.
+- La skill gemini no sustituye la revisión por otra IA (`/revisar`), que hacen Claude, Codex o Antigravity; no genera vídeo ni audio; el audio no se analiza.
 - Probado en macOS con Node 24, clonando en carpetas distintas. No se ha comprobado en Linux ni en Windows.
 - `nexakit ahorro` estima los tokens recortados (caracteres / 4); hay una [medición sin conexión del mod](consolidacion.md#medición-sin-conexión-de-nexakit-ahorro-2026-11-11) (21,8 % menos salida de Bash), pero no una comparación en vivo del ahorro total.
 - La recomendación de modelo lee frases en español; con mensajes en otro idioma muestra el valor por defecto.
@@ -293,7 +293,7 @@ Herramientas internas del servidor (solo para depurar):
 
 | Grupo | Herramientas |
 | --- | --- |
-| Revisión cruzada | `start_collaboration, get_collaboration, publish_peer_context, preview_peer_review, approve_peer_review, request_peer_review, wait_for_peer_handoff, claim_peer_review, submit_peer_review, record_review_outcome, cancel_peer_review, close_collaboration` |
+| Revisión entre sesiones | `start_collaboration, get_collaboration, publish_peer_context, preview_peer_review, approve_peer_review, request_peer_review, wait_for_peer_handoff, claim_peer_review, submit_peer_review, record_review_outcome, cancel_peer_review, close_collaboration` |
 | Tareas por etapas | `start_task, get_task, preview_codex_plan, run_codex_plan, preview_claude_proposal, run_claude_proposal, preview_claude_implementation, run_claude_implementation, preview_codex_review, run_codex_review, wait_for_task_activity, cancel_task_execution` |
 
 `approve_peer_review` es la que te pide permiso: no la pongas en la lista de permitidas ni en modo automático.

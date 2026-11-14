@@ -3,6 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderAntigravityAgents } from './antigravity-agents.js';
+import { assertNoSymlinkAncestors as assertNoSymlinkAncestorsBase, within } from './safe-paths.js';
+import { shellQuote } from './shell-quote.js';
 
 const TOOL_MATCHER = 'run_command|write_file|write_to_file|edit_file|replace_file_content|multi_replace_file_content';
 
@@ -24,39 +26,10 @@ export function buildAntigravityCommand(subcommand, {
     }
     return `"${executable}" "${entrypoint}" antigravity ${subcommand}`;
   }
-  const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
-  return `${quote(executable)} ${quote(entrypoint)} antigravity ${subcommand}`;
+  return `${shellQuote(executable)} ${shellQuote(entrypoint)} antigravity ${subcommand}`;
 }
 
-async function isDarwinSystemLink(current) {
-  if (process.platform !== 'darwin' || (current !== '/tmp' && current !== '/var')) return false;
-  return (await fs.realpath(current).catch(() => null)) === `/private${current}`;
-}
-
-async function assertNoSymlinkAncestors(destination) {
-  let current = destination;
-  while (true) {
-    try {
-      const stat = await fs.lstat(current);
-      if (stat.isSymbolicLink() && !(await isDarwinSystemLink(current))) {
-        throw new Error('No se admiten enlaces simbólicos en el destino.');
-      }
-      if (current !== destination && !stat.isDirectory() && !(await isDarwinSystemLink(current))) {
-        throw new Error('El padre no es una carpeta.');
-      }
-    } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
-    }
-    const parent = path.dirname(current);
-    if (parent === current) break;
-    current = parent;
-  }
-}
-
-const within = (root, destination) => {
-  const relative = path.relative(path.resolve(root), destination);
-  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
-};
+const assertNoSymlinkAncestors = (destination) => assertNoSymlinkAncestorsBase(destination, { allowDarwinSystemLinks: true });
 
 /** Generate manual preview or write a valid standalone Antigravity CLI plugin + statusLine package. */
 export async function prepareAntigravity({

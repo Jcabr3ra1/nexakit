@@ -36,7 +36,7 @@ export function aciertoDeCache(cache) {
   return total > 0 ? (cache.read / total) * 100 : null;
 }
 
-const tonoCache = (p) => (p >= 80 ? 'success' : p >= 50 ? 'warning' : 'error');
+export const tonoCache = (p) => (p >= 80 ? 'success' : p >= 50 ? 'warning' : 'error');
 
 // Tokens de un subagente, sumados paso a paso con el uso que la API informó de cada petición. Separan lo que
 // entró nuevo (input), lo que se leyó de la caché (read) y lo que se escribió en ella (creation), porque una

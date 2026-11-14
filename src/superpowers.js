@@ -117,13 +117,6 @@ export async function inspectSuperpowers({ agentsFound, runCommand, environment 
   return states;
 }
 
-// The command a person can run by hand, for messages.
-export function superpowersCommand(agent, state) {
-  const entry = SUPERPOWERS[agent];
-  const args = state === 'desactivado' ? entry.enable : entry.install;
-  return args ? `${entry.command} ${args.join(' ')}` : null;
-}
-
 export async function applySuperpowers(agent, state, { runCommand, environment } = {}) {
   const entry = SUPERPOWERS[agent];
   if (!entry) throw new Error(`Agente desconocido: ${agent}`);
