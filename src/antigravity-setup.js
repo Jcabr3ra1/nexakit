@@ -12,7 +12,7 @@ export function buildAntigravityCommand(subcommand, {
   entrypoint = fileURLToPath(new URL('../bin/nexakit.js', import.meta.url)),
   platform = process.platform,
 } = {}) {
-  const pathApi = platform === 'win32' ? path.win32 : path;
+  const pathApi = platform === 'win32' ? path.win32 : path.posix;
   for (const value of [executable, entrypoint]) {
     if (!pathApi.isAbsolute(value) || /[\0\r\n]/u.test(value)) {
       throw new Error('El comando requiere rutas absolutas seguras.');

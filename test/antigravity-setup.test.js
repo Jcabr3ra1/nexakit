@@ -88,10 +88,21 @@ test('rejects symlink ancestors and quotes POSIX and Windows commands safely', a
     /Windows/u,
   );
 
+  const posixQuoted = await buildCmd('barra', {
+    executable: '/opt/node & bin/node',
+    entrypoint: "/tmp/entry & ' $(touch injected).js",
+    platform: 'posix',
+  });
+  assert.equal(posixQuoted, "'/opt/node & bin/node' '/tmp/entry & '\\'' $(touch injected).js' antigravity barra");
+
   const script = path.join(root, "entry & ' $(touch injected).js");
   await fs.writeFile(script, 'console.log(JSON.stringify(process.argv.slice(2)))');
-  const posix = await buildCmd('barra', { executable: process.execPath, entrypoint: script, platform: 'posix' });
-  const run = spawnSync(posix, { shell: true, cwd: root, encoding: 'utf8' });
+  const hostCmd = await buildCmd('barra', {
+    executable: process.execPath,
+    entrypoint: script,
+    platform: process.platform === 'win32' ? 'win32' : 'posix',
+  });
+  const run = spawnSync(hostCmd, { shell: true, cwd: root, encoding: 'utf8' });
   assert.equal(run.status, 0, run.stderr);
   assert.deepEqual(JSON.parse(run.stdout), ['antigravity', 'barra']);
   await assert.rejects(fs.stat(path.join(root, 'injected')), { code: 'ENOENT' });
