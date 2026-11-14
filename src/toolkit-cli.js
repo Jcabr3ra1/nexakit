@@ -3,6 +3,7 @@ import { runCli } from './cli.js';
 import { runModelCommand } from './model-command.js';
 import { runAhorroCommand } from './ahorro-command.js';
 import { runCodexCommand } from './codex-command.js';
+import { runAntigravityCommand } from './antigravity-command.js';
 import { runLeccionesCommand } from './lecciones-command.js';
 import { runRevisionCommand } from './revision.js';
 import path from 'node:path';
@@ -41,6 +42,7 @@ const HELP = `Uso: npx nexakit [--project <ruta>] [--si]
      nexakit revision --con <ia> --modelo <m> --esfuerzo <e> --encargo <archivo> [--base <rama>]
      nexakit modelo [--nivel <nivel>] [--ia claude|codex|antigravity] [--perfil-codex <nombre>]
      nexakit codex auditar|preparar|agentes|actividad|consumo|recomendar|hook|ejecutar|comparar [opciones]
+     nexakit antigravity barra|preparar|agentes|recomendar|hook|ejecutar [opciones]
      nexakit ahorro [--json]
      nexakit lecciones [--json | --descartar]
      npx nexakit recommend [--project <ruta>] [--profile frontend|backend|mcp|security] [--client codex|claude] [--dry-run] [--json]
@@ -100,6 +102,7 @@ export async function runToolkitCli(
   const [command, ...rest] = argv;
   if (command === 'modelo') return runModelCommand(rest, { out, err }, options);
   if (command === 'codex') return runCodexCommand(rest, { out, err, input, output }, options);
+  if (command === 'antigravity') return runAntigravityCommand(rest, { out, err, input, output }, options);
   if (command === 'ahorro') return runAhorroCommand(rest, { out, err }, options);
   if (command === 'lecciones') return runLeccionesCommand(rest, { out, err }, options);
   if (command === 'revision') return runRevisionCommand(rest, { out, err }, { options });

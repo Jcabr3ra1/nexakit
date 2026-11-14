@@ -79,6 +79,8 @@ configuración. [Guía de ahorro y consumo](docs/guias/codex-ahorro.md).
 especialistas con modelos del catálogo local, vista previa y actualización
 con respaldos. [Equipo y delegación en Codex](docs/guias/codex-agentes.md).
 
+**Antigravity CLI (`agy`):** `nexakit antigravity preparar` genera un plugin válido (`plugin.json`, `hooks.json`, los 10 `agents/*.md` de `niveles`, `settings.statusline.json` y `README.md`) con activación manual para la barra `statusLine` (`nexakit antigravity barra`), recomendación al enviar (`PreInvocation`), `guardarrailes`, `ahorro` (`nexakit antigravity ejecutar`), `lecciones` y avisos de `sesión` (60 % / 80 % de contexto y 70 % / 90 % de cuota); `nexakit antigravity agentes` instala o actualiza los 10 perfiles directamente en `~/.gemini/config/agents/` o `.agents/agents/`.
+
 Los mods de Claude Code se instalan *dentro* de Claude Code: `/plugin marketplace add Jcabr3ra1/nexakit` y luego `/plugin install <nombre>@agent-toolkit` para `niveles`, `nexakit-modelo`, `nexakit-sesion`, `nexakit-ahorro`, `nexakit-lecciones` y `nexakit-guardarrailes` ([paso 7 de la guía](docs/guias/guia-de-comandos.md#7-instala-los-plugins-y-mods-solo-claude-code)).
 
 

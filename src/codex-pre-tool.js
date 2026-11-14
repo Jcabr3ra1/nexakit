@@ -13,8 +13,8 @@ const NODE_VALUES = new Map([
   ['--test-skip-pattern', /^[A-Za-z0-9_./:@%+=,-]+$/u],
 ]);
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
-const quote = token => `'${token.replaceAll("'", "'\"'\"'")}'`;
-const safeAbsolute = value => typeof value === 'string' && posix.isAbsolute(value) &&
+export const quoteShell = token => `'${token.replaceAll("'", "'\"'\"'")}'`;
+export const safeAbsolutePath = value => typeof value === 'string' && posix.isAbsolute(value) &&
   value.length <= 4096 && !/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u.test(value);
 
 function nodeTests(argv) {
@@ -36,7 +36,7 @@ function nodeTests(argv) {
   return true;
 }
 
-function approved(argv) {
+export function approvedOutputCommand(argv) {
   // Conservative bypass: preserve interactive and structured-output commands intact.
   if (argv.some(token => /watch|inspect|interactive|tty|background/iu.test(token) ||
       /^(?:-w|-i|-t|-it|-ti|--ui|--open|--debug)(?:=|$)/u.test(token) ||
@@ -47,26 +47,39 @@ function approved(argv) {
     (argv[0] === 'yarn' && TASKS.has(argv[1]));
 }
 
+export function buildOutputWrapperCommand(command, {
+  executable = process.execPath,
+  entrypoint = ENTRYPOINT,
+  agent = 'codex',
+  tempEnv = 'NEXAKIT_CODEX_TEMP_OUTPUT=1',
+  platform = process.platform,
+  environment = process.env,
+} = {}) {
+  if (platform === 'win32' || environment.NEXAKIT_SALIDA === 'completa') return null;
+  if (typeof command !== 'string' || command.length > 16 * 1024 ||
+      !/^[A-Za-z0-9_./:@%+=, -]+$/u.test(command)) return null;
+  const argv = command.trim().split(/ +/u);
+  if (!approvedOutputCommand(argv)) return null;
+  if (!safeAbsolutePath(executable) || !safeAbsolutePath(entrypoint)) return null;
+  return `${tempEnv} ${[executable, entrypoint, agent, 'ejecutar', '--', ...argv].map(quoteShell).join(' ')}`;
+}
+
 /** Pure, synchronous PreToolUse rewrite. Unknown inputs always retain their original route. */
 export function rewriteCodexToolInput(payload, options = {}) {
-  if ((options.platform ?? process.platform) === 'win32' ||
-      (options.environment ?? process.env).NEXAKIT_SALIDA === 'completa' ||
-      !isRecord(payload) || payload.hook_event_name !== 'PreToolUse' || payload.tool_name !== 'Bash' ||
+  if (!isRecord(payload) || payload.hook_event_name !== 'PreToolUse' || payload.tool_name !== 'Bash' ||
       !isRecord(payload.tool_input)) return {};
   const input = payload.tool_input;
   if (('sandbox_permissions' in input && input.sandbox_permissions !== 'use_default') ||
       ['tty', 'interactive', 'background', 'run_in_background'].some(key => input[key])) return {};
-  const command = input.command;
-  // ASCII-only grammar makes this length limit also a byte limit. Only literal spaces separate tokens.
-  if (typeof command !== 'string' || command.length > 16 * 1024 ||
-      !/^[A-Za-z0-9_./:@%+=, -]+$/u.test(command)) return {};
-  const argv = command.trim().split(/ +/u);
-  if (!approved(argv)) return {};
-  const executable = options.executable ?? process.execPath;
-  const entrypoint = options.entrypoint ?? ENTRYPOINT;
-  if (!safeAbsolute(executable) || !safeAbsolute(entrypoint)) return {};
-  const wrapper = 'NEXAKIT_CODEX_TEMP_OUTPUT=1 ' +
-    [executable, entrypoint, 'codex', 'ejecutar', '--', ...argv].map(quote).join(' ');
+  const wrapper = buildOutputWrapperCommand(input.command, {
+    executable: options.executable,
+    entrypoint: options.entrypoint,
+    agent: 'codex',
+    tempEnv: 'NEXAKIT_CODEX_TEMP_OUTPUT=1',
+    platform: options.platform ?? process.platform,
+    environment: options.environment ?? process.env,
+  });
+  if (!wrapper) return {};
   return { hookSpecificOutput: {
     hookEventName: 'PreToolUse',
     permissionDecision: 'allow',

@@ -132,8 +132,13 @@ export async function runCodexOutput(argv, { out, err, input }, options = {}) {
   try {
     // Automatic wrapping runs inside the tool sandbox. Its private temporary
     // store requires no additional access to the real user home.
-    const root = env.NEXAKIT_CODEX_TEMP_OUTPUT === '1'
-      ? privateDirectory(path.join(directory(fs.realpathSync(options.tempDirectory ?? os.tmpdir())), `nexakit-codex-${process.getuid?.() ?? 'user'}`))
+    const tempAgent = env.NEXAKIT_ANTIGRAVITY_TEMP_OUTPUT === '1'
+      ? 'antigravity'
+      : env.NEXAKIT_CODEX_TEMP_OUTPUT === '1'
+        ? 'codex'
+        : null;
+    const root = tempAgent
+      ? privateDirectory(path.join(directory(fs.realpathSync(options.tempDirectory ?? os.tmpdir())), `nexakit-${tempAgent}-${process.getuid?.() ?? 'user'}`))
       : directory(options.homeDirectory ?? os.homedir());
     home = privateDirectory(path.join(root, '.nexakit'));
     const folder = privateDirectory(path.join(home, 'salidas'));
@@ -215,7 +220,7 @@ export async function runCodexOutput(argv, { out, err, input }, options = {}) {
     const linesAfter = results.reduce((sum, result) => sum + (result.text ? result.text.split('\n').length : 0), 0);
     if (results.some(result => result.trimmed) && before > after && linesBefore >= linesAfter) {
       try {
-        record(home, { fecha: Date.now(), antes: before, despues: after, lineasAntes: linesBefore, lineasDespues: linesAfter, agent: 'codex' });
+        record(home, { fecha: Date.now(), antes: before, despues: after, lineasAntes: linesBefore, lineasDespues: linesAfter, agent: options.agent ?? 'codex' });
       } catch { emit(err, 'nexakit: no se pudo guardar el registro de ahorro.\n'); }
     }
   }

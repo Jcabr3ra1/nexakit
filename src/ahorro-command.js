@@ -83,7 +83,9 @@ export async function runAhorroCommand(argv, { out, err }, options = {}) {
   try {
     // El temporal del sistema puede ser un alias (por ejemplo /var en macOS).
     const temporal = await fs.realpath(options.tempDirectory ?? os.tmpdir());
-    fuentes.add(path.join(temporal, `nexakit-codex-${process.getuid?.() ?? 'user'}`, '.nexakit', 'ahorro.jsonl'));
+    const uid = process.getuid?.() ?? 'user';
+    fuentes.add(path.join(temporal, `nexakit-codex-${uid}`, '.nexakit', 'ahorro.jsonl'));
+    fuentes.add(path.join(temporal, `nexakit-antigravity-${uid}`, '.nexakit', 'ahorro.jsonl'));
   } catch {
     // No se crean directorios al consultar métricas.
   }

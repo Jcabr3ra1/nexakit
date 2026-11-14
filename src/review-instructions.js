@@ -15,7 +15,7 @@ o plan ya aprobado. Antes de un PR, quality-gate. Modo tutor (la persona
 escribe el código, un paso verificable cada vez) solo si lo pide.
 
 Orquesta: tú entiendes, planificas, decides e integras; delega la ejecución en
-subagentes de nivel (Claude: niveles:nivel-<nivel>; Codex: nivel_<nivel>):
+subagentes de nivel (Claude: niveles:nivel-<nivel>; Codex: nivel_<nivel>; Antigravity: nivel-<nivel>):
 ligero para comandos, búsquedas y cambios mecánicos; normal para implementar
 con diseño claro; exigente para pruebas, casos borde o un fallo acotado; alto
 para un fallo sutil, seguridad o lo que exigente no resolvió. Trabaja tú solo
