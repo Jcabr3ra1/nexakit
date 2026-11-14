@@ -57,7 +57,7 @@ pendientes; no se consultó el remoto y ese número no acredita su estado actual
   autoría tutor y autorización separada por rol.
 - AD-3 y la inferencia automática de clientes reales permanecen sin admisión.
 
-Evidencia histórica relevante: el candidato funcional de [AD-1/AD-2](../agentes/clientes/agent-client-auth-diagnostic.md)
+Evidencia histórica relevante: el candidato funcional de AD-1/AD-2
 pasó **3.279/3.279 pruebas** el 2026-10-09, sin fallos, canceladas, omitidas o
 todo, con concurrencia 1. Se construyó desde `6cd6811` más los seis archivos de
 AD; las consolidaciones posteriores solo cambiaron documentación. La referencia

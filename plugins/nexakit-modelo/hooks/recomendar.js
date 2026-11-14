@@ -6,7 +6,7 @@
 // Solo cuenta como confirmación un mensaje hecho únicamente de estas palabras, separadas entre sí:
 // «ok, depura esto» y «sídale» no lo son.
 const PALABRA = '(?:s[ií]|ok|okay|dale|listo|vale|perfecto|bien|contin[uú]a|sigue|hazlo|adelante|gracias|de una|claro|no)';
-const CONFIRMACION = new RegExp(`^¡?${PALABRA}(?:[\\s.!,¡]+${PALABRA})*[\\s.!,]*$`, 'iu');
+export const CONFIRMACION = new RegExp(`^¡?${PALABRA}(?:[\\s.!,¡]+${PALABRA})*[\\s.!,]*$`, 'iu');
 // «error» solo cuenta como fallo si no es parte de «mensajes de error» o similar. «por qué» solo no es un
 // fallo: suele ser una pregunta de explicación, trabajo habitual.
 const FALLO = /(\bbugs?\b|(?<!de )\berror|\bfall[aeo]|no funciona|no guarda|no carga|\broto\b|\brompe|\bdepura|\bdebug|\barr?e?gl|\bcorr[ií][gj])/iu;

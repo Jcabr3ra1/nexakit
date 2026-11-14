@@ -4,15 +4,15 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { IS_WINDOWS } from './platform.js';
+import { shellQuote } from './shell-quote.js';
 import { nexakitDir } from './stable-install.js';
 
-const shellQuote = value => `'${value.replaceAll("'", "'\\''")}'`;
 // The second line marks the file as nexakit's: a file without it is the person's and is never replaced.
 const MARK = 'nexakit: orden estable (se reescribe sola)';
 // In a batch file % expands variables even inside quotes; %% is a literal %.
 const batchPath = value => value.replaceAll('%', '%%');
 
-export function stableCommandContent({ nodePath, toolkitRoot, windows = IS_WINDOWS }) {
+function stableCommandContent({ nodePath, toolkitRoot, windows = IS_WINDOWS }) {
   return windows
     ? `@rem ${MARK}\r\n@"${batchPath(nodePath)}" "${batchPath(toolkitRoot)}\\bin\\nexakit.js" %*\r\n`
     : `#!/bin/sh\n# ${MARK}\nexec ${shellQuote(nodePath)} ${shellQuote(path.join(toolkitRoot, 'bin', 'nexakit.js'))} "$@"\n`;

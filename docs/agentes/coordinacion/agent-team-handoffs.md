@@ -218,10 +218,9 @@ pruebas y documentación del proyecto siguen siendo la fuente principal de verda
 ## Plan inicial de tareas y puertas
 
 La lista conserva el alcance del contrato inicial. T4/T5 no significan que
-todo el código offline siga sin construir: existen
-[adaptadores declarativos](../clientes/agent-client-adapters.md) y
-[supervisión con fixtures](../clientes/agent-client-runtime-local.md), entregados en etapas
-separadas. Esas bases no completan la admisión de un equipo real ni autorizan
+todo el código offline siga sin construir: existieron
+adaptadores declarativos y supervisión con fixtures, entregados en etapas
+separadas y retirados después. Esas bases no completan la admisión de un equipo real ni autorizan
 ejecuciones nativas. No se marcan estas tareas globales como verificadas por
 haber pasado pruebas ficticias.
 

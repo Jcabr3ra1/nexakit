@@ -63,8 +63,7 @@ de oferta y acceso no se renuevan para evitar caducidad.
 Ayuda, versión y estado de autenticación son invocaciones del cliente aunque
 no pidan una respuesta de IA. Requieren revisión y autorización específica de
 sus efectos de arranque; no ejecutarlos para descubrir si son inocuos. Las bases
-posteriores de [diagnóstico nativo](../clientes/agent-client-supervised-native.md) y
-[diagnóstico de autenticación](../clientes/agent-client-auth-diagnostic.md) mantienen permisos
+posteriores de diagnóstico nativo y de autenticación (ya retiradas) mantenían permisos
 separados. Esta consolidación no renueva el lote original ni autoriza esas recetas.
 
 La revisión privada debe resolver para cada ejecución:

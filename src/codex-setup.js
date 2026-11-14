@@ -2,6 +2,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertNoSymlinkAncestors, within } from './safe-paths.js';
+import { shellQuote } from './shell-quote.js';
 
 export function buildCodexHookCommand({ executable = process.execPath,
   entrypoint = fileURLToPath(new URL('../bin/nexakit.js', import.meta.url)), platform = process.platform } = {}) {
@@ -15,27 +17,8 @@ export function buildCodexHookCommand({ executable = process.execPath,
     // Return shell command text; the runner owns cmd.exe's outer /s /c quotes.
     return `"${executable}" "${entrypoint}" codex hook`;
   }
-  const quote = value => `'${value.replaceAll("'", "'\\''")}'`;
-  return `${quote(executable)} ${quote(entrypoint)} codex hook`;
+  return `${shellQuote(executable)} ${shellQuote(entrypoint)} codex hook`;
 }
-
-async function assertNoSymlinkAncestors(destination) {
-  let current = destination;
-  while (true) {
-    try {
-      const stat = await fs.lstat(current);
-      if (stat.isSymbolicLink()) throw new Error('No se admiten enlaces simbólicos en el destino.');
-      if (current !== destination && !stat.isDirectory()) throw new Error('El padre no es una carpeta.');
-    } catch (error) { if (error.code !== 'ENOENT') throw error; }
-    const parent = path.dirname(current);
-    if (parent === current) break;
-    current = parent;
-  }
-}
-const within = (root, destination) => {
-  const relative = path.relative(path.resolve(root), destination);
-  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
-};
 
 export async function prepareCodex({ outputDirectory, apply = false, homeDirectory = os.homedir(),
   codexHome, projectRoot = process.cwd(), environment = process.env } = {}) {

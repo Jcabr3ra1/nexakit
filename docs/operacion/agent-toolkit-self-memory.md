@@ -206,4 +206,3 @@ pendientes y no se presentan como resultados del preview o de las pruebas de R2.
 - [Beta R1](agent-toolkit-private-beta.md)
 - [Validación R2](agent-toolkit-clean-install.md)
 - [Guía del equipo manual](../../templates/agent-team/README.md)
-- [Diagnóstico nativo y admisión pendiente](../agentes/clientes/agent-client-auth-diagnostic.md)

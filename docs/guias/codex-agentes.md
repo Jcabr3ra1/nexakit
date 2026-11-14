@@ -78,7 +78,7 @@ por defecto la suite completa en cada subagente.
 - `cierre_de_memoria` requiere que la persona haya pedido actualizar la memoria.
   No implica permiso para hacer commit o push de la bóveda.
 - `revisor_de_calidad` es un rol interno de Codex. No autoriza lanzar Claude,
-  Gemini ni una revisión cruzada: eso sigue requiriendo la petición explícita.
+  Gemini ni una revisión por otra IA: eso sigue requiriendo la petición explícita.
 - Una frase citada, una pregunta sobre un comando o una negación no constituyen
   autorización de ejecución.
 

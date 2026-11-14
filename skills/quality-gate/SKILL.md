@@ -1,7 +1,7 @@
 ---
 name: quality-gate
 license: MIT
-description: Revisa y verifica entregas contra requisitos, corrección, seguridad, pruebas y evidencia fresca antes de afirmar que un trabajo está listo, corregido o aprobado. Úsala antes de cerrar una tarea, pedir revisión cruzada, preparar commit o PR, o emitir un dictamen; aplica una comprobación breve proporcional cuando el cambio sea puramente documental o menor.
+description: Revisa y verifica entregas contra requisitos, corrección, seguridad, pruebas y evidencia fresca antes de afirmar que un trabajo está listo, corregido o aprobado. Úsala antes de cerrar una tarea, pedir una revisión por otra IA, preparar commit o PR, o emitir un dictamen; aplica una comprobación breve proporcional cuando el cambio sea puramente documental o menor.
 ---
 
 # Puerta de calidad y evidencia de cierre

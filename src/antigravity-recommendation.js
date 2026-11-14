@@ -1,8 +1,7 @@
 import { LIMITE_ALTO } from '../plugins/nexakit-modelo/hooks/decidir.js';
-import { recomendarPorTexto } from '../plugins/nexakit-modelo/hooks/recomendar.js';
+import { CONFIRMACION as CONFIRMATION_RE, recomendarPorTexto } from '../plugins/nexakit-modelo/hooks/recomendar.js';
 
 const MAX_TASK_BYTES = 16 * 1024;
-const CONFIRMATION_RE = /^(?:¡?)(?:s[ií]|ok|okay|dale|listo|vale|perfecto|bien|contin[uú]a|sigue|hazlo|adelante|gracias|de una|claro|no)(?:[\s.!,¡]+(?:s[ií]|ok|okay|dale|listo|vale|perfecto|bien|contin[uú]a|sigue|hazlo|adelante|gracias|de una|claro|no))*[\s.!,]*$/iu;
 const EFFORT_SUFFIX_RE = /-(low|medium|high|xhigh|max)$/iu;
 const EFFORT_PAREN_RE = /\s*\((low|medium|high|xhigh|max)\)\s*$/iu;
 const KNOWN_FAMILY_RE = /\b(flash|hydrogen|argon|carbon|luna|terra|sol|astra|haiku|sonnet|opus)\b/iu;

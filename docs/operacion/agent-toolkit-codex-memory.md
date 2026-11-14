@@ -185,5 +185,4 @@ informar el estado real y no sobrescribir trabajo concurrente.
 - [Adopción R3 y sus puertas](agent-toolkit-self-memory.md)
 - [Contrato de conexión](../memoria/project-memory-connect.md)
 - [Diagnóstico local](../memoria/project-memory-doctor.md)
-- [Admisión nativa y sus límites](../agentes/clientes/agent-client-auth-diagnostic.md)
 - [Adaptador revisado](../../src/connect.js)

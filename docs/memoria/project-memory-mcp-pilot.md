@@ -205,4 +205,3 @@ multiagente automática ni una distribución de dependencias.
 - [Propuesta original de conexión](../operacion/agent-toolkit-codex-memory.md)
 - [Adopción local R3](../operacion/agent-toolkit-self-memory.md)
 - [Contrato de conexión existente](project-memory-connect.md)
-- [Admisión nativa y sus límites](../agentes/clientes/agent-client-auth-diagnostic.md)

@@ -1206,7 +1206,7 @@ commit/push y publicación mantienen alcances y permisos separados.
 
 El 2026-10-14 se autorizó un alcance separado de tres rutas:
 test/client-auth-diagnostic.test.js,
-[diagnóstico AD, sección AD-11](../agentes/clientes/agent-client-auth-diagnostic.md) y este documento.
+diagnóstico AD, sección AD-11 y este documento.
 No se modifican A1f, su prueba, el recolector AD, su parser/esquema/fixture C,
 dependencias, configuración, otras pruebas, memoria ni clientes IA reales.
 

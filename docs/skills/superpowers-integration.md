@@ -46,7 +46,7 @@ de instrucciones de cada IA (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`):
 2. **Nunca destruir trabajo:** no se borra ni descarta código existente sin acuerdo, aunque el TDD estricto lo pida.
 3. **Permisos:** commit, push, PR y cambios en la memoria solo con autorización explícita.
 4. **Un único flujo:** si ya hay un diseño o plan aprobado para el objetivo, se reutiliza.
-5. **Puerta propia:** antes de un PR o de la revisión cruzada se pasa `quality-gate`.
+5. **Puerta propia:** antes de un PR o de pedir una revisión por otra IA se pasa `quality-gate`.
 
 ## Skills retiradas
 
