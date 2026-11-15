@@ -311,9 +311,10 @@ export function aplicarCambios(recorrido: Recorrido, cambios: CambioRecorrido[])
       ia,
       modelo,
       esfuerzo,
-      // Quien sigue en Codex conserva sus órdenes; al llegar a Codex salen de la tabla, no del repo.
-      ordenesPermitidas:
-        ia !== 'codex' ? [] : actual.ia === 'codex' ? actual.ordenesPermitidas : [...ESTACIONES[actual.estacion].ordenesPermitidas],
+      // Solo se conserva lo que la persona vio en la propuesta y sigue valiendo para la IA nueva:
+      // quien sigue en Codex mantiene sus órdenes; quien llega a Codex desde otra IA no recibe ninguna.
+      // Para tener órdenes nuevas hay que volver a proponer.
+      ordenesPermitidas: ia === 'codex' && actual.ia === 'codex' ? actual.ordenesPermitidas : [],
       motivo: 'cambiada por la persona',
       estado: 'propuesta',
     } satisfies Partial<EstacionRecorrido>);

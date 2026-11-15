@@ -357,7 +357,13 @@ test('Antigravity rechaza toda orden: sus estaciones van sin órdenes aunque la 
   assert.deepEqual(porNombre(r, 'arquitectura').ordenesPermitidas, []);
 });
 
-test('aplicarCambios ajusta las órdenes al cambiar de IA: las de la tabla al llegar a Codex, ninguna al irse', async () => {
+function crearRepoArquitectura() {
+  const dir = crearRepo({ config: { rutasCriticas: ['src/**'] } });
+  escribir(dir, 'src/a.js', 'export {};\n');
+  return dir;
+}
+
+test('aplicarCambios solo conserva las órdenes vistas: las mantiene quien sigue en Codex y ninguna recibe quien llega o se va', async () => {
   const dir = crearRepo({ config: { estaciones: { pruebas: { ordenesPermitidas: ['npm run lint'] } } } });
   escribir(dir, 'src/a.js', 'export {};\n');
   const r = await proponer({ raiz: dir, base: 'main', catalogos: CATALOGOS });
@@ -367,11 +373,17 @@ test('aplicarCambios ajusta las órdenes al cambiar de IA: las de la tabla al ll
   const mismoCodex = aplicarCambios(r, [{ estacion: 'pruebas', modelo: 'gpt-6-sol', esfuerzo: 'medium' }]);
   assert.deepEqual(porNombre(mismoCodex, 'pruebas').ordenesPermitidas, ['npm test', 'npm run lint']);
 
-  // Se va a Antigravity: ninguna orden. Y al volver a Codex, solo las de la tabla (no las del repo).
+  // Se va a Antigravity: ninguna orden. Y al volver a Codex tampoco recibe ninguna: hay que volver a proponer.
   const aAgy = aplicarCambios(r, [{ estacion: 'pruebas', ia: 'antigravity', modelo: 'gemini-4-argon-high' }]);
   assert.deepEqual(porNombre(aAgy, 'pruebas').ordenesPermitidas, []);
   const deVuelta = aplicarCambios(aAgy, [{ estacion: 'pruebas', ia: 'codex', modelo: 'gpt-6.1-terra', esfuerzo: 'medium' }]);
-  assert.deepEqual(porNombre(deVuelta, 'pruebas').ordenesPermitidas, ['npm test']);
+  assert.deepEqual(porNombre(deVuelta, 'pruebas').ordenesPermitidas, []);
+
+  // Pasar de Antigravity a Codex una estación que la propuesta ya tenía en Antigravity da [].
+  const rAgy = await proponer({ raiz: crearRepoArquitectura(), base: 'main', catalogos: CATALOGOS });
+  assert.equal(porNombre(rAgy, 'pruebas').ia, 'codex');
+  const arqACodex = aplicarCambios(rAgy, [{ estacion: 'arquitectura', ia: 'codex', modelo: 'gpt-6.1-sol', esfuerzo: 'high' }]);
+  assert.deepEqual(porNombre(arqACodex, 'arquitectura').ordenesPermitidas, []);
 
   // Quitar la estación borra las órdenes; el original no cambia.
   const quitada = aplicarCambios(r, [{ estacion: 'pruebas', quitar: true }]);

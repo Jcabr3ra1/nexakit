@@ -242,7 +242,40 @@ test('lanzar rechaza una propuesta alterada a mano o cuyo diff cambió', async (
   writeFileSync(archivo, JSON.stringify(alterada));
   const manipulada = await cli(['lanzar', '--huella', propuesta.huella], e);
   assert.equal(manipulada.codigo, 1);
-  assert.match(manipulada.err, /ya no es el que aprobaste/u);
+  assert.equal(manipulada.err, 'No hay una propuesta con esa huella; vuelve a proponer\n');
+});
+
+test('lanzar --cambios no deja pasar una propuesta editada a mano, aunque el cambio no haga nada', async () => {
+  const e = escenario();
+  const propuesta = JSON.parse((await cli(['proponer', '--base', 'main', '--json'], e)).out);
+  const archivo = path.join(e.home, '.nexakit', 'fabrica', await nombreRepo(e.dir), 'propuesta.json');
+  const alterada = JSON.parse(readFileSync(archivo, 'utf8'));
+  porNombre(alterada, 'pruebas').ordenesPermitidas.push('rm -rf /');
+  writeFileSync(archivo, JSON.stringify(alterada));
+  const cambios = path.join(e.home, 'cambios.json');
+  writeFileSync(cambios, JSON.stringify([{ estacion: 'pruebas' }]));
+  const { codigo, out, err } = await cli(['lanzar', '--huella', propuesta.huella, '--cambios', cambios], e);
+  assert.equal(codigo, 1);
+  assert.equal(err, 'No hay una propuesta con esa huella; vuelve a proponer\n');
+  assert.equal(out, '');
+});
+
+test('lanzar --cambios no da órdenes nuevas al pasar una estación de Antigravity a Codex', async () => {
+  const e = escenario({ config: CONFIG_AGY });
+  const propuesta = JSON.parse((await cli(['proponer', '--base', 'main', '--json'], e)).out);
+  const cambios = path.join(e.home, 'cambios.json');
+  // Solo arquitectura corre en Codex: el servidor falso no atiende dos hilos a la vez.
+  writeFileSync(cambios, JSON.stringify([
+    { estacion: 'arquitectura', ia: 'codex', modelo: 'gpt-6.1-sol', esfuerzo: 'high' },
+    { estacion: 'pruebas', quitar: true },
+  ]));
+  const { codigo, out, err } = await cli(['lanzar', '--huella', propuesta.huella, '--cambios', cambios, '--json'], e);
+  assert.equal(codigo, 0, err);
+  const final = JSON.parse(out);
+  const guardado = JSON.parse(readFileSync(path.join(final.dir, 'recorrido.json'), 'utf8'));
+  assert.equal(porNombre(guardado, 'arquitectura').ia, 'codex');
+  assert.deepEqual(porNombre(guardado, 'arquitectura').ordenesPermitidas, []);
+  assert.equal(porNombre(propuesta, 'pruebas').ordenesPermitidas[0], 'npm test');
 });
 
 test('lanzar --cambios aplica los cambios y lanza con la huella de lo aplicado', async () => {
@@ -303,6 +336,24 @@ test('Ctrl+C cancela el recorrido, espera el cierre y sale con 1', async () => {
   assert.match(out, /\[pruebas\] cancelada/u);
   assert.match(out, /^Consolidado: /mu);
   assert.equal(process.listenerCount('SIGINT'), antes, 'el manejador de SIGINT se retira al terminar');
+});
+
+test('un segundo Ctrl+C termina el proceso con 130 sin esperar al cierre ordenado', async () => {
+  const e = escenario({ codex: guionCodexLento() });
+  const propuesta = JSON.parse((await cli(['proponer', '--base', 'main', '--json'], e)).out);
+  let out = '';
+  const salidas = [];
+  const ejecucion = ejecutarCli(
+    ['lanzar', '--huella', propuesta.huella],
+    { out: (t) => { out += t; }, err: () => {} },
+    { homeDirectory: e.home, cwd: e.dir, environment: e.env, sondeoMs: 20, salir: (c) => salidas.push(c) },
+  );
+  for (let i = 0; i < 500 && !out.includes('[pruebas] en-curso'); i++) await new Promise((r) => setTimeout(r, 20));
+  process.emit('SIGINT');
+  assert.deepEqual(salidas, [], 'el primero solo cancela');
+  process.emit('SIGINT');
+  assert.deepEqual(salidas, [130]);
+  await ejecucion;
 });
 
 test('estado, resultado y cancelar consultan un recorrido por su id', async () => {

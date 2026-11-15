@@ -11,7 +11,7 @@ import type { Conector } from './conectores/tipos.js';
 import { cargarConfig } from './config.js';
 import { escaparMarkdown, escribirConsolidado, hallazgosDe } from './consolidar.js';
 import * as ejecutor from './ejecutor.js';
-import { aplicarCambios, proponer, type CambioRecorrido, type Catalogos, type Recorrido } from './enrutador.js';
+import { aplicarCambios, calcularHuella, proponer, type CambioRecorrido, type Catalogos, type Recorrido } from './enrutador.js';
 import { ErrorFabrica } from './errores.js';
 import { IA, NombreEstacion } from './esquemas.js';
 import * as rastro from './rastro.js';
@@ -30,6 +30,8 @@ export interface OpcionesCli {
   environment?: NodeJS.ProcessEnv;
   /** Carpeta desde la que se busca el repo; por defecto la actual. */
   cwd?: string;
+  /** Termina el proceso con un código; por defecto `process.exit`. */
+  salir?: (codigo: number) => void;
   /** Cada cuánto se mira el estado al lanzar, en milisegundos. */
   sondeoMs?: number;
 }
@@ -267,6 +269,7 @@ interface Contexto {
   entorno: NodeJS.ProcessEnv;
   cwd: string;
   sondeoMs: number;
+  salir: (codigo: number) => void;
 }
 
 const salida = async (ctx: Contexto, texto: string): Promise<void> => {
@@ -308,7 +311,11 @@ async function ordenProponer(ctx: Contexto, base: string, foco: string | undefin
 async function ordenLanzar(ctx: Contexto, huella: string, archivoCambios: string | undefined, json: boolean): Promise<number> {
   const raiz = await raizDelRepo(ctx.cwd);
   const propuesta = cargarPropuesta(ctx.home, await rastro.nombreRepo(raiz));
-  if (propuesta === null || propuesta.huella !== huella) throw new ErrorFabrica(MENSAJE_SIN_PROPUESTA);
+  // Antes de aplicar nada: `aplicarCambios` recalcula la huella, así que una propuesta editada a mano
+  // (órdenes añadidas, por ejemplo) pasaría con un cambio que no hace nada.
+  if (propuesta === null || propuesta.huella !== huella || calcularHuella(propuesta) !== propuesta.huella) {
+    throw new ErrorFabrica(MENSAJE_SIN_PROPUESTA);
+  }
   const cambios = archivoCambios === undefined ? [] : await leerCambios(archivoCambios);
   // La huella del recorrido con los cambios ya aplicados es la que `lanzar` comprueba contra el diff.
   const recorrido = cambios.length > 0 ? aplicarCambios(propuesta, cambios) : propuesta;
@@ -328,7 +335,11 @@ async function ordenLanzar(ctx: Contexto, huella: string, archivoCambios: string
     const { id } = await ejecutor.lanzar(recorrido, { raiz, conectores, paralelismo: config.paralelismo, home: ctx.home });
     let cancelando: Promise<void> | undefined;
     const alInterrumpir = (): void => {
-      if (cancelando !== undefined) return;
+      // El segundo Ctrl+C termina el proceso aunque el cierre ordenado siga en curso.
+      if (cancelando !== undefined) {
+        ctx.salir(130);
+        return;
+      }
       if (!json) void ctx.io.out('\nCancelando el recorrido; espero a que las estaciones cierren...\n');
       cancelando = ejecutor.cancelar(id, ctx.home).catch(() => {});
     };
@@ -464,6 +475,7 @@ export async function ejecutarCli(argv: string[], io: IoCli, opciones: OpcionesC
     entorno: opciones.environment ?? process.env,
     cwd: opciones.cwd ?? process.cwd(),
     sondeoMs: opciones.sondeoMs ?? SONDEO_MS,
+    salir: opciones.salir ?? ((codigo) => process.exit(codigo)),
   };
   const [orden, ...resto] = argv;
   if (orden === '--help' || orden === '-h') {
