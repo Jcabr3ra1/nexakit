@@ -133,12 +133,12 @@ const evidenciaMedida = () => {
     if (fd !== undefined) try { fs.closeSync(fd); } catch { /* nada */ }
   }
 };
+const limpio = texto => String(texto).replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, ' ');
 const mejores = evidenciaMedida();
 if (mejores && mejores.size > 0) {
   out('', '## Evidencia medida');
   for (const [estacion, { fila, media }] of [...mejores].sort((a, b) => a[0].localeCompare(b[0]))) {
-    const esfuerzo = typeof fila.esfuerzo === 'string' ? ` · ${fila.esfuerzo}` : '';
-    const limpio = texto => String(texto).replace(/[\u0000-\u001f\u007f]/gu, ' ');
+    const esfuerzo = typeof fila.esfuerzo === 'string' ? ` · ${limpio(fila.esfuerzo)}` : '';
     out(`- ${limpio(estacion)}: ${limpio(fila.ia)} · ${limpio(fila.modelo)}${esfuerzo} · media ${media.toFixed(2)} · ${fila.banco + fila.real} observaciones (${fila.banco} de banco, ${fila.real} reales)`);
   }
   out('Nota: la fábrica decide con un criterio más prudente (el cuantil del 5 % de la Beta frente al umbral de riesgo), no con la media.');

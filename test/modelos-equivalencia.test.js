@@ -81,3 +81,13 @@ test('modelos.mjs no imprime nada de evidencia si falta o es inválida', async (
     assert.doesNotMatch(await ejecutarSkill(t, contenido), /Evidencia medida/u);
   }
 });
+
+test('modelos.mjs sanea los controles de la evidencia antes de imprimirla', async (t) => {
+  const sucio = (x) => `${x}\u001b[31m\u009b2J\nfalso\u2028`;
+  const f = { ...fila(sucio('est'), sucio('mod'), 9, 1, 1, 1), ia: sucio('ia'), esfuerzo: sucio('esf') };
+  const salida = await ejecutarSkill(t, JSON.stringify({ version: 1, actualizada: '2026-11-01T00:00:00.000Z', catalogo: { codex: [], antigravity: [], claude: [] }, filas: [f] }));
+  const seccion = salida.slice(salida.indexOf('## Evidencia medida'));
+  assert.match(seccion, /^- est/mu);
+  assert.doesNotMatch(seccion, /[\u001b\u009b\u2028\u2029]/u);
+  assert.equal(seccion.split('\n').filter((l) => l.startsWith('- ')).length, 1);
+});
