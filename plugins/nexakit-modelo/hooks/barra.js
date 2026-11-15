@@ -162,10 +162,14 @@ const MAX_ETIQUETA = 18;
 // Una fila por subagente (los más recientes): nombre, modelo y esfuerzo observados, encargo y estado. La
 // columna del nombre se ajusta al más largo (hasta 18 caracteres, lo que mide «revisor-de-calidad») para que
 // el resto de columnas quede alineado y ningún nombre habitual salga cortado.
-export function filasDeAgentes(agentes) {
+const columnaDe = (etiquetas) => Math.min(MAX_ETIQUETA, Math.max(MIN_ETIQUETA, ...etiquetas.map((e) => e.length))) + 1;
+export const columnaDeAgentes = (agentes) => columnaDe(agentes.slice(-MAX_FILAS).map((a) => etiquetaDeAgente(a.type)));
+
+// `columnaMinima` permite alinear estas filas con las de la fábrica cuando conviven.
+export function filasDeAgentes(agentes, columnaMinima = 0) {
   const recientes = agentes.slice(-MAX_FILAS);
   const etiquetas = recientes.map((a) => etiquetaDeAgente(a.type));
-  const columna = Math.min(MAX_ETIQUETA, Math.max(MIN_ETIQUETA, ...etiquetas.map((e) => e.length))) + 1;
+  const columna = Math.max(columnaDe(etiquetas), columnaMinima);
   return recientes.map((a, i) => {
     const nombre = etiquetas[i].length > MAX_ETIQUETA ? `${etiquetas[i].slice(0, MAX_ETIQUETA - 1)}…` : etiquetas[i];
     const [icono, color] = ICONO[a.status] ?? ['?', undefined];
@@ -187,6 +191,11 @@ const ICONO_FABRICA = {
   pendiente: ['●', 'warning'], 'en-curso': ['●', 'warning'], ok: ['✓', 'success'], fallida: ['✗', 'error'], cancelada: ['✗', 'error'],
 };
 const IA_CORTA = { codex: 'codex', antigravity: 'agy' };
+const MARGEN_FUTURO = 60 * 1000;
+const propio = (tabla, clave) => typeof clave === 'string' && Object.hasOwn(tabla, clave);
+// Lo que viene del archivo no es de fiar: fuera los caracteres de control (una secuencia ANSI u OSC no debe
+// llegar a la terminal) y fuera lo que no sea texto.
+const limpio = (v) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f-\u009f]/gu, '') : '');
 
 // Convierte el texto de activo.json en un objeto o null: más de 64 KiB, JSON roto o forma inesperada no dan nada.
 export function activoDeTexto(texto) {
@@ -200,30 +209,47 @@ export function activoDeTexto(texto) {
   }
 }
 
-// Una fila por estación externa en curso (como mucho 4), con el formato y los colores de filasDeAgentes.
-// Un estado de hace más de 10 minutos es de un proceso que murió sin limpiar: se ignora.
-export function filasDeFabrica(activo, ahora = Date.now()) {
+// Datos ya limpios de las estaciones externas visibles (como mucho 4). Una estación mala se descarta sola; un
+// estado de hace más de 10 minutos (proceso muerto sin limpiar) o de más de 60 s en el futuro descarta todo.
+export function datosDeFabrica(activo, ahora = Date.now()) {
   try {
     if (!activo || typeof activo !== 'object' || !Array.isArray(activo.estaciones)) return [];
     const edad = ahora - Date.parse(activo.actualizado);
-    if (!Number.isFinite(edad) || edad > VIDA_ACTIVO) return [];
-    const visibles = activo.estaciones
-      .filter((e) => e && typeof e.estacion === 'string' && IA_CORTA[e.ia] && ICONO_FABRICA[e.estado])
-      .slice(0, MAX_FILAS);
-    const etiquetas = visibles.map((e) => e.estacion);
-    const columna = Math.min(MAX_ETIQUETA, Math.max(MIN_ETIQUETA, ...etiquetas.map((t) => t.length))) + 1;
-    return visibles.map((e, i) => {
-      const nombre = etiquetas[i].length > MAX_ETIQUETA ? `${etiquetas[i].slice(0, MAX_ETIQUETA - 1)}…` : etiquetas[i];
+    if (!Number.isFinite(edad) || edad > VIDA_ACTIVO || edad < -MARGEN_FUTURO) return [];
+    const datos = [];
+    for (const e of activo.estaciones) {
+      if (datos.length >= MAX_FILAS) break;
+      if (!e || typeof e !== 'object' || !propio(IA_CORTA, e.ia) || !propio(ICONO_FABRICA, e.estado)) continue;
+      const estacion = limpio(e.estacion);
+      if (!estacion) continue;
       const [icono, color] = ICONO_FABRICA[e.estado];
-      const modelo = [IA_CORTA[e.ia], e.modelo || '?', e.esfuerzo].filter(Boolean).join(' ');
-      return [
-        { text: `  ↳ ${nombre.padEnd(columna)}`, dim: true },
-        { text: `· ${ancho(modelo, 24)}`, color: 'claude' },
-        { text: ` ${icono}`, color },
-        ...(esNumero(e.tokens) && e.tokens > 0 ? [{ text: `  ${formatoTokens(e.tokens)} tokens` }] : []),
-      ];
-    });
+      datos.push({
+        estacion, ia: IA_CORTA[e.ia], modelo: limpio(e.modelo) || '?', esfuerzo: limpio(e.esfuerzo), estado: e.estado, icono, color,
+        tokens: esNumero(e.tokens) && e.tokens > 0 ? e.tokens : 0,
+      });
+    }
+    return datos;
   } catch {
     return [];
   }
+}
+
+export const columnaDeFabrica = (activo, ahora = Date.now()) => columnaDe(datosDeFabrica(activo, ahora).map((d) => d.estacion));
+export const detalleDeFabrica = (d) => [d.ia, d.modelo, d.esfuerzo].filter(Boolean).join(' ');
+
+// Una fila por estación externa, con el formato y las columnas de filasDeAgentes: nombre, IA con modelo y
+// esfuerzo, el estado en la columna del encargo y el icono en la misma posición.
+export function filasDeFabrica(activo, ahora = Date.now(), columnaMinima = 0) {
+  const datos = datosDeFabrica(activo, ahora);
+  const columna = Math.max(columnaDe(datos.map((d) => d.estacion)), columnaMinima);
+  return datos.map((d) => {
+    const nombre = d.estacion.length > MAX_ETIQUETA ? `${d.estacion.slice(0, MAX_ETIQUETA - 1)}…` : d.estacion;
+    return [
+      { text: `  ↳ ${nombre.padEnd(columna)}`, dim: true },
+      { text: ancho(detalleDeFabrica(d), 20), color: 'claude' },
+      { text: ` ${ancho(d.estado, ANCHO_ENCARGO)} ` },
+      { text: d.icono, color: d.color },
+      ...(d.tokens > 0 ? [{ text: `  ${formatoTokens(d.tokens)} tokens` }] : []),
+    ];
+  });
 }

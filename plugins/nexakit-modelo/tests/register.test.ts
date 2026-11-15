@@ -48,4 +48,52 @@ describe('nexakit-modelo API', () => {
     expect(barra).toContain('148k en total');
     expect(barra).toContain('97% caché');
   });
+
+  // Prepara el motor con un HOME y un sistema de archivos falsos; `lecturas` cuenta las lecturas de activo.json.
+  const preparar = ($: any, on: any, { home, archivos }: { home: string | null; archivos: Record<string, string> }) => {
+    const lecturas: string[] = [];
+    on('session.start', ($: any, e: any) => ({ cwd: e.cwd }));
+    on('session.model', () => ({ value: 'claude-opus-5-5' }));
+    on('tool.register', ($: any, e: any) => ({ value: { tool: e.name } }));
+    on('env.get', ($: any, e: any) => ({ value: e.name === 'HOME' ? (home ?? undefined) : undefined }));
+    on('fs.exists', ($: any, e: any) => ({ value: e.path in archivos }));
+    on('fs.read', ($: any, e: any) => {
+      lecturas.push(e.path);
+      return { value: archivos[e.path] };
+    });
+    return lecturas;
+  };
+  const pintar = async ($: any) => JSON.stringify(await $.ui.render({ surface: 'terminal', component: 'AbovePrompt', requestId: 'r', props: { hasSurvey: false } }));
+  const activo = (extra: object = {}) => JSON.stringify({
+    pid: 1, id: 'r', repo: 'x', actualizado: new Date().toISOString(),
+    estaciones: [{ estacion: 'implementar', ia: 'codex', modelo: 'gpt-5.5', esfuerzo: 'high', estado: 'en-curso', tokens: 2500 }], ...extra,
+  });
+
+  test('la barra pinta las estaciones externas de la fábrica leídas de activo.json', async ($, on) => {
+    preparar($, on, { home: '/h', archivos: { '/h/.nexakit/fabrica/activo.json': activo() } });
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/test' });
+    const barra = await pintar($);
+    expect(barra).toContain('implementar');
+    expect(barra).toContain('codex gpt-5.5 high');
+    expect(barra).toContain('2,5k tokens');
+  });
+
+  test('con el archivo ausente la barra no muestra filas ni falla', async ($, on) => {
+    preparar($, on, { home: '/h', archivos: {} });
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/test' });
+    expect(await pintar($)).not.toContain('↳');
+  });
+
+  test('sin HOME no se lee nada', async ($, on) => {
+    const lecturas = preparar($, on, { home: null, archivos: { '/h/.nexakit/fabrica/activo.json': activo() } });
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/test' });
+    expect(await pintar($)).not.toContain('↳');
+    expect(lecturas).toHaveLength(0);
+  });
+
+  test('un activo.json de más de 64 KiB (se lee entero: $.fs no informa del tamaño antes) no da filas', async ($, on) => {
+    preparar($, on, { home: '/h', archivos: { '/h/.nexakit/fabrica/activo.json': activo({ relleno: 'a'.repeat(70 * 1024) }) } });
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/test' });
+    expect(await pintar($)).not.toContain('↳');
+  });
 });

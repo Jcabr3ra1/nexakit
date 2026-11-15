@@ -133,8 +133,8 @@ test('Antigravity pinta las estaciones de la fábrica y lee activo.json sin segu
     assert.equal(leido.estaciones.length, 2);
     const lineas = formatAntigravityStatusLine({}, { color: false, now, fabrica: leido }).split('\n');
     assert.equal(lineas.length, 3);
-    assert.match(lineas[1], /↳ implementar +· codex gpt-5\.5 high +● +900 tokens/u);
-    assert.match(lineas[2], /↳ revisar +· agy Gemini 4 low +✗/u);
+    assert.match(lineas[1], /↳ implementar +codex gpt-5\.5 high +● +900 tokens/u);
+    assert.match(lineas[2], /↳ revisar +agy Gemini 4 low +✗/u);
 
     writeFileSync(join(base, 'activo.json'), JSON.stringify({ ...activo, pid: 2 ** 22 + 7 }));
     assert.equal(leerActivoDeFabrica(home), null, 'proceso muerto');
@@ -149,4 +149,24 @@ test('Antigravity pinta las estaciones de la fábrica y lee activo.json sin segu
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+test('Antigravity limpia el texto de la fábrica y alinea sus filas con las de los subagentes', async () => {
+  const { formatAntigravityStatusLine } = await mod();
+  const now = Date.parse('2026-11-15T10:00:00Z');
+  const fabrica = {
+    actualizado: '2026-11-15T10:00:00Z',
+    estaciones: [
+      { estacion: 'x\x1b]0;t\x07y', ia: 'codex', modelo: '\x1b[2Jm', esfuerzo: 'low', estado: 'ok', tokens: 0 },
+      { estacion: 'mala', ia: 'constructor', modelo: 'm', esfuerzo: null, estado: 'ok', tokens: 0 },
+    ],
+  };
+  const payload = { subagents: [{ name: 'niveles:nivel-normal', role: 'implementar', status: 'running' }] };
+  const out = formatAntigravityStatusLine(payload, { color: true, now, fabrica });
+  assert.doesNotMatch(out.replace(/\x1b\[[0-9;]*m/gu, ''), /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/u);
+  const [, a, b, ...resto] = formatAntigravityStatusLine(payload, { color: false, now, fabrica }).split('\n');
+  assert.equal(resto.length, 0);
+  assert.match(a, /●$/u);
+  assert.match(b, /✓$/u);
+  assert.equal(a.length, b.length, 'el icono queda en la misma columna');
 });
