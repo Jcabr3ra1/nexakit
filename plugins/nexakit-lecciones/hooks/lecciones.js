@@ -4,7 +4,7 @@ const CORRECCION = new RegExp([
   String.raw`^\s*no[,.!]?\s+(eso|era|es\s+as[ií]|as[ií]|hagas|uses|me\s+(pidas|preguntes|hables|digas|hagas))\b`,
   // «otra vez» solo cuenta como queja («otra vez lo mismo», «¿otra vez?»), no como petición («córrelo otra vez»).
   String.raw`\botra\s+vez\s+(lo\s+mismo|con\s+eso|el\s+mismo|igual)\b|¿\s*otra\s+vez\s*\?|^\s*otra\s+vez\s*[!?.]*\s*$`,
-  String.raw`\bte\s+(dije|he\s+dicho|hab[ií]a\s+dicho|ped[ií])\b`,
+  String.raw`\bte\s+(dije|he\s+dicho|hab[ií]a\s+dicho|ped[ií])(?!\p{L})`,
   String.raw`\bya\s+te\s+(dije|hab[ií]a)\b`,
   String.raw`\bh[aá]blame\s+en\b`,
   String.raw`\bdeja\s+de\s+(?!lado\b)\p{L}+(r|rme|rte|rlo|rla)\b`,
@@ -14,9 +14,17 @@ const CORRECCION = new RegExp([
   String.raw`\bvolviste\s+a\b`,
   String.raw`\bno\s+vuelvas\s+a\b`,
   String.raw`\bcu[aá]ntas\s+veces\b`,
+  // Quejas con contexto: palabra de queja + referencia a lo que hizo el asistente. Sin «sigue» ni «no funciona» sueltos.
+  String.raw`\bsigu(e|es|en)\s+(haciendo|preguntando|pidiendo)\s+(muchas|demasiadas|tantas|lo\s+mismo|eso)\b`,
+  String.raw`\bsigues\s+(sin\b|\p{L}+ndo\b)`,
+  String.raw`\bya\s+(me\s+)?cans(a|as|aste|[eé]|o)(?!\p{L})`,
+  String.raw`\botra\s+vez\s+con\s+(las|los|tus|tantas|tantos|esas|esos)\b`,
+  String.raw`\b(haces|hiciste|haciendo)\s+(muchas|demasiadas|tantas)\s+preguntas\b`,
+  String.raw`\bno\s+(funciona|sirve|sirvi[oó]|funcion[oó])\s+(lo\s+que|eso\s+que)\s+(hiciste|hizo|arreglaste|cambiaste|me\s+diste)\b`,
+  String.raw`\blo\s+que\s+(hiciste|arreglaste|cambiaste)\s+no\s+(funciona|sirve)\b`,
 ].join('|'), 'iu');
 
-export const NOTA_CORRECCION = '[nexakit: este mensaje parece una corrección. Si de verdad corrige algo que hiciste, guarda la lección en tu memoria persistente (tipo feedback, con el porqué y cómo aplicarla) si no está ya, y aplícala desde ahora; si no lo es, ignora esta nota.]';
+export const NOTA_CORRECCION = '[nexakit: este mensaje parece una corrección. Si de verdad corrige algo que hiciste, guarda la lección en tu memoria persistente (tipo feedback, con el porqué y cómo aplicarla) si no está ya, y aplícala en esta misma respuesta, no solo desde la siguiente; si no lo es, ignora esta nota.]';
 
 export function esCorreccion(texto) {
   return CORRECCION.test(String(texto ?? ''));

@@ -13,6 +13,20 @@ test('reconoce las correcciones habituales y no los mensajes normales', () => {
   assert.match(NOTA_CORRECCION, /memoria persistente/u);
   assert.match(NOTA_CORRECCION, /feedback/u);
   assert.match(NOTA_CORRECCION, /Si de verdad corrige/u);
+  assert.match(NOTA_CORRECCION, /en esta misma respuesta/u);
+});
+
+test('reconoce quejas repetidas escritas sin tildes ni signos y no las peticiones normales', () => {
+  for (const t of ['sigue haciendo muchas preguntas', 'otra vez lo mismo', 'ya cansa', 'eso está mal', 'no era eso', 'te pedí que no preguntaras tanto',
+    'no funciona lo que hiciste', 'por qué volviste a hacerlo', 'ya me cansaste con las preguntas', 'YA CANSA', 'sigues haciendo muchas preguntas porfavor',
+    'otra vez con las preguntas', 'sigues preguntando lo mismo', 'sigues sin entender lo que quiero', 'haces demasiadas preguntas', 'eso esta mal',
+    'lo que hiciste no funciona', 'no sirve lo que hiciste', 'porque volviste a tocar ese archivo', 'te pedi que no hicieras commit'])
+    assert.ok(esCorreccion(t), t);
+  for (const t of ['¿por qué funciona así?', 'sigue con el plan', 'no funciona el wifi del vecino, pero tú sigue', 'otra vez gracias',
+    'corre otra vez las pruebas porfavor', 'sigue con el siguiente paso', 'dime por qué sigue fallando el test', 'el login no funciona en Safari, revísalo',
+    'otra vez abre el archivo de configuración', 'sigue haciendo el plan tal como está', 'explícame cómo funciona el hook', 'prueba otra vez con el otro modelo',
+    'cuando no funciona el build, ¿qué se hace?', 'sigue con lo que estabas haciendo', 'no funciona npm en esta máquina, instálalo de nuevo'])
+    assert.equal(esCorreccion(t), false, t);
 });
 
 test('dos comandos que solo difieren en espacios son el mismo; el permiso de repetir no cuenta', () => {
