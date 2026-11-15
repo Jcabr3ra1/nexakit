@@ -365,6 +365,9 @@ test('git ignore management (.gitignore & .git/info/exclude) and safe decoupling
   const fakeHome = await tempProject(t, {
     '.claude/skills/user-global-skill/SKILL.md': '# keep',
     '.codex/agents/nivel_ligero.toml': '# Generado por `agent-toolkit-inbox agentes`. Ese comando nunca sobrescribe...\nname = "nivel_ligero"\n',
+    '.codex/agents/nivel_normal.toml': '# Generado por `nexakit codex agentes`. Ese comando nunca sobrescribe...\nname = "nivel_normal"\n',
+    '.codex/agents/nivel_exigente.toml': '# Generado por nexakit codex agentes\nname = "nivel_exigente"\n',
+    '.codex/agents/nivel_alto.toml': '# mío, no es de nexakit: Generado por nexakit codex agentes\nname = "nivel_alto"\n',
     '.codex/agents/custom_agent.toml': 'name = "custom"\n'
   });
   await fs.mkdir(path.join(fakeHome, '.agents/skills'), { recursive: true });
@@ -383,7 +386,14 @@ test('git ignore management (.gitignore & .git/info/exclude) and safe decoupling
     codexHome: path.join(fakeHome, '.codex')
   });
   const globalDetached = await applyToolkitDetach(globalDetachPlan);
-  assert.equal(globalDetached.removedCount, 2); // mcp-builder symlink + nivel_ligero.toml
+  // mcp-builder symlink + los tres agentes con marca (antigua, nueva y la que escribe `codex agentes`)
+  assert.equal(globalDetached.removedCount, 4);
+  for (const kept of ['nivel_alto.toml', 'custom_agent.toml']) {
+    assert.equal(await fs.access(path.join(fakeHome, '.codex/agents', kept)).then(() => true, () => false), true);
+  }
+  for (const gone of ['nivel_normal.toml', 'nivel_exigente.toml']) {
+    assert.equal(await fs.access(path.join(fakeHome, '.codex/agents', gone)).then(() => true, () => false), false);
+  }
   assert.equal(await fs.access(path.join(fakeHome, '.agents/skills/mcp-builder')).then(() => true, () => false), false);
   assert.equal(await fs.access(path.join(fakeHome, '.codex/agents/nivel_ligero.toml')).then(() => true, () => false), false);
   assert.equal(await fs.readFile(path.join(fakeHome, '.claude/skills/user-global-skill/SKILL.md'), 'utf8'), '# keep');

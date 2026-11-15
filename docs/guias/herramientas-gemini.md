@@ -93,12 +93,12 @@ Cada llamada usa una carpeta única bajo `~/.agent-toolkit/gemini/<comando>/`
 repetir respuestas completas. Los contadores faltantes son null; no se inventa
 un precio o ahorro. En análisis se conservan también los archivos elegidos.
 
-Para una colaboración existente, añade `--task <id> --project-root <raíz>` a la
-consulta. El Toolkit registra automáticamente el uso informado por `agy` con un
-id estable basado en la conversación. No crea colaboraciones, no agrega Gemini
-como participante de revisión. Si guardar la medición falla después de generar,
-la salida conserva el artefacto; registra esos contadores con `inbox medir` sin
-repetir la consulta.
+El Toolkit registra automáticamente el uso informado por `agy` (investigar,
+imagen, consultar y analizar) en `~/.agent-toolkit/gemini/consumo.jsonl`, una
+línea por consulta con un id estable basado en la conversación. El archivo es
+privado (`0o600`), no sigue enlaces y no guarda prompts ni respuestas. Si guardar
+la medición falla después de generar, la salida conserva el artefacto y la orden
+termina con error; no repitas la consulta.
 
 La medición se intenta guardar antes de copiar o esperar los artefactos. Si ese
 paso posterior falla, el JSON conserva la carpeta, conversación y consumo para

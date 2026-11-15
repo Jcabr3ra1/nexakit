@@ -35,7 +35,10 @@ const PROJECT_MANIFEST_FILE = 'manifest.json';
 const PROJECT_LOCKFILE_NAME = 'skills-lock.json';
 const IGNORE_BLOCK_START = '# >>> agent-toolkit (managed) >>>';
 const IGNORE_BLOCK_END = '# <<< agent-toolkit (managed) <<<';
-const LEVEL_AGENT_HEADER = '# Generado por `agent-toolkit-inbox agentes`.';
+// La marca antigua (bandeja retirada) sigue reconociéndose: esos archivos ya escritos son de nexakit.
+// `nexakit codex agentes` escribe hoy la marca sin comillas; level-agents.js, la de comillas.
+const LEVEL_AGENT_HEADERS = ['# Generado por nexakit codex agentes', '# Generado por `nexakit codex agentes`.', '# Generado por `agent-toolkit-inbox agentes`.'];
+const isLevelAgentContent = text => LEVEL_AGENT_HEADERS.some(header => text.startsWith(header));
 const LEVEL_AGENT_NAMES = ['nivel_ligero.toml', 'nivel_normal.toml', 'nivel_exigente.toml', 'nivel_alto.toml'];
 
 export { SIGNAL_LABELS };
@@ -1377,7 +1380,7 @@ export async function planToolkitDetach({
         const info = await lstatOrNull(target);
         if (!info?.isFile() || info.isSymbolicLink() || info.size > 65536) continue;
         const content = await fs.readFile(target, 'utf8').catch(() => '');
-        if (content.startsWith(LEVEL_AGENT_HEADER)) {
+        if (isLevelAgentContent(content)) {
           items.push({
             scope: 'global',
             client: 'codex',
@@ -1530,7 +1533,7 @@ export async function applyToolkitDetach(plan) {
         continue;
       }
       const text = await fs.readFile(item.target, 'utf8').catch(() => '');
-      if (!text.startsWith(LEVEL_AGENT_HEADER)) {
+      if (!isLevelAgentContent(text)) {
         conflicts++;
         updatedItems.push({ ...item, action: 'conflict' });
         continue;

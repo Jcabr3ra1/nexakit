@@ -36,6 +36,16 @@ test("the plan covers four Codex levels from the live catalog and writes nothing
   assert.match(levelAgentsTable(plan), /Vista previa: no se escribió nada.*crear 4/u);
 });
 
+test("generated files carry the nexakit mark, not the retired inbox one", async () => {
+  const plan = await levelAgentPlan({ codexHome: await home() });
+  for (const file of plan.files) {
+    assert.ok(file.content.startsWith("# Generado por `nexakit codex agentes`. "));
+    assert.doesNotMatch(file.content, /agent-toolkit-inbox/u);
+  }
+  assert.match(levelAgentsTable(plan), /nexakit codex agentes --apply/u);
+  assert.doesNotMatch(levelAgentsTable(plan), /agent-toolkit-inbox/u);
+});
+
 test("generated files are valid TOML with every field Codex requires", async () => {
   const plan = await levelAgentPlan({ codexHome: await home() });
   for (const file of plan.files) {

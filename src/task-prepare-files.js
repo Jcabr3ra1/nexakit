@@ -2,15 +2,12 @@ import fs from "node:fs/promises";
 import { constants } from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { decode, copyBytes, parseEventJson } from "./client-output-json.js";
-import { copyTaskJson, TASK_LIMITS } from "./task-prepare.js";
+import { copyTaskJson, TASK_LIMITS, TaskInputError, reject, parseTaskDocument } from "./task-document.js";
 import { containsSensitiveData, isCredentialPath } from "./sensitive-data.js";
 import { IS_WINDOWS, warnPlatformPermissions, toGitPath, isPortableAbsolutePath } from "./platform.js";
 
-export class TaskInputError extends Error {
-  constructor(code) { super("Task input rejected"); this.code = code; }
-}
-const reject = code => { throw new TaskInputError(code); };
+// Reexportados desde task-document.js mientras existan sus importadores.
+export { TaskInputError, parseTaskDocument };
 const signature = s => JSON.stringify([s.dev, s.ino, s.uid, s.gid, s.mode, s.nlink, s.size, s.mtimeMs, s.ctimeMs, s.mtimeNs, s.ctimeNs], (_key, value) => typeof value === "bigint" ? String(value) : value);
 // NTFS file ids may exceed Number.MAX_SAFE_INTEGER. Preserve exact device/inode ids;
 // the bounded sizes and permission fields remain numbers for existing read budgets.
@@ -28,38 +25,6 @@ const forbiddenInput = value => {
   const p = toGitPath(value);
   return isCredentialPath(p) || /(?:^|\/)(?:\.git|\.obsidian|\.claude|\.codex|\.gemini|\.agents|\.(?:credentials?|secrets?)(?:\.[^/]*)?)(?:\/|$)/i.test(p) || /\.keychain(?:-db)?$/i.test(p);
 };
-
-// Compare decimal values after their shortest JSON round trip, not binary-rational exactness.
-function decimalIdentity(token) {
-  const [m, exp = "0"] = token.toLowerCase().split("e");
-  const minus = m.startsWith("-"), fraction = m.split(".")[1]?.length ?? 0;
-  let digits = m.replace(/[-.]/g, "").replace(/^0+/, ""); if (!digits) return "0";
-  let scale = Number(exp) - fraction;
-  if (!Number.isSafeInteger(scale)) reject("task-file-format");
-  const trailing = digits.length - digits.replace(/0+$/, "").length;
-  digits = digits.slice(0, digits.length - trailing); scale += trailing;
-  return (minus ? "-" : "") + digits + "e" + scale;
-}
-function checkNumbers(text) {
-  let string = false, escape = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (string) { if (escape) escape = false; else if (c === "\\") escape = true; else if (c === '"') string = false; continue; }
-    if (c === '"') { string = true; continue; }
-    if (c === "-" || /[0-9]/.test(c)) {
-      const m = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/.exec(text.slice(i)); if (!m) reject("task-file-format");
-      const n = Number(m[0]);
-      if (!Number.isFinite(n) || Number.isInteger(n) && !Number.isSafeInteger(n) || decimalIdentity(m[0]) !== decimalIdentity(String(n))) reject("task-file-format");
-      i += m[0].length - 1;
-    }
-  }
-}
-export function parseTaskDocument(bytes) {
-  try {
-    const text = decode(copyBytes(bytes, TASK_LIMITS.fileBytes)); checkNumbers(text);
-    return copyTaskJson(parseEventJson(text));
-  } catch { reject("task-file-format"); }
-}
 
 /** Only explicit source files; no referenced paths, credentials, config, Git or writes. */
 export async function readTaskInputs(paths, cwd, dependencies = {}) {

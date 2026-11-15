@@ -3,12 +3,14 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import Ajv2020 from "ajv/dist/2020.js";
 import { copyInertJson } from "./client-output-json.js";
+import { copyTaskJson, TASK_LIMITS } from "./task-document.js";
 import { createModelSelector } from "./model-selection.js";
 import { containsSensitiveData, isCredentialPath } from "./sensitive-data.js";
 
+// copyTaskJson y TASK_LIMITS viven en task-document.js; se reexportan mientras existan sus importadores.
+export { copyTaskJson, TASK_LIMITS };
+
 export const TASK_SCHEMA_ID = "https://agent-toolkit.local/schemas/agent-task-prepare.schema.json";
-export const TASK_LIMITS = Object.freeze({ fileBytes: 524288, totalBytes: 2097152, nodes: 30000, depth: 32,
-  textBytes: 2000000, briefBytes: 131072, summaryBytes: 8192 });
 export const TASK_FACTS = Object.freeze({ executed: false, sent: false, wrote: false, permissionVerified: false,
   sourceBaseVerified: false, runtimeReady: false, verifiedAdmission: false, modelVerification: "unknown" });
 const BASE_ID = "https://agent-toolkit.local/schemas/agent-model-selection.schema.json";
@@ -16,7 +18,6 @@ const PREF_ID = "https://agent-toolkit.local/schemas/agent-model-preference.sche
 const canonical = v => v === null || typeof v !== "object" ? JSON.stringify(v) : Array.isArray(v) ?
   `[${v.map(canonical).join(",")}]` : `{${Object.keys(v).sort().map(k => `${JSON.stringify(k)}:${canonical(v[k])}`).join(",")}}`;
 export const taskHash = v => createHash("sha256").update(canonical(v)).digest("hex");
-const control = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/u;
 const pathKey = s => s.normalize("NFC").toLowerCase();
 const credentialReference = value => { const s = toGitPath(value); return isCredentialPath(s) || /(?:^|\/)(?:\.(?:credentials?|secrets?)(?:\.[^/]*)?)(?:\/|$)/i.test(s) || /\.keychain(?:-db)?$/i.test(s); };
 export function taskRelativePath(s, dot = false) {
@@ -24,20 +25,6 @@ export function taskRelativePath(s, dot = false) {
     !/[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069\\:*?\[\]<>|`]/u.test(s) &&
     s.split("/").every(p => p && ![".", "..", ".git", ".obsidian"].includes(p.toLowerCase())) &&
     !credentialReference(s) && !containsSensitiveData(s));
-}
-export function copyTaskJson(input) {
-  const v = copyInertJson(input); let nodes = 0, textBytes = 0;
-  function walk(x, depth) {
-    if (++nodes > TASK_LIMITS.nodes || depth > TASK_LIMITS.depth) throw Error("Task data limit");
-    if (typeof x === "string") {
-      textBytes += Buffer.byteLength(x); if (Buffer.from(x, "utf8").toString("utf8") !== x || control.test(x)) throw Error("Task text invalid");
-    } else if (x !== null && typeof x === "object") for (const k of Object.keys(x)) {
-      textBytes += Buffer.byteLength(k); if (control.test(k) || Buffer.from(k, "utf8").toString("utf8") !== k) throw Error("Task key invalid");
-      walk(x[k], depth + 1);
-    }
-    if (textBytes > TASK_LIMITS.textBytes) throw Error("Task data limit");
-  }
-  walk(v, 0); return v;
 }
 function sensitive(v) {
   return typeof v === "string" ? containsSensitiveData(v) : v !== null && typeof v === "object" &&

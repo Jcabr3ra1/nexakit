@@ -91,7 +91,8 @@ test("estado reports availability and models, or that agy is missing", async () 
 
 test("the CLI maps options to the tools and rejects bad usage", async () => {
   const seen = [];
-  const tools = { investigar: async input => { seen.push(["investigar", input]); return { ok: true }; }, imagen: async input => { seen.push(["imagen", input]); return { ok: true }; }, estado: async () => ({ available: true }) };
+  const strip = ({ onUsage, ...input }) => (assert.equal(typeof onUsage, "function"), input);
+  const tools = { investigar: async input => { seen.push(["investigar", strip(input)]); return { ok: true }; }, imagen: async input => { seen.push(["imagen", strip(input)]); return { ok: true }; }, estado: async () => ({ available: true }) };
   const run = async argv => {
     const out = [], errors = [];
     const code = await runGeminiCli(argv, { tools, out: t => out.push(t), err: t => errors.push(t) });
@@ -208,18 +209,51 @@ test('audio is explicitly unavailable after failed native validation, without sp
   assert.equal(f.calls.length,0);
 });
 
-test('explicit task binding records provider usage once and never infers on an invalid collaboration', async () => {
+test('the CLI records provider usage once in its own consumo.jsonl and rejects the retired task binding', async () => {
   const calls=[], records=[];
-  const store={getCollaboration:async ()=>({}),recordUsage:async input=>{records.push(input);return {recorded:true};}};
+  const store={recordUsage:async measurement=>{records.push(measurement);return {recorded:true};}};
   const tools={consultar:async ()=>{calls.push(1);return {kind:'consultar',conversationId:CONVERSATION,model:'gemini-3.8-flash-low',usage:{input_tokens:100,cache_read_tokens:40,output_tokens:5,total_tokens:105},durationMs:500};}};
-  const args=['consultar','--prompt','hi','--task',CONVERSATION,'--project-root','/project'];
   const io={tools,usageStore:store,out:()=>{},err:()=>{}};
-  assert.equal(await runGeminiCli(args,io),0);
-  assert.equal(records[0].measurement.totalTokens,105);
-  assert.equal(records[0].measurement.cacheReadTokens,40);
-  assert.equal(records[0].measurement.source,'client-reported');
-  assert.equal(await runGeminiCli(args,{...io,usageStore:{getCollaboration:async ()=>{throw Error('missing');}}}),1);
+  assert.equal(await runGeminiCli(['consultar','--prompt','hi'],io),0);
+  assert.equal(records.length,1);
+  assert.equal(records[0].totalTokens,105);
+  assert.equal(records[0].cacheReadTokens,40);
+  assert.equal(records[0].source,'client-reported');
+  assert.equal(records[0].id,'gemini:'+CONVERSATION);
+  assert.equal(await runGeminiCli(['consultar','--prompt','hi','--task',CONVERSATION,'--project-root','/project'],io),2);
   assert.equal(calls.length,1);
+});
+
+test('the usage store appends private lines to consumo.jsonl without following links', async () => {
+  const { createGeminiUsageStore } = await import('../src/gemini-usage-store.js');
+  const directory = path.join(root, 'consumo-case');
+  const store = createGeminiUsageStore({ directory, now: () => new Date('2026-11-15T10:00:00Z') });
+  const measurement = { id: 'gemini:' + CONVERSATION, agent: 'gemini', model: 'gemini-3.8-flash-low', source: 'client-reported', phase: 'other', inputTokens: 10, outputTokens: 2, totalTokens: 12 };
+  assert.deepEqual(await store.recordUsage(measurement), { recorded: true, id: measurement.id });
+  await store.recordUsage({ ...measurement, id: 'gemini:otra' });
+  const file = path.join(directory, 'consumo.jsonl');
+  const lines = (await fs.readFile(file, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(lines.length, 2);
+  assert.equal(lines[0].at, '2026-11-15T10:00:00.000Z');
+  assert.equal(lines[0].totalTokens, 12);
+  assert.equal(lines[0].prompt, undefined);
+  if (process.platform !== 'win32') assert.equal((await fs.stat(file)).mode & 0o777, 0o600);
+  await assert.rejects(store.recordUsage({ ...measurement, phase: 'inventada' }));
+  if (process.platform !== 'win32') {
+    const linked = path.join(root, 'consumo-link');
+    const target = path.join(root, 'consumo-destino');
+    await fs.mkdir(linked, { recursive: true });
+    await fs.writeFile(target, 'intacto');
+    await fs.symlink(target, path.join(linked, 'consumo.jsonl'));
+    await assert.rejects(createGeminiUsageStore({ directory: linked }).recordUsage(measurement));
+    assert.equal(await fs.readFile(target, 'utf8'), 'intacto');
+    const outside = path.join(root, 'consumo-fuera');
+    await fs.mkdir(outside);
+    const dirLink = path.join(root, 'consumo-dir-link');
+    await fs.symlink(outside, dirLink);
+    await assert.rejects(createGeminiUsageStore({ directory: dirLink }).recordUsage(measurement));
+    await assert.rejects(fs.access(path.join(outside, 'consumo.jsonl')));
+  }
 });
 
 test('copy failures and late images still record usage and expose the recoverable run',async()=>{
@@ -229,11 +263,11 @@ test('copy failures and late images still record usage and expose the recoverabl
     await fs.mkdir(target);await fs.writeFile(path.join(target,'respuesta.md'),'preserve');
     const tools={ [command]: options=>api[command]({...options,outRoot:f.outRoot,run:f.run(f.ok()),brainDirectory:f.brainDirectory,waitMs:1,pollMs:1}) };
     let stdout='',stderr='';
-    const code=await runGeminiCli([command,'--prompt','test','--task',CONVERSATION,'--project-root',f.directory,...(command==='consultar'?['--copiar-a',target]:[])],{
-      tools,usageStore:{getCollaboration:async()=>({}),recordUsage:async record=>{records.push(record);return {recorded:true};}},
+    const code=await runGeminiCli([command,'--prompt','test',...(command==='consultar'?['--copiar-a',target]:[])],{
+      tools,usageStore:{recordUsage:async record=>{records.push(record);return {recorded:true};}},
       out:s=>{stdout+=s;},err:s=>{stderr+=s;}
     });
-    assert.equal(code,1);assert.equal(records.length,1);assert.equal(records[0].measurement.totalTokens,100);
+    assert.equal(code,1);assert.equal(records.length,1);assert.equal(records[0].totalTokens,100);
     const result=JSON.parse(stdout);
     assert.ok(result.directory);assert.equal(result.usageRecord.recorded,true);
     assert.equal((await api.historial({outRoot:f.outRoot})).runs[0].directory,result.directory);
