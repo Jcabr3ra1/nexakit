@@ -23,7 +23,8 @@
     "catalog:add": "node scripts/add-catalog-skill.js",
     "prepack": "npm run build && node scripts/prepare-package.js",
     "test:mod": "claude plugin test plugins/nexakit-modelo",
-    "plugins:huellas": "node scripts/plugin-huellas.js"
+    "plugins:huellas": "node scripts/plugin-huellas.js",
+    "tipos:codex": "node scripts/generar-tipos-codex.mjs"
   },
   "engines": {
     "node": ">=24"

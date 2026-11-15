@@ -1,0 +1,69 @@
+{
+  "metodos": {
+    "initialize": {
+      "resultado": {
+        "userAgent": "codex-falso/0.0.0",
+        "codexHome": "/tmp/codex-falso",
+        "platformFamily": "unix",
+        "platformOs": "macos"
+      }
+    },
+    "thread/start": {
+      "resultado": {
+        "thread": {
+          "id": "hilo-1"
+        },
+        "model": "gpt-5.5",
+        "modelProvider": "openai",
+        "serviceTier": null,
+        "disabledPluginIds": [],
+        "cwd": "/tmp",
+        "instructionSources": [],
+        "approvalPolicy": "untrusted",
+        "approvalsReviewer": "user",
+        "sandbox": {
+          "type": "readOnly",
+          "networkAccess": false
+        },
+        "reasoningEffort": "high"
+      }
+    },
+    "turn/start": {
+      "resultado": {
+        "turn": {
+          "id": "turno-1",
+          "rootTurnId": null,
+          "items": [],
+          "itemsView": "full",
+          "status": "inProgress",
+          "error": null,
+          "startedAt": null,
+          "completedAt": null,
+          "durationMs": null
+        }
+      }
+    },
+    "turn/interrupt": {
+      "resultado": {},
+      "notificaciones": [
+        {
+          "metodo": "turn/completed",
+          "params": {
+            "threadId": "hilo-1",
+            "turn": {
+              "id": "turno-1",
+              "rootTurnId": null,
+              "items": [],
+              "itemsView": "notLoaded",
+              "status": "interrupted",
+              "error": null,
+              "startedAt": null,
+              "completedAt": null,
+              "durationMs": null
+            }
+          }
+        }
+      ]
+    }
+  }
+}

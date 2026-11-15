@@ -1,0 +1,109 @@
+{
+  "metodos": {
+    "initialize": {
+      "resultado": {
+        "userAgent": "codex-falso/0.0.0",
+        "codexHome": "/tmp/codex-falso",
+        "platformFamily": "unix",
+        "platformOs": "macos"
+      }
+    },
+    "thread/start": {
+      "resultado": {
+        "thread": {
+          "id": "hilo-1"
+        },
+        "model": "gpt-5.5",
+        "modelProvider": "openai",
+        "serviceTier": null,
+        "disabledPluginIds": [],
+        "cwd": "/tmp",
+        "instructionSources": [],
+        "approvalPolicy": "untrusted",
+        "approvalsReviewer": "user",
+        "sandbox": {
+          "type": "readOnly",
+          "networkAccess": false
+        },
+        "reasoningEffort": "high"
+      }
+    },
+    "turn/start": {
+      "resultado": {
+        "turn": {
+          "id": "turno-1",
+          "rootTurnId": null,
+          "items": [],
+          "itemsView": "full",
+          "status": "inProgress",
+          "error": null,
+          "startedAt": null,
+          "completedAt": null,
+          "durationMs": null
+        }
+      },
+      "notificaciones": [
+        {
+          "metodo": "thread/tokenUsage/updated",
+          "params": {
+            "threadId": "hilo-1",
+            "turnId": "turno-1",
+            "tokenUsage": {
+              "total": {
+                "totalTokens": 1500,
+                "inputTokens": 1200,
+                "cachedInputTokens": 0,
+                "cacheWriteInputTokens": 0,
+                "outputTokens": 300,
+                "reasoningOutputTokens": 100
+              },
+              "last": {
+                "totalTokens": 1500,
+                "inputTokens": 1200,
+                "cachedInputTokens": 0,
+                "cacheWriteInputTokens": 0,
+                "outputTokens": 300,
+                "reasoningOutputTokens": 100
+              },
+              "modelContextWindow": null
+            }
+          }
+        },
+        {
+          "metodo": "item/completed",
+          "params": {
+            "threadId": "hilo-1",
+            "turnId": "turno-1",
+            "completedAtMs": 0,
+            "item": {
+              "type": "agentMessage",
+              "id": "msg-1",
+              "text": "{\"hallazgos\": \"no es una lista\"}",
+              "phase": null,
+              "memoryCitation": null,
+              "delivery": null,
+              "questions": null
+            }
+          }
+        },
+        {
+          "metodo": "turn/completed",
+          "params": {
+            "threadId": "hilo-1",
+            "turn": {
+              "id": "turno-1",
+              "rootTurnId": null,
+              "items": [],
+              "itemsView": "notLoaded",
+              "status": "completed",
+              "error": null,
+              "startedAt": null,
+              "completedAt": null,
+              "durationMs": null
+            }
+          }
+        }
+      ]
+    }
+  }
+}

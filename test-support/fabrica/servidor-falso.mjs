@@ -1,7 +1,7 @@
 // Servidor JSON-RPC falso por stdio (NDJSON) para probar a los conectores de la fábrica.
 // Uso: node test-support/fabrica/servidor-falso.mjs <guion.json>
 // El formato del guion está documentado en .superpowers/sdd/2026-11-14-fabrica-nucleo/tarea-3-report.md.
-import { readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
 const rutaGuion = process.argv[2];
@@ -10,6 +10,11 @@ if (!rutaGuion) {
   process.exit(2);
 }
 const guion = JSON.parse(readFileSync(rutaGuion, 'utf8'));
+// `<servidor> <guion> --version` imita `codex --version` con el texto de `guion.version`.
+if (process.argv[3] === '--version') {
+  process.stdout.write(`${guion.version ?? 'servidor-falso 0.0.0'}\n`);
+  process.exit(0);
+}
 const metodos = guion.metodos ?? {};
 const contadores = new Map();
 let siguientePeticion = 1;
@@ -78,6 +83,12 @@ async function atender(mensaje) {
     else params.result = mensaje.result;
     await enviar({ method: 'servidor/respuestaRecibida', params });
   }
+  // `alResponder[id]`: efectos (notificaciones, peticiones...) cuando el cliente contesta esa petición.
+  const efectos = mensaje.id !== undefined ? guion.alResponder?.[String(mensaje.id)] : undefined;
+  if (efectos) {
+    if (efectos.retrasoMs) await pausa(efectos.retrasoMs);
+    await ejecutarEfectos(efectos);
+  }
 }
 
 // Los mensajes se atienden en orden de llegada, para que los retrasos sean deterministas.
@@ -91,6 +102,8 @@ lector.on('line', (linea) => {
     return;
   }
   if (mensaje === null || typeof mensaje !== 'object') return;
+  // `registro`: cada mensaje recibido se guarda como una línea JSON para que la prueba lo afirme.
+  if (guion.registro) appendFileSync(guion.registro, `${JSON.stringify(mensaje)}\n`);
   cola = cola.then(() => atender(mensaje)).catch((error) => {
     process.stderr.write(`servidor-falso: ${error?.stack ?? error}\n`);
   });
