@@ -5,8 +5,7 @@ import path from 'node:path';
 import type { Encargo, ResultadoEstacion } from './conectores/tipos.js';
 import type { Recorrido } from './enrutador.js';
 import { ErrorFabrica } from './errores.js';
-import type { EstadoEstacionEjecucion } from './ejecutor.js';
-import { NOMBRES_ESTACION, type IA, type NombreEstacion } from './esquemas.js';
+import { NOMBRES_ESTACION, type EstadoEstacionEjecucion, type IA, type NombreEstacion } from './esquemas.js';
 
 /** Días que se conserva un rastro antes de que `podar` lo borre. */
 export const DIAS_RASTRO = 90;

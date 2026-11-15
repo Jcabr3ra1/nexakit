@@ -6,7 +6,7 @@ import { comparar, instantanea, type Instantanea } from './disco.js';
 import { calcularCoste, comprobarHuella, descarte, type EstacionRecorrido, type Recorrido } from './enrutador.js';
 import { ErrorFabrica } from './errores.js';
 import { ESTACIONES } from './estaciones.js';
-import type { IA, NombreEstacion } from './esquemas.js';
+import type { EstadoEstacionEjecucion, IA, NombreEstacion } from './esquemas.js';
 import * as rastro from './rastro.js';
 
 /** Estaciones externas a la vez, salvo que la configuración diga otra cosa. */
@@ -31,15 +31,7 @@ const SIN_RESPUESTA = 'el revisor no respondió a la cancelación';
 const AGOTADO: unique symbol = Symbol('agotado');
 
 export type FaseRecorrido = 'en-curso' | 'terminado' | 'fallido' | 'cancelado';
-export type EstadoEstacionEjecucion =
-  | 'pendiente'
-  | 'en-curso'
-  | 'ok'
-  | 'fallida'
-  | 'cancelada'
-  | 'claude'
-  | 'omitida'
-  | 'sin-modelo';
+export type { EstadoEstacionEjecucion };
 
 export interface EstadoRecorrido {
   id: string;
@@ -215,28 +207,14 @@ function persistir(ej: Ejecucion): Promise<void> {
   return ej.guardado;
 }
 
-/** Quién escribe `activo.json` en una carpeta de usuario: un solo archivo, aunque haya varios recorridos. */
-interface Publicador {
+/** Estado vivo de este proceso: un solo `activo.json`, el de la última ejecución que cambió. */
+const vivo: {
+  mostrada: Ejecucion | undefined;
   ultimaEscritura: number;
   temporizador: NodeJS.Timeout | undefined;
-  /** Escrituras y borrado en orden. */
+  /** Escrituras y borrados en orden. */
   cadena: Promise<void>;
-  /** Recorridos de este proceso que siguen en curso, del más antiguo al más reciente. */
-  activas: Ejecucion[];
-  /** El que se muestra: el último que cambió. */
-  mostrada: Ejecucion | undefined;
-}
-
-const publicadores = new Map<string, Publicador>();
-
-function publicadorDe(home: string): Publicador {
-  let pub = publicadores.get(home);
-  if (pub === undefined) {
-    pub = { ultimaEscritura: 0, temporizador: undefined, cadena: Promise.resolve(), activas: [], mostrada: undefined };
-    publicadores.set(home, pub);
-  }
-  return pub;
-}
+} = { mostrada: undefined, ultimaEscritura: 0, temporizador: undefined, cadena: Promise.resolve() };
 
 function contenidoActivo(ej: Ejecucion): rastro.Activo {
   return {
@@ -255,13 +233,15 @@ function contenidoActivo(ej: Ejecucion): rastro.Activo {
   };
 }
 
-/** Encola la escritura del estado de la ejecución mostrada. El estado vivo es de cortesía: un fallo se ignora. */
-function escribirActivo(home: string, pub: Publicador): void {
-  pub.ultimaEscritura = Date.now();
-  pub.cadena = pub.cadena
+/** Encola la escritura de la ejecución mostrada. El estado vivo es de cortesía: un fallo se ignora. */
+function escribirActivo(): void {
+  vivo.ultimaEscritura = Date.now();
+  vivo.cadena = vivo.cadena
     .then(() => {
-      const mostrada = pub.mostrada;
-      return mostrada === undefined ? undefined : rastro.guardarActivo(home, contenidoActivo(mostrada));
+      const mostrada = vivo.mostrada;
+      return mostrada === undefined || mostrada.activoCerrado
+        ? undefined
+        : rastro.guardarActivo(mostrada.home, contenidoActivo(mostrada));
     })
     .catch(() => {});
 }
@@ -269,49 +249,35 @@ function escribirActivo(home: string, pub: Publicador): void {
 /** Publica el estado vivo, con como mucho una escritura por intervalo: lo que cambie entre medias sale en la siguiente. */
 function publicarActivo(ej: Ejecucion): void {
   if (ej.activoCerrado) return;
-  const pub = publicadorDe(ej.home);
-  pub.mostrada = ej;
-  const espera = pub.ultimaEscritura + ej.intervaloActivoMs - Date.now();
+  vivo.mostrada = ej;
+  const espera = vivo.ultimaEscritura + ej.intervaloActivoMs - Date.now();
   if (espera <= 0) {
-    escribirActivo(ej.home, pub);
-  } else if (pub.temporizador === undefined) {
+    escribirActivo();
+  } else if (vivo.temporizador === undefined) {
     // Sin `unref` un recorrido terminado retendría el proceso.
-    pub.temporizador = setTimeout(() => {
-      pub.temporizador = undefined;
-      escribirActivo(ej.home, pub);
+    vivo.temporizador = setTimeout(() => {
+      vivo.temporizador = undefined;
+      escribirActivo();
     }, espera);
-    pub.temporizador.unref();
+    vivo.temporizador.unref();
   }
 }
 
 /**
- * La ejecución termina: si no queda otra en curso, escribe el estado final y borra `activo.json`. Si
- * otro proceso se lo quedó, no lo toca. Nunca lanza.
+ * La ejecución termina: intenta siempre borrar `activo.json` (nunca el de otro `pid`, de eso se ocupa
+ * `guardarActivo`) y no vuelve a publicar nada. Un fallo al borrar no hace fallar el recorrido.
  */
 function cerrarActivo(ej: Ejecucion): Promise<void> {
   ej.activoCerrado = true;
-  const pub = publicadorDe(ej.home);
-  pub.activas = pub.activas.filter((otra) => otra !== ej);
-  if (pub.mostrada === ej) pub.mostrada = pub.activas.at(-1);
-  pub.cadena = pub.cadena
-    .then(async () => {
-      const actual = rastro.leerActivo(ej.home);
-      if (actual !== null && actual.pid !== process.pid) return;
-      const siguiente = pub.activas.at(-1);
-      if (siguiente !== undefined) {
-        pub.mostrada = siguiente;
-        pub.ultimaEscritura = Date.now();
-        await rastro.guardarActivo(ej.home, contenidoActivo(siguiente));
-        return;
-      }
-      clearTimeout(pub.temporizador);
-      pub.temporizador = undefined;
-      await rastro.guardarActivo(ej.home, contenidoActivo(ej));
-      await rastro.guardarActivo(ej.home, null);
-      if (pub.activas.length === 0 && publicadores.get(ej.home) === pub) publicadores.delete(ej.home);
-    })
-    .catch(() => {});
-  return pub.cadena;
+  if (vivo.mostrada === ej) {
+    vivo.mostrada = undefined;
+    clearTimeout(vivo.temporizador);
+    vivo.temporizador = undefined;
+    // El archivo desaparece: el siguiente recorrido empieza de cero y publica sin esperar.
+    vivo.ultimaEscritura = 0;
+  }
+  vivo.cadena = vivo.cadena.then(() => rastro.guardarActivo(ej.home, null)).catch(() => {});
+  return vivo.cadena;
 }
 
 function marcar(fila: FilaEstado, estado: EstadoEstacionEjecucion, motivo?: string): void {
@@ -557,7 +523,6 @@ export async function lanzar(r: Recorrido, opciones: OpcionesLanzar): Promise<{ 
     registro.delete(id);
     throw new ErrorFabrica(`No se pudo guardar el estado del rastro: ${mensajeDe(ej.errorRastro)}`);
   }
-  publicadorDe(home).activas.push(ej);
   publicarActivo(ej);
   // La poda corre en segundo plano y nunca hace fallar el recorrido.
   const poda = rastro.podar(home).then(

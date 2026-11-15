@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -327,16 +328,23 @@ test('un activo.json de otro pid no se borra: ni al terminar ni con guardarActiv
   assert.deepEqual(leerActivoSiExiste(home), ajeno, 'el archivo ajeno queda como estaba');
 });
 
-test('con dos recorridos a la vez, uno que termina deja el estado del otro y el último lo borra', async () => {
+test('con dos recorridos a la vez no quedan restos: cada fin borra y el siguiente cambio vuelve a publicar', async () => {
   const dir = crearRepo();
   const home = temporal('fabrica-home-');
   const rapido = puerta();
   const lento = puerta();
+  const fin = puerta();
   const rA = await recorridoCon(dir, [externa('seguridad')]);
   const rB = await recorridoCon(dir, [externa('pruebas', 'codex', 'gpt-6-sol', 'medium')]);
   const codex = conector(async (encargo, _s, alProgreso) => {
     alProgreso({ tokens: 9 });
-    await (encargo.estacion === 'seguridad' ? rapido : lento).abierta;
+    if (encargo.estacion === 'seguridad') {
+      await rapido.abierta;
+      return ok(encargo);
+    }
+    await lento.abierta;
+    alProgreso({ tokens: 33 });
+    await fin.abierta;
     return ok(encargo);
   });
   const opciones = { raiz: dir, conectores: { codex }, home, intervaloActivoMs: 10 };
@@ -347,12 +355,54 @@ test('con dos recorridos a la vez, uno que termina deja el estado del otro y el 
 
   rapido.abrir();
   await esperar(idA);
-  const queda = await esperarActivo(home, (a) => a.id === idB, 'no quedó el estado del recorrido B');
+  lento.abrir();
+  const queda = await esperarActivo(home, (a) => a.id === idB && tokensDe(a, 'pruebas') === 33, 'no volvió el estado del recorrido B');
   assert.equal(queda.pid, process.pid);
 
-  lento.abrir();
+  fin.abrir();
   await esperar(idB);
   await esperarSinActivo(home);
+});
+
+test('un temporizador pendiente al terminar no resucita activo.json', async () => {
+  const dir = crearRepo();
+  const home = temporal('fabrica-home-');
+  const r = await recorridoCon(dir, [externa('seguridad')]);
+  const codex = conector(async (encargo, _s, alProgreso) => {
+    // La primera escritura ya salió al lanzar: esto queda esperando al siguiente intervalo.
+    alProgreso({ tokens: 3 });
+    return ok(encargo);
+  });
+  const { id } = await lanzar(r, { raiz: dir, conectores: { codex }, home, intervaloActivoMs: 300 });
+  assert.equal((await esperar(id)).fase, 'terminado');
+  assert.equal(existsSync(rutaActivo(home)), false);
+  await espera(700);
+  assert.equal(existsSync(rutaActivo(home)), false, 'no reaparece pasado el intervalo');
+});
+
+test('si las escrituras fallan a mitad de recorrido, activo.json se borra igualmente al terminar', {
+  skip: process.platform === 'win32' || process.getuid?.() === 0,
+}, async () => {
+  const dir = crearRepo();
+  const home = temporal('fabrica-home-');
+  const carpeta = path.join(home, '.nexakit', 'fabrica');
+  const r = await recorridoCon(dir, [externa('seguridad')]);
+  const codex = conector(async (encargo, _s, alProgreso) => {
+    await esperarActivo(home, () => true, 'no se escribió activo.json al lanzar');
+    // Sin permiso de escritura en la carpeta, la escritura diferida falla y se ignora.
+    chmodSync(carpeta, 0o500);
+    alProgreso({ tokens: 4 });
+    await espera(150);
+    chmodSync(carpeta, 0o700);
+    return ok(encargo);
+  });
+  const { id } = await lanzar(r, { raiz: dir, conectores: { codex }, home, intervaloActivoMs: 50 });
+  try {
+    assert.equal((await esperar(id)).fase, 'terminado');
+  } finally {
+    chmodSync(carpeta, 0o700);
+  }
+  assert.equal(existsSync(rutaActivo(home)), false);
 });
 
 /** Guion del servidor falso copiado a una carpeta temporal, con la ruta de registro. */
