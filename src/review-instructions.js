@@ -42,9 +42,9 @@ const PREVIOUS_BODY_HASHES = new Set([
   'f1d67fb2be192ddcade136409ee59302e926c6bf41c883f6125ffb8075be41d5', // 3fa5d18: Antigravity en la orquesta
   'b02861cef24be0e67afc1870d829f375ab752980babc30a98fa187736a5247a4', // f151a93: revisión bajo demanda e informes breves
   '7f5be5b768fa60fcb785fae74492271772e4befcadf5e3d5dc60ba8203062391', // f3b8bca: subagentes de nivel
-  'd3dffb1989bb26476aca364fa3af4130d413c54062a91a50f9330cf0f9356b4a', // 043432b: Superpowers obligatorio
-  '014f1ccabde7d1c9f655b701dd8615ba129320d77be09a1af79ee4f0ad7c60c0', // c4761ab: traspaso y cierre
-  '5bd6bf93ee149f2b4157c612bef308f2e33c8b73b764cb1733c045d0408a250b', // d815d60: revisión certificada
+  'f564df4f5f8bf8163a916261ed6fae969b66f58104cc8a03140027b1eb1da0fa', // 043432b: Superpowers obligatorio
+  '4841d522765b5630d1c8c079fb5bc0c3d6e687e937bae7654a4a020b3e684a2e', // c4761ab: traspaso y cierre
+  'a59f9d7f20e328a0e990566dee78e9fe90623598bc8bd85eb593808217aae123', // d815d60: revisión certificada
   'b9ed8e99a370f760c46574fa0e1854768d35498eb70fc619337851843d97c32a', // d73e44a: revisión por sesión
 ]);
 const proofPath = (home) => path.join(home, '.nexakit', 'review-instructions.json');

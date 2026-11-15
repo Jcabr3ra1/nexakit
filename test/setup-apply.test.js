@@ -35,7 +35,7 @@ test('applies the blocks in the fixed order, reports progress, and a second run 
   const result = await applySetup(w.options, answers, { onProgress: (id, phase) => progress.push(`${id}:${phase}`) });
   assert.equal(result.ok, true, JSON.stringify(result.failed));
   assert.deepEqual(result.done, ['answers', 'stable-command', 'project-skills', 'global-skills:claude', 'global-skills:codex', 'global-skills:antigravity',
-    'superpowers:claude', 'superpowers:codex', 'superpowers:antigravity', 'mod:niveles', 'mod:nexakit-modelo', 'mod:nexakit-ahorro', 'mod:nexakit-lecciones', 'mod:nexakit-sesion',
+    'fabrica-mcp:claude', 'fabrica-mcp:codex', 'superpowers:claude', 'superpowers:codex', 'superpowers:antigravity', 'mod:niveles', 'mod:nexakit-modelo', 'mod:nexakit-ahorro', 'mod:nexakit-lecciones', 'mod:nexakit-sesion',
     'mod:nexakit-guardarrailes',
     'memory-init', 'memory-connect:claude', 'memory-connect:codex', 'memory-connect:antigravity', 'memory-allow-dir', 'review-instructions', 'final-check']);
   assert.deepEqual(progress.slice(0, 2), ['answers:start', 'answers:done']);
@@ -43,6 +43,8 @@ test('applies the blocks in the fixed order, reports progress, and a second run 
   assert.deepEqual(w.clis.plugins, { claude: 'activo', codex: 'activo', agy: 'activo' }, 'Superpowers installed in every agent');
   assert.ok(Object.values(w.clis.mods).every(state => state === 'activo'), 'every mod installed in Claude Code');
   assert.ok(w.clis.calls.some(call => call.join(' ') === 'claude plugin install nexakit-guardarrailes@agent-toolkit'));
+  assert.ok(w.clis.calls.some(call => call.slice(0, 8).join(' ') === 'claude mcp add --scope user --transport stdio nexakit-fabrica'), 'a new install registers the fábrica');
+  assert.ok(w.clis.calls.some(call => call.slice(0, 4).join(' ') === 'codex mcp add nexakit-fabrica'));
 
   const vault = path.join(w.home, 'nexakit-memorias', 'punto-motos');
   assert.equal(await exists(path.join(vault, 'project-memory.json')), true);

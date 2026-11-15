@@ -264,8 +264,13 @@ export async function gatherSetupState({
   }
 
   const reviewInstructions = await planReviewInstructions({ homeDirectory, environment, codexHome });
-  // Migration of an older install: the old MCP per agent, and Codex profiles that still carry an old mark.
-  const mcpMigrations = setup.mcp.migrations;
+  // nexakit-fabrica per agent (register, repair, retire the old MCP). Registering needs the script: it exists, or
+  // the stable copy installed first in the same confirmation brings it.
+  const canRegister = setup.mcp.entryExists || stableCopy.needed;
+  const fabricaMcp = Object.fromEntries(
+    Object.entries(setup.mcp.fabrica).filter(([, action]) => canRegister || (!action.registrar && !action.reparar)),
+  );
+  // Codex profiles that still carry an old mark.
   const codexAgents = await teamMarks({ codexHome });
   const superpowers = await inspectSuperpowers({ agentsFound, runCommand, environment });
   const mods = await inspectMods({ agentsFound, runCommand, environment, toolkitRoot });
@@ -275,7 +280,7 @@ export async function gatherSetupState({
     generators:await loadGeneratorsCatalog(),
     cleanProject:await readCleanProjectAnswers(project.root),
     reviewInstructions,
-    mcpMigrations,
+    fabricaMcp,
     codexAgents,
     superpowers,
     mods,

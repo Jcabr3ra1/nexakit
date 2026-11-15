@@ -193,17 +193,25 @@ export function buildConfirmation(state, answers) {
   }
   for (const agent of globalBlocks) block(`global-skills:${agent}`, `Skills base en ${AGENT_NAMES[agent]}`);
 
-  // An older install: the old MCP is replaced by nexakit-fabrica with the agent's own CLI.
+  // The MCP of the fábrica, with the agent's own CLI: registered or repaired, and the old MCP of an older install
+  // removed once nexakit-fabrica works.
   for (const agent of agents) {
-    const migration = state.mcpMigrations?.[agent];
-    if (!migration) continue;
-    if (!state.agentsFound[agent]) {
-      add('!', `No encontré ${AGENT_NAMES[agent]}; no puedo retirar su MCP antiguo ${migration.retirar}`);
+    const action = state.fabricaMcp?.[agent];
+    if (!action) continue;
+    const name = AGENT_NAMES[agent];
+    if (action.bloqueado) {
+      const why = action.bloqueado === 'disabled' ? 'está desactivado' : 'es otro servidor';
+      add('!', `nexakit-fabrica ${why} en ${name}; no lo toco ni retiro el MCP antiguo ${action.antiguo}`);
       continue;
     }
-    add('−', `Retirar el MCP antiguo ${migration.retirar} de ${AGENT_NAMES[agent]}`);
-    if (migration.registrar) add('+', `Registrar nexakit-fabrica en ${AGENT_NAMES[agent]}`);
-    block(`fabrica-mcp:${agent}`, `MCP de la fábrica en ${AGENT_NAMES[agent]}`);
+    if (!state.agentsFound[agent]) {
+      if (action.retirar || action.reparar) add('!', `No encontré ${name}; no puedo preparar nexakit-fabrica en esa IA`);
+      continue;
+    }
+    if (action.retirar) add('−', `Retirar el MCP antiguo ${action.retirar} de ${name}`);
+    if (action.registrar) add('+', `Registrar nexakit-fabrica en ${name}`);
+    if (action.reparar) add('↻', `Reparar nexakit-fabrica en ${name}`);
+    block(`fabrica-mcp:${agent}`, `MCP de la fábrica en ${name}`);
   }
   // Codex profiles nexakit wrote with an old mark: the same content is brought up to date, other content is not.
   const codexAgents = agents.includes('codex') ? state.codexAgents : null;

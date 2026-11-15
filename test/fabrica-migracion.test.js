@@ -242,15 +242,97 @@ test('si una orden falla, se informa y la migración no se da por hecha', async 
   assert.doesNotMatch(plan.io.out, /MCP antiguo agent-toolkit-workflow de Codex/u);
 });
 
-test('sin el MCP antiguo el plan no muestra la retirada', async (t) => {
+test('una instalación nueva registra nexakit-fabrica y el plan no muestra ninguna retirada', async (t) => {
   const w = await world(t, { legacyMcp: false });
   const { runToolkitCli } = await import('../src/toolkit-cli.js');
   const plan = capture();
   await runToolkitCli(['--project', w.repo], { ...plan, isTTY: false, options: w.options });
-  assert.doesNotMatch(plan.io.out, /Retirar el MCP antiguo|Registrar nexakit-fabrica/u);
+  assert.doesNotMatch(plan.io.out, /Retirar el MCP antiguo/u);
+  assert.match(plan.io.out, /^  \+ Registrar nexakit-fabrica en Claude Code$/mu);
+  assert.match(plan.io.out, /^  \+ Registrar nexakit-fabrica en Codex$/mu);
   const check = capture();
   await runToolkitCli(['comprobar'], { ...check, options: w.options });
-  assert.doesNotMatch(check.io.out, /MCP antiguo|Registrar nexakit-fabrica/u);
+  assert.doesNotMatch(check.io.out, /MCP antiguo/u);
+  assert.match(check.io.out, /^! Registrar nexakit-fabrica en Claude Code \(ejecuta npx nexakit\)$/mu);
+
+  const run = capture();
+  assert.equal(await runToolkitCli(['--si', '--project', w.repo], { ...run, isTTY: false, options: w.options }), 0, run.io.out + run.io.err);
+  const after = await servers(w);
+  assert.ok(after.claude.includes('nexakit-fabrica'));
+  assert.match(after.codex, /^\[mcp_servers\.nexakit-fabrica\]$/mu);
+  assert.ok(!w.clis.calls.some((call) => call[1] === 'mcp' && call[2] === 'remove'), 'nada que retirar');
+  const again = capture();
+  await runToolkitCli(['comprobar'], { ...again, options: w.options });
+  assert.doesNotMatch(again.io.out, /nexakit-fabrica/u);
+});
+
+test('un nexakit-fabrica roto se repara antes de retirar el MCP antiguo', async (t) => {
+  const w = await world(t);
+  const dead = path.join(w.base, 'copia-borrada', 'bin', 'nexakit-fabrica-mcp.js');
+  const config = JSON.parse(await fs.readFile(w.clis.files.claudeFile, 'utf8'));
+  config.mcpServers['nexakit-fabrica'] = { type: 'stdio', command: 'node', args: [dead], env: {} };
+  await fs.writeFile(w.clis.files.claudeFile, JSON.stringify(config));
+  const { runToolkitCli } = await import('../src/toolkit-cli.js');
+  const plan = capture();
+  await runToolkitCli(['--project', w.repo], { ...plan, isTTY: false, options: w.options });
+  assert.match(plan.io.out, /^  ↻ Reparar nexakit-fabrica en Claude Code$/mu);
+  assert.match(plan.io.out, /^  − Retirar el MCP antiguo agent-toolkit-workflow de Claude Code$/mu);
+  assert.doesNotMatch(plan.io.out, /Registrar nexakit-fabrica en Claude Code/u);
+
+  const run = capture();
+  assert.equal(await runToolkitCli(['--si', '--project', w.repo], { ...run, isTTY: false, options: w.options }), 0, run.io.out + run.io.err);
+  const calls = w.clis.calls
+    .filter((call) => call[0] === 'claude' && call[1] === 'mcp' && ['add', 'remove'].includes(call[2]))
+    .map((call) => `${call[2]} ${call.includes('nexakit-fabrica') ? 'nexakit-fabrica' : call[3]}`);
+  assert.deepEqual(calls.slice(0, 3), ['remove nexakit-fabrica', 'add nexakit-fabrica', 'remove agent-toolkit-workflow']);
+  const servidores = JSON.parse(await fs.readFile(w.clis.files.claudeFile, 'utf8')).mcpServers;
+  assert.deepEqual(servidores['nexakit-fabrica'].args, [path.join(TOOLKIT_ROOT, 'bin', 'nexakit-fabrica-mcp.js')]);
+  assert.equal(servidores['agent-toolkit-workflow'], undefined);
+});
+
+test('con nexakit-fabrica desactivado o ajeno no se toca nada y el MCP antiguo se queda', async (t) => {
+  for (const [entry, why] of [
+    [{ type: 'stdio', command: 'node', args: [path.join(TOOLKIT_ROOT, 'bin', 'nexakit-fabrica-mcp.js')], enabled: false }, 'está desactivado'],
+    [{ type: 'stdio', command: 'python', args: ['otro.py'] }, 'es otro servidor'],
+  ]) {
+    const w = await world(t);
+    const config = JSON.parse(await fs.readFile(w.clis.files.claudeFile, 'utf8'));
+    config.mcpServers['nexakit-fabrica'] = entry;
+    await fs.writeFile(w.clis.files.claudeFile, JSON.stringify(config));
+    const { runToolkitCli } = await import('../src/toolkit-cli.js');
+    const plan = capture();
+    await runToolkitCli(['--project', w.repo], { ...plan, isTTY: false, options: w.options });
+    assert.match(plan.io.out, new RegExp(`^  ! nexakit-fabrica ${why} en Claude Code; no lo toco ni retiro el MCP antiguo agent-toolkit-workflow$`, 'mu'));
+    assert.doesNotMatch(plan.io.out, /MCP antiguo agent-toolkit-workflow de Claude Code/u);
+    const run = capture();
+    await runToolkitCli(['--si', '--project', w.repo], { ...run, isTTY: false, options: w.options });
+    const servidores = JSON.parse(await fs.readFile(w.clis.files.claudeFile, 'utf8')).mcpServers;
+    assert.deepEqual(servidores['nexakit-fabrica'], entry);
+    assert.ok(servidores['agent-toolkit-workflow'], 'la persona no se queda sin MCP');
+    assert.ok(!w.clis.calls.some((call) => call[0] === 'claude' && call[1] === 'mcp' && ['add', 'remove'].includes(call[2]) && call.includes('nexakit-fabrica')));
+  }
+});
+
+test('a medias (la nueva registrada, la vieja sin retirar), la siguiente pasada solo reintenta la retirada', async (t) => {
+  const w = await world(t, { fakeOptions: { fail: { 'claude remove': true } } });
+  const { runToolkitCli } = await import('../src/toolkit-cli.js');
+  const run = capture();
+  assert.equal(await runToolkitCli(['--si', '--project', w.repo], { ...run, isTTY: false, options: w.options }), 1);
+  assert.match(run.io.err, /No se pudo retirar el MCP antiguo agent-toolkit-workflow en Claude Code.*claude remove falló/u);
+  const claude = (await servers(w)).claude;
+  assert.ok(claude.includes('nexakit-fabrica') && claude.includes('agent-toolkit-workflow'));
+
+  const healed = createFakeClis(w.home);
+  const options = { ...w.options, runCommand: healed.runCommand };
+  const plan = capture();
+  await runToolkitCli(['--project', w.repo], { ...plan, isTTY: false, options });
+  assert.match(plan.io.out, /^  − Retirar el MCP antiguo agent-toolkit-workflow de Claude Code$/mu);
+  assert.doesNotMatch(plan.io.out, /nexakit-fabrica en Claude Code/u);
+  const retry = capture();
+  await runToolkitCli(['--si', '--project', w.repo], { ...retry, isTTY: false, options });
+  const mcp = healed.calls.filter((call) => call[0] === 'claude' && call[1] === 'mcp' && ['add', 'remove'].includes(call[2]));
+  assert.deepEqual(mcp.map((call) => call.join(' ')), ['claude mcp remove agent-toolkit-workflow -s user']);
+  assert.ok(!(await servers(w)).claude.includes('agent-toolkit-workflow'));
 });
 
 test('un MCP con el nombre antiguo que no es de nexakit no se toca', async (t) => {
@@ -267,10 +349,10 @@ test('un MCP con el nombre antiguo que no es de nexakit no se toca', async (t) =
   await runToolkitCli(['--si', '--project', w.repo], { ...run, isTTY: false, options: w.options });
   const config = JSON.parse(await fs.readFile(w.clis.files.claudeFile, 'utf8')).mcpServers;
   assert.deepEqual(config['agent-toolkit'], { type: 'stdio', command: 'python', args: ['mi-servidor.py'] });
-  assert.equal(config['nexakit-fabrica'], undefined);
+  assert.ok(config['nexakit-fabrica'], 'la fábrica se registra con su propio nombre');
 });
 
-test('un MCP antiguo desactivado se retira sin registrar la fábrica en su lugar', async (t) => {
+test('un MCP antiguo desactivado también se cambia por la fábrica', async (t) => {
   const w = await world(t);
   const config = JSON.parse(await fs.readFile(w.clis.files.claudeFile, 'utf8'));
   config.mcpServers['agent-toolkit-workflow'].enabled = false;
@@ -279,15 +361,45 @@ test('un MCP antiguo desactivado se retira sin registrar la fábrica en su lugar
   const plan = capture();
   await runToolkitCli(['--project', w.repo], { ...plan, isTTY: false, options: w.options });
   assert.match(plan.io.out, /^  − Retirar el MCP antiguo agent-toolkit-workflow de Claude Code$/mu);
-  assert.doesNotMatch(plan.io.out, /Registrar nexakit-fabrica en Claude Code/u);
-  assert.match(plan.io.out, /^  \+ Registrar nexakit-fabrica en Codex$/mu);
+  assert.match(plan.io.out, /^  \+ Registrar nexakit-fabrica en Claude Code$/mu);
   const run = capture();
   assert.equal(await runToolkitCli(['--si', '--project', w.repo], { ...run, isTTY: false, options: w.options }), 0, run.io.err);
   const claude = (await servers(w)).claude;
-  assert.ok(!claude.includes('agent-toolkit-workflow') && !claude.includes('nexakit-fabrica'), claude.join(', '));
+  assert.ok(!claude.includes('agent-toolkit-workflow') && claude.includes('nexakit-fabrica'), claude.join(', '));
 });
 
-test('quitar --si borra los datos antiguos reales y nunca toca ~/.agent-toolkit/gemini', async (t) => {
+test('quitar --global retira nexakit-fabrica y el MCP antiguo con las órdenes oficiales', async (t) => {
+  const w = await world(t);
+  const fabrica = { type: 'stdio', command: 'node', args: [path.join(TOOLKIT_ROOT, 'bin', 'nexakit-fabrica-mcp.js')], env: {} };
+  const config = JSON.parse(await fs.readFile(w.clis.files.claudeFile, 'utf8'));
+  config.mcpServers['nexakit-fabrica'] = fabrica;
+  config.mcpServers.ajeno = { type: 'stdio', command: 'python', args: ['x.py'] };
+  await fs.writeFile(w.clis.files.claudeFile, JSON.stringify(config));
+  await fs.appendFile(w.clis.files.codexFile, `\n[mcp_servers.nexakit-fabrica]\ncommand = "node"\nargs = [${JSON.stringify(fabrica.args[0])}]\n`);
+  const { runToolkitCli } = await import('../src/toolkit-cli.js');
+
+  const preview = capture();
+  await runToolkitCli(['quitar', '--global', '--project', w.repo], { ...preview, options: w.options });
+  assert.match(preview.io.out, /^  - \[global claude\] Retirar el MCP nexakit-fabrica de Claude Code$/mu);
+  assert.match(preview.io.out, /^  - \[global codex\] Retirar el MCP agent-toolkit-workflow de Codex$/mu);
+  assert.ok(!w.clis.calls.some((call) => call[2] === 'remove'), 'la vista previa no retira nada');
+
+  const run = capture();
+  assert.equal(await runToolkitCli(['quitar', '--global', '--si', '--project', w.repo], { ...run, options: w.options }), 0, run.io.out);
+  const removes = w.clis.calls.filter((call) => call[1] === 'mcp' && call[2] === 'remove').map((call) => call.join(' '));
+  assert.deepEqual(removes.sort(), [
+    'claude mcp remove agent-toolkit-workflow -s user',
+    'claude mcp remove nexakit-fabrica -s user',
+    'codex mcp remove agent-toolkit-workflow',
+    'codex mcp remove nexakit-fabrica',
+  ]);
+  const after = await servers(w);
+  assert.deepEqual(after.claude, ['ajeno']);
+  assert.doesNotMatch(after.codex, /mcp_servers/u);
+  assert.match(run.io.out, /MCP retirado: nexakit-fabrica de Claude Code/u);
+});
+
+test('quitar sin --global no ofrece los datos antiguos; con --global los borra y nunca toca ~/.agent-toolkit/gemini', async (t) => {
   const w = await world(t, { legacyMcp: false });
   const workflows = path.join(w.home, '.agent-toolkit', 'workflows');
   const gemini = path.join(w.home, '.agent-toolkit', 'gemini');
@@ -300,19 +412,25 @@ test('quitar --si borra los datos antiguos reales y nunca toca ~/.agent-toolkit/
   await fs.writeFile(reviewers, '{}');
   const { runToolkitCli } = await import('../src/toolkit-cli.js');
 
+  const local = capture();
+  await runToolkitCli(['quitar', '--si', '--project', w.repo], { ...local, options: w.options });
+  assert.doesNotMatch(local.io.out, /datos antiguos/iu);
+  assert.equal(await exists(workflows), true);
+  assert.equal(await exists(reviewers), true);
+
   const preview = capture();
-  await runToolkitCli(['quitar', '--project', w.repo], { ...preview, options: w.options });
+  await runToolkitCli(['quitar', '--global', '--project', w.repo], { ...preview, options: w.options });
   assert.match(preview.io.out, /Borrar datos antiguos: ~\/\.agent-toolkit\/workflows y ~\/\.nexakit\/revisores\.json/u);
   assert.equal(await exists(workflows), true, 'la vista previa no borra');
 
   const run = capture();
-  await runToolkitCli(['quitar', '--si', '--project', w.repo], { ...run, options: w.options });
+  await runToolkitCli(['quitar', '--global', '--si', '--project', w.repo], { ...run, options: w.options });
   assert.equal(await exists(workflows), false);
   assert.equal(await exists(reviewers), false);
   assert.equal(await fs.readFile(path.join(gemini, 'consumo.jsonl'), 'utf8'), '{}\n');
 });
 
-test('quitar no sigue enlaces: un workflows enlazado y un revisores.json que no es archivo se conservan', async (t) => {
+test('quitar --global no sigue enlaces: un workflows enlazado y un revisores.json que no es archivo se conservan', async (t) => {
   const w = await world(t, { legacyMcp: false });
   const outside = path.join(w.base, 'fuera');
   await fs.mkdir(outside);
@@ -322,11 +440,46 @@ test('quitar no sigue enlaces: un workflows enlazado y un revisores.json que no 
   await fs.mkdir(path.join(w.home, '.nexakit', 'revisores.json'), { recursive: true });
   const { runToolkitCli } = await import('../src/toolkit-cli.js');
   const preview = capture();
-  await runToolkitCli(['quitar', '--project', w.repo], { ...preview, options: w.options });
+  await runToolkitCli(['quitar', '--global', '--project', w.repo], { ...preview, options: w.options });
   assert.doesNotMatch(preview.io.out, /Borrar datos antiguos/u);
   const run = capture();
-  await runToolkitCli(['quitar', '--si', '--project', w.repo], { ...run, options: w.options });
+  await runToolkitCli(['quitar', '--global', '--si', '--project', w.repo], { ...run, options: w.options });
   assert.equal(await fs.readFile(path.join(outside, 'mio.txt'), 'utf8'), 'mío');
   assert.equal(await exists(path.join(w.home, '.agent-toolkit', 'workflows')), true);
   assert.equal(await exists(path.join(w.home, '.nexakit', 'revisores.json')), true);
+});
+
+// Los textos de cada versión anterior del bloque van como fixtures (test-support/bloques-anteriores), sacados del
+// historial de src/review-instructions.js: la prueba no depende de git.
+const PREVIOUS = {
+  '3fa5d18': 'f1d67fb2be192ddcade136409ee59302e926c6bf41c883f6125ffb8075be41d5',
+  f151a93: 'b02861cef24be0e67afc1870d829f375ab752980babc30a98fa187736a5247a4',
+  f3b8bca: '7f5be5b768fa60fcb785fae74492271772e4befcadf5e3d5dc60ba8203062391',
+  '043432b': 'f564df4f5f8bf8163a916261ed6fae969b66f58104cc8a03140027b1eb1da0fa',
+  c4761ab: '4841d522765b5630d1c8c079fb5bc0c3d6e687e937bae7654a4a020b3e684a2e',
+  d815d60: 'a59f9d7f20e328a0e990566dee78e9fe90623598bc8bd85eb593808217aae123',
+  d73e44a: 'b9ed8e99a370f760c46574fa0e1854768d35498eb70fc619337851843d97c32a',
+};
+test('cada una de las 7 versiones anteriores del bloque se reconoce por su texto y se actualiza', async (t) => {
+  const { planReviewInstructions } = await import('../src/review-instructions.js');
+  const fixtures = fileURLToPath(new URL('../test-support/bloques-anteriores/', import.meta.url));
+  assert.deepEqual((await fs.readdir(fixtures)).sort(), Object.keys(PREVIOUS).map((sha) => `${sha}.md`).sort());
+  const home = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'bloques-anteriores-')));
+  t.after(() => fs.rm(home, { recursive: true, force: true }));
+  const target = path.join(home, '.codex', 'AGENTS.md');
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  for (const [sha, expected] of Object.entries(PREVIOUS)) {
+    const text = await fs.readFile(path.join(fixtures, `${sha}.md`), 'utf8');
+    assert.ok(text.startsWith(START) && text.endsWith(END), sha);
+    assert.equal(hash(text), expected, `hash de ${sha}`);
+    await fs.writeFile(target, `REGLAS\n\n${text}\n`);
+    const item = (await planReviewInstructions({ homeDirectory: home, agents: ['codex'] })).items[0];
+    assert.equal(item.state, 'pending', sha);
+    assert.equal(item.update, true, sha);
+    assert.match(item.after, /^REGLAS\n\n/u);
+    assert.match(item.after, /\/fabrica/u);
+    await fs.writeFile(target, `${text.replace(`${START}\n`, `${START}\nNota mía.\n`)}\n`);
+    const edited = (await planReviewInstructions({ homeDirectory: home, agents: ['codex'] })).items[0];
+    assert.deepEqual([edited.state, edited.reason], ['conflict', 'editado'], sha);
+  }
 });

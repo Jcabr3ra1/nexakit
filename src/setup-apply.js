@@ -20,7 +20,7 @@ import {
 } from './skill-recommendations.js';
 import { planStableCommand, writeStableCommand } from './stable-command.js';
 import { ensureStableInstall, nexakitDir } from './stable-install.js';
-import { applyMcpMigration, packageVersion, setupToolkit } from './toolkit-setup.js';
+import { applyFabricaMcp, packageVersion, setupToolkit } from './toolkit-setup.js';
 import { staleTeamMarks, teamPlan, writeTeam } from './codex-team.js';
 import { applyMod } from './mods.js';
 import { applySuperpowers } from './superpowers.js';
@@ -205,7 +205,7 @@ export async function applySetup(
       });
     }
     if (kind === 'fabrica-mcp') {
-      return applyMcpMigration(agent, { homeDirectory, toolkitRoot, environment, codexHome, ...(runCommand && { runCommand }) });
+      return applyFabricaMcp(agent, { homeDirectory, toolkitRoot, environment, codexHome, ...(runCommand && { runCommand }) });
     }
     if (kind === 'superpowers') {
       return applySuperpowers(agent, state.superpowers?.[agent], { environment, ...(runCommand && { runCommand }) });

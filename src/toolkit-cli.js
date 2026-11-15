@@ -223,6 +223,7 @@ export async function runToolkitCli(
         ...(options.toolkitRoot && { toolkitRoot: options.toolkitRoot }),
         ...(options.homeDirectory && { homeDirectory: options.homeDirectory }),
         ...(options.codexHome && { codexHome: options.codexHome }),
+        ...(options.runCommand && { runCommand: options.runCommand }),
       });
       const report = parsed.apply ? await applyToolkitDetach(plan) : plan;
       if (parsed.json) {
@@ -233,6 +234,7 @@ export async function runToolkitCli(
           includeGlobal: report.includeGlobal,
           items: report.items.map(({ catalogEntry, ...itemRest }) => itemRest),
           oldData: report.applied ? report.oldDataRemoved : report.oldData.map((item) => item.label),
+          mcp: report.applied ? { removed: report.mcpRemoved, failed: report.mcpFailed } : report.mcpRemovals,
           ...(report.applied
             ? {
                 removedCount: report.removedCount,
@@ -431,9 +433,18 @@ function formatComprobarReport(result, { homeDirectory }) {
 // What `npx nexakit` would migrate from an older install, and what it leaves alone. Warnings only.
 function migrationReport(result) {
   const lines = [];
-  for (const [client, migration] of Object.entries(result.mcpMigrations ?? {})) {
-    lines.push(`! Retirar el MCP antiguo ${migration.retirar} de ${AGENT_NAMES[client]} (ejecuta npx nexakit)`);
-    if (migration.registrar) lines.push(`! Registrar nexakit-fabrica en ${AGENT_NAMES[client]} (ejecuta npx nexakit)`);
+  for (const [client, action] of Object.entries(result.fabricaMcp ?? {})) {
+    const name = AGENT_NAMES[client];
+    if (action.bloqueado) {
+      const why = action.bloqueado === 'disabled' ? 'está desactivado' : 'es otro servidor';
+      lines.push(`! nexakit-fabrica ${why} en ${name}; no lo toco ni retiro el MCP antiguo ${action.antiguo}`);
+      continue;
+    }
+    // Without that agent's CLI there is nothing to register; an old MCP is still worth reporting.
+    if (!result.clients?.[client]?.available && !action.retirar) continue;
+    if (action.retirar) lines.push(`! Retirar el MCP antiguo ${action.retirar} de ${name} (ejecuta npx nexakit)`);
+    if (action.registrar) lines.push(`! Registrar nexakit-fabrica en ${name} (ejecuta npx nexakit)`);
+    if (action.reparar) lines.push(`! Reparar nexakit-fabrica en ${name} (ejecuta npx nexakit)`);
   }
   for (const item of result.reviewInstructions ?? []) {
     if (item.reason === 'editado') lines.push(`! ${item.name}: el bloque de nexakit está editado a mano; no lo toco`);
