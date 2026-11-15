@@ -4,7 +4,6 @@ import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 import { agentModels, agentModelsTable } from "../src/agent-models.js";
-import { runPeerInboxCli } from "../src/peer-inbox-cli.js";
 
 const root = await fs.mkdtemp(path.join(os.tmpdir(), "agent-models-"));
 after(() => fs.rm(root, { recursive: true, force: true }));
@@ -110,17 +109,6 @@ test("the saved Claude model and effort are read from settings.json or reported 
     const unreadable = await agentModels({ codexHome: await codexHome(null, null), claudeHome: dir });
     assert.match(agentModelsTable(unreadable), /No se pudo leer la configuración guardada de Claude/u);
   }
-});
-
-test("the inbox CLI prints the catalog as a table or JSON", async () => {
-  const dir = await codexHome([{ slug: "diario", description: "Latest workhorse model", supported_reasoning_levels: levels(["low", "medium", "high"]) }]);
-  const out = [], json = [], errors = [];
-  assert.equal(await runPeerInboxCli(["modelos"], { codexHome: dir, out: t => out.push(t), err: () => {} }), 0);
-  assert.match(out.join(""), /\*\*Niveles con los modelos actuales\*\*/u);
-  assert.equal(await runPeerInboxCli(["modelos", "--json"], { codexHome: dir, out: t => json.push(t), err: () => {} }), 0);
-  assert.equal(JSON.parse(json.join("")).levels[1].codex.model, "diario");
-  assert.equal(await runPeerInboxCli(["modelos", "--otro"], { codexHome: dir, out: () => {}, err: t => errors.push(t) }), 2);
-  assert.match(errors.join(""), /agent-toolkit-inbox modelos/u);
 });
 
 test("new models without useful description inherit the role of their family or are marked sin clasificar", async () => {

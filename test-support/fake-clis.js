@@ -192,36 +192,3 @@ export function createFakeClis(
 
   return { runCommand, calls, installBin, plugins, mods: modStates, files: { claudeFile, codexFile, agyFile } };
 }
-
-// A real child process for review integration tests; no model or user configuration is accessed.
-export function writeReviewFixtureCli(directory) {
-  const script = path.join(directory, 'review-fixture.cjs');
-  fs.writeFileSync(
-    script,
-    `
-const client = process.argv[2];
-const args = process.argv.slice(3);
-if (args.includes('models')) { console.log('gemini-fixture-low\\tFixture'); process.exit(0); }
-if (args.includes('--version')) { console.log('fixture-v1'); process.exit(0); }
-let input = '';
-process.stdin.on('data', chunk => input += chunk);
-process.stdin.on('end', () => {
-  const prompt = client === 'antigravity' ? JSON.parse(input).message.content : input;
-  const probe = prompt.startsWith('Prueba de aislamiento');
-  if (client === 'codex') {
-    const events = [{ type: 'thread.started', thread_id: 'fixture' }];
-    if (probe) events.push({ type: 'item.completed', item: { type: 'command_execution', exit_code: 1, aggregated_output: 'operation not permitted' } });
-    else events.push({ type: 'item.completed', item: { type: 'agent_message', text: 'Informe de prueba: no hay hallazgos.' } });
-    events.push({ type: 'turn.completed', usage: { input_tokens: 10, output_tokens: 2 } });
-    console.log(events.map(e => JSON.stringify(e)).join('\\n'));
-  } else if (client === 'claude') {
-    console.log(JSON.stringify(probe ? { permission_denials: [{ tool_name: prompt.includes('shell') ? 'Bash' : 'Write' }] } : { result: 'Informe de prueba: no hay hallazgos.', model: 'haiku', usage: { input_tokens: 10, output_tokens: 2 } }));
-  } else {
-    const action = prompt.includes('MCP') ? 'mcp' : prompt.includes('shell') ? 'command' : 'write_file';
-    console.log(JSON.stringify({ event: 'result', result: probe ? { denied_actions: [{ action }] } : { status: 'SUCCESS', response: 'Informe de prueba: no hay hallazgos.', usage: { input_tokens: 10, output_tokens: 2 } } }));
-  }
-});
-`,
-  );
-  return script;
-}

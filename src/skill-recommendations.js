@@ -35,8 +35,8 @@ const PROJECT_MANIFEST_FILE = 'manifest.json';
 const PROJECT_LOCKFILE_NAME = 'skills-lock.json';
 const IGNORE_BLOCK_START = '# >>> agent-toolkit (managed) >>>';
 const IGNORE_BLOCK_END = '# <<< agent-toolkit (managed) <<<';
-// La marca antigua (bandeja retirada) sigue reconociéndose: esos archivos ya escritos son de nexakit.
-// `nexakit codex agentes` escribe hoy la marca sin comillas; level-agents.js, la de comillas.
+// `nexakit codex agentes` escribe hoy una sola marca: «# Generado por `nexakit codex agentes`». Las dos antiguas
+// (sin comillas, y la de la bandeja retirada) siguen reconociéndose: esos archivos ya escritos son de nexakit.
 const LEVEL_AGENT_HEADERS = ['# Generado por nexakit codex agentes', '# Generado por `nexakit codex agentes`.', '# Generado por `agent-toolkit-inbox agentes`.'];
 const isLevelAgentContent = text => LEVEL_AGENT_HEADERS.some(header => text.startsWith(header));
 const LEVEL_AGENT_NAMES = ['nivel_ligero.toml', 'nivel_normal.toml', 'nivel_exigente.toml', 'nivel_alto.toml'];

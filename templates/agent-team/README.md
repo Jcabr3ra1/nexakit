@@ -38,29 +38,18 @@ la bóveda, una carpeta sincronizada o un repositorio público por defecto.
 
 ## Ayudas locales disponibles
 
-El [preparador](../../docs/agentes/coordinacion/agent-task-prepare.md) genera un borrador por destinatario
-a partir de cuatro JSON explícitos. El
-[verificador](../../docs/agentes/coordinacion/agent-task-verify.md) compara los archivos listados en un
-contrato fijado. Para consultar su ayuda desde la raíz de Agent-Toolkit, sin
-instalación global:
-
-```text
-node bin/agent-task.js --help
-node bin/agent-task.js verify --help
-```
-
-`prepare` no escribe ni envía el encargo, ni interpreta tareas libres mediante IA
-ni verifica cuentas. `verify` no aplica una propuesta ni acredita permisos,
-calidad, estado Git completo o modelo. `prepared-draft` y `matched` no autorizan
-al siguiente agente: la revisión humana y el permiso del receptor siguen aparte.
+Las plantillas se completan a mano: no hay un preparador ni un verificador
+automáticos. Para pedir una revisión por otras IA existe la
+[fábrica](../../docs/agentes/coordinacion/fabrica.md), que no sustituye el permiso
+del receptor ni la revisión humana del encargo.
 
 ## Modelo recomendado y modelo observado
 
 El [selector local](../../docs/agentes/modelos/agent-model-selector.md) recomienda a partir de
 solicitud, catálogo y política; no guarda informes, ejecuta IA o cambia el CLI.
 Estas plantillas tampoco lo invocan automáticamente. Su bloque se completa
-manualmente o con un borrador del preparador, que luego se revisa; no deja listo
-un encargo bajo esta política por el simple éxito de la preparación.
+manualmente y la persona la revisa; no deja listo un encargo bajo esta política
+por el simple hecho de haberla rellenado.
 
 1. El coordinador obtiene una decisión para el participante y rol realmente
    encargados, con datos de confianza y acceso declarado. Si faltan datos, no
@@ -201,8 +190,7 @@ no demuestra cumplimiento de agentes reales ni instala barreras técnicas.
 
 ## Qué falta y qué ya se puede utilizar
 
-Las plantillas, preparación de borradores y verificación de archivos pueden
-apoyar entregas manuales delimitadas. Sus datos ficticios no sirven como política
+Las plantillas pueden apoyar entregas manuales delimitadas. Sus datos ficticios no sirven como política
 real de modelos. Cuando exista inventario y evaluación aprobados, un traspaso
 nuevo conservará sus propios permisos y evidencia; no se repite ni altera el
 piloto histórico para rellenar datos faltantes.

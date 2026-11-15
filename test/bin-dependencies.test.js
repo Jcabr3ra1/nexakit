@@ -26,9 +26,7 @@ test('all checkout executables that import external packages explain how to inst
     ['nexakit.js', 'comprobar'],
     ['agent-toolkit.js', '--help'],
     ['project-memory.js', '--help'],
-    ['project-memory-mcp.js', '--manifest', path.join(root, 'project-memory.json')],
-    ['agent-toolkit-mcp.js'],
-    ['agent-task.js', '--help']
+    ['project-memory-mcp.js', '--manifest', path.join(root, 'project-memory.json')]
   ];
   for (const [bin, ...args] of invocations) {
     const label = `${bin} ${args.join(' ')}`;
@@ -47,8 +45,6 @@ test('with its dependencies installed the commands still work and every bin entr
   }
   assert.equal(run(ROOT, 'project-memory.js', '--help').status, 0);
   assert.equal(run(ROOT, 'project-memory-mcp.js', '--help').status, 0);
-  assert.equal(run(ROOT, 'agent-task.js', '--help').status, 0);
-  assert.equal(run(ROOT, 'agent-toolkit-inbox.js', '--help').status, 2);
   assert.equal(run(ROOT, 'agent-toolkit-gemini.js', '--help').status, 0);
 
   for (const file of await fs.readdir(path.join(ROOT, 'bin'))) {

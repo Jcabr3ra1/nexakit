@@ -42,8 +42,8 @@ const SKILL_HOMES = {
 const MCP_CLIENTS = ['codex', 'claude'];
 // Skills nexakit no longer ships. Links it created are removed; anything else with the name is reported, never
 // touched. The last three are now covered by Superpowers (brainstorming/writing-plans, systematic-debugging and
-// test-driven-development), which is required. revision-cruzada merged into revisar when review became on demand.
-export const RETIRED_SKILLS = Object.freeze(['programar', 'estado', 'spec-driven-development', 'depurar', 'desarrollo-con-pruebas', 'revision-cruzada']);
+// test-driven-development), which is required. revision-cruzada merged into revisar, which `fabrica` replaced.
+export const RETIRED_SKILLS = Object.freeze(['programar', 'estado', 'spec-driven-development', 'depurar', 'desarrollo-con-pruebas', 'revision-cruzada', 'revisar']);
 const MCP_NAME = 'nexakit-fabrica';
 const MCP_SUFFIX = 'bin/nexakit-fabrica-mcp.js';
 // The MCP this one replaces: still recognized so it can be reported as to be removed. Its retirement and the
@@ -396,7 +396,7 @@ async function codexSandbox(home, codexHome, codexProfile) {
   const unknown = (reason) => ({
     state: 'unknown',
     writableRoot: state,
-    hint: `${reason}: no se puede saber si Codex deja escribir en ${state}. Si $revisar no consigue registrarse, permite esa carpeta.`,
+    hint: `${reason}: no se puede saber si Codex deja escribir en ${state}. Si Gemini no consigue guardar su historial o su consumo, permite esa carpeta.`,
   });
   let config = {},
     profileFiles = [];
@@ -449,7 +449,7 @@ async function sandboxState(effective, home, state, file, command, unknown) {
       return {
         state: 'read-only',
         writableRoot: state,
-        hint: `El perfil de permisos :read-only no deja escribir: $revisar no puede registrarse. Usa sandbox_mode = "workspace-write" con ${state} en writable_roots.`,
+        hint: `El perfil de permisos :read-only no deja escribir: Gemini no puede guardar su historial. Usa sandbox_mode = "workspace-write" con ${state} en writable_roots.`,
       };
     return unknown('Codex usa un perfil de permisos propio');
   }
@@ -460,7 +460,7 @@ async function sandboxState(effective, home, state, file, command, unknown) {
     return {
       state: 'read-only',
       writableRoot: state,
-      hint: `Codex está en solo lectura: $revisar no puede registrarse. Usa sandbox_mode = "workspace-write" con ${state} en writable_roots.`,
+      hint: `Codex está en solo lectura: Gemini no puede guardar su historial. Usa sandbox_mode = "workspace-write" con ${state} en writable_roots.`,
     };
   if (mode !== undefined && mode !== 'workspace-write')
     return unknown(`sandbox_mode = ${JSON.stringify(mode)} no es conocido`);

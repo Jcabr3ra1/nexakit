@@ -20,61 +20,30 @@ No instales desde un worktree temporal que vayas a borrar.
 
 `doctor` informa Node, dependencias, presencia de CLIs, skills y configuración MCP.
 Con Codex informa además `codexSandbox`: si su sandbox deja escribir en
-`~/.agent-toolkit`, que `$revisar` necesita para registrar la sesión revisora. Si
+`~/.agent-toolkit`, donde la herramienta Gemini guarda su historial y su consumo. Si
 falta, imprime el comando que añade `[sandbox_workspace_write] writable_roots`
-sin duplicar la sección; sin ese permiso `registrar` falla con un error de
+sin duplicar la sección; sin ese permiso esa escritura falla con un error de
 escritura (EPERM). Si `sandbox_mode` está presente, manda sobre
-`default_permissions`; `:read-only` bloquea el registro. Si abres Codex con
+`default_permissions`; `:read-only` bloquea la escritura. Si abres Codex con
 `--profile <nombre>`, añade `--perfil-codex <nombre>` a `doctor` o `setup` para
 evaluar `<nombre>.config.toml` sobre `config.toml`; sin él, el resultado lista
 los perfiles que encuentra y avisa de que no los evaluó.
 Que algo esté configurado no demuestra que una sesión nueva lo haya cargado.
 Superpowers es obligatorio: `npx nexakit` lo instala o activa con el gestor de
 plugins de cada IA, y `doctor` informa su estado por IA. Para agentes por nivel, usa
-`agent-toolkit-inbox agentes`. La revisión por otra IA es opcional: solo con `/revisar`
+`nexakit codex agentes`. La revisión por otra IA es opcional: solo con `/fabrica`
 o si la pides.
 
 ## Medir sin inventar ahorro
 
-```sh
-node bin/agent-toolkit-inbox.js consumo --project-root /ruta/proyecto
-node bin/agent-toolkit-inbox.js medir --project-root /ruta/proyecto --task UUID --archivo /ruta/medicion.json
-```
+`nexakit codex consumo` resume el consumo local de Codex y `nexakit ahorro` lo que
+recorta el mod `nexakit-ahorro`. Gemini registra automáticamente los contadores
+declarados de cada consulta explícita en `~/.agent-toolkit/gemini/consumo.jsonl`;
+`agent-toolkit-gemini historial` lista las consultas guardadas.
 
-Una medición JSON describe una llamada (o un intervalo no solapado):
-
-```json
-{
-  "id": "review-1-call-1",
-  "agent": "codex",
-  "phase": "review",
-  "model": "modelo-observado",
-  "source": "client-reported",
-  "inputTokens": 1200,
-  "cacheReadTokens": 900,
-  "outputTokens": 100,
-  "totalTokens": 1300,
-  "durationMs": 2300,
-  "costUsd": null
-}
-```
-
-El ejemplo es ficticio. Los campos desconocidos se omiten o son null. El origen
-es declarado, no autenticado; `manual` permite registrar una medición propia.
-No sumes caché nuevamente a entrada/total ni atribuyas un precio al consumo de
-una suscripción. Para contadores acumulativos de una sesión, registra diferencias
-entre dos puntos conocidos, nunca el acumulado completo una vez por revisión.
-
-Un id repetido con los mismos datos no duplica consumo. El mismo id con datos
-diferentes se rechaza. Hay un máximo de 256 mediciones por colaboración. Las
-colaboraciones antiguas siguen legibles y aparecen sin mediciones. Cada contador
-informa cuántas llamadas tienen el dato; un total parcial está marcado como tal.
-El reporte no captura llamadas que nadie registró ni acredita ahorro.
-
-Por MCP: `record_peer_usage` y `get_peer_consumption`. Las respuestas compactas de
-colaboración solo muestran la cantidad de mediciones; `completo` conserva acceso
-a ellas. Gemini registra automáticamente sus contadores cuando recibe una tarea
-explícita; las sesiones existentes de Claude/Codex deben proporcionar mediciones.
+El origen de un contador es declarado, no autenticado. No sumes caché nuevamente
+a entrada/total ni atribuyas un precio al consumo de una suscripción. El reporte
+no captura llamadas que nadie registró ni acredita ahorro.
 
 Para evaluar ahorro, compara tareas equivalentes con y sin Toolkit, con la misma
 calidad exigida. Conserva tokens de entrada/caché/salida, tiempo, llamadas, rondas
@@ -102,20 +71,6 @@ siete proyectos, y uno aporta el 36 % del ahorro; quedaron fuera 26 salidas que 
 llevaban la marca del mod. No mide las relecturas de cada salida en los turnos
 siguientes (el ahorro real es mayor), ni si el recorte obligó a repetir un comando
 para ver la salida entera, ni el efecto de delegar por niveles o de la caché.
-
-## Cierre y recuperación
-
-```sh
-node bin/agent-toolkit-inbox.js cierre --project-root /ruta/proyecto --task UUID --salida /ruta/nueva/traspaso.md
-```
-
-Requiere no tener encargos activos. Escribe un archivo nuevo con contexto,
-informes, vigencia y consumo, y cierra la colaboración. No reemplaza archivos ni
-actualiza la memoria vigente. La carpeta de salida debe existir. Si falla el
-cierre después de escribir, conserva el borrador y consulta el estado antes de
-repetir. Una sesión nueva recupera la colaboración por id, incluso cerrada.
-Actualizar la bóveda requiere el flujo de cierre del proyecto y evidencia del
-cambio integrado; el borrador no acredita merge ni despliegue.
 
 ## Evidencia y progreso
 
@@ -148,15 +103,6 @@ borrador explícito de cierre para unir recuperación y memoria sin actualizar n
 vigentes. La entrega inicial no se publicó ni instaló en los clientes activos;
 la activación posterior del cierre global se detalla al final.
 
-## Aceptación nativa pendiente
-
-La prueba automatizada no reemplaza este recorrido con dos sesiones reales:
-abrir Codex/Claude en un proyecto de prueba; registrar revisor; aprobar un encargo;
-entregar aviso; confirmar reclamación/informe; registrar consumo real; cerrar a
-borrador; abrir una sesión nueva y recuperar informe/consumo. Después de integrar
-el cambio, actualizar la memoria y comprobar su consulta por MCP. Requiere esas
-sesiones y sus permisos; esta entrega no afirma haberlas utilizado.
-
 ## Cierre global de memoria — 28 de octubre de 2026
 
 `cerrar-memoria` se generalizó para cualquier manifiesto, sin tabla de proyectos,
@@ -171,7 +117,7 @@ separados para código, commits, publicación y sincronización. Un registro blo
 permanece pendiente; se retiró el antiguo fallback de marcarlo manualmente como
 revisado. También hay un flujo para eventos estables sin PR ni automatización.
 
-La plantilla de memoria nueva y la revisión por otra IA (opcional, con `/revisar`) remiten al cierre global.
+La plantilla de memoria nueva y la revisión por otra IA (opcional, con `/fabrica`) remiten al cierre global.
 `cerrar-avisens` conserva compatibilidad como alias del mismo flujo. Esta mejora
 no actualiza notas de las bóvedas reales ni modifica sus reglas de proyecto.
 

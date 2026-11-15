@@ -11,6 +11,7 @@ function runAgyModels(invocation, { environment, timeoutMs, signal }) {
       [...invocation.argsPrefix, 'models'],
       { env: environment, timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, windowsHide: true, shell: false, signal },
       (error, stdout, stderr) => {
+        if (error?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') return reject(new Error('La salida de agy models supera el límite.'));
         if (error && !Number.isInteger(error.code) && !error.killed) return reject(error);
         resolve({
           status: error ? (Number.isInteger(error.code) ? error.code : null) : 0,

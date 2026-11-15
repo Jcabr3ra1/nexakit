@@ -210,7 +210,7 @@ test('comprobar prints a readable Spanish report with obsolete and legacy warnin
   await fs.mkdir(path.join(w.home, '.codex/agents'), { recursive: true });
   await fs.writeFile(path.join(w.home, '.codex/agents/nivel-normal.toml'), 'model = "gpt-6.1-sol"\n');
   const deadRoot = path.join(w.home, 'viejo-toolkit');
-  for (const skill of ['project-handoff', 'revisar', 'quality-gate']) {
+  for (const skill of ['project-handoff', 'decision-records', 'quality-gate']) {
     const link = path.join(w.home, '.claude/skills', skill);
     await fs.rm(link, { force: true });
     await fs.symlink(path.join(deadRoot, 'skills', skill), link);
@@ -297,7 +297,7 @@ test('--help lists all Spanish subcommands', async () => {
   const { runToolkitCli } = await import('../src/toolkit-cli.js');
   const c = capture();
   assert.equal(await runToolkitCli(['--help'], { ...c }), 0);
-  for (const sub of ['comprobar', 'quitar', 'reparar --desde', 'memoria', 'revision', 'modelo']) {
+  for (const sub of ['comprobar', 'quitar', 'reparar --desde', 'memoria', 'fabrica', 'modelo']) {
     assert.match(c.io.out, new RegExp(sub, 'u'));
   }
 });

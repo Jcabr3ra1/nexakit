@@ -29,6 +29,13 @@ test('la skill fabrica sigue el recorrido, exige aprobación y trata lo externo 
   assert.match(md, /máximo de dos rondas/u);
 });
 
+test('la skill fabrica cubre el recorrido en curso, la estación de Claude y la invocación desde Codex', async () => {
+  const md = (await leer('skills/fabrica/SKILL.md')).replace(/\s+/gu, ' ');
+  assert.match(md, /sigue en curso, díselo a la persona y espera a que te lo pida, sin consultar en bucle/u);
+  assert.match(md, /`estacion` de cada hallazgo debe ser una estación de Claude de este recorrido/u);
+  assert.match(md, /Desde Codex\.[^.]*`nexakit-fabrica` está registrado en Codex[^.]*`\$fabrica`/u);
+});
+
 test('el bloque instalado manda a la fábrica y ya no recomienda /revisar', async (t) => {
   const homeDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'fabrica-skill-'));
   t.after(() => fs.rm(homeDirectory, { recursive: true, force: true }));

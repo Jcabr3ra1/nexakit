@@ -7,10 +7,7 @@
     "nexakit": "bin/nexakit.js",
     "agent-toolkit": "bin/agent-toolkit.js",
     "project-memory": "bin/project-memory.js",
-    "agent-task": "bin/agent-task.js",
-    "agent-toolkit-mcp": "bin/agent-toolkit-mcp.js",
     "nexakit-fabrica-mcp": "bin/nexakit-fabrica-mcp.js",
-    "agent-toolkit-inbox": "bin/agent-toolkit-inbox.js",
     "project-memory-mcp": "bin/project-memory-mcp.js",
     "agent-toolkit-gemini": "bin/agent-toolkit-gemini.js"
   },

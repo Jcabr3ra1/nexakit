@@ -115,3 +115,18 @@ test('antigravity-models runs a real agy found on PATH once, with no shell', { s
     assert.ok((await listAntigravityModels({ environment: { PATH: path.join(bin, 'nada') } })).error);
   } finally { await fs.rm(bin, { recursive: true, force: true }); }
 });
+
+test('antigravity-models corta un agy que no responde y no deja pasar una salida enorme', { skip: process.platform === 'win32' }, async () => {
+  const { listAntigravityModels } = await import('../src/antigravity-models.js');
+  const bin = await fs.mkdtemp(path.join(os.tmpdir(), 'agy-tope-'));
+  try {
+    await fs.writeFile(path.join(bin, 'agy'), '#!/bin/sh\nexec sleep 30\n', { mode: 0o755 });
+    const inicio = Date.now();
+    const colgado = await listAntigravityModels({ environment: { PATH: `${bin}:/bin:/usr/bin` }, timeoutMs: 300 });
+    assert.deepEqual([colgado.models, colgado.error], [[], 'No se pudo consultar agy models.']);
+    assert.ok(Date.now() - inicio < 10000, 'el tope de tiempo mata al proceso');
+    await fs.writeFile(path.join(bin, 'agy'), '#!/bin/sh\nhead -c 5000000 /dev/zero | tr "\\0" "x"\n', { mode: 0o755 });
+    const enorme = await listAntigravityModels({ environment: { PATH: `${bin}:/bin:/usr/bin` } });
+    assert.deepEqual([enorme.models, enorme.error], [[], 'La salida de agy models supera el límite.']);
+  } finally { await fs.rm(bin, { recursive: true, force: true }); }
+});

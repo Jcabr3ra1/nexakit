@@ -41,9 +41,8 @@ calidad ni amplía los permisos por sí solo.
 - Las instrucciones del proyecto y la autoría prevalecen sobre una plantilla.
 - El [traspaso manual](agent-team-handoffs.md) adopta ambos recorridos para
   encargos delimitados, sin instalar esta política globalmente.
-- [agent-task prepare](agent-task-prepare.md) acepta modo y reglas del proyecto
-  explícitos, comprueba su coherencia declarada y genera un borrador. No elige
-  un modo por defecto, ni verifica permisos efectivos ni ejecuta al equipo.
+- Ninguna herramienta elige un modo por defecto, verifica permisos efectivos ni
+  ejecuta al equipo: el modo lo declara la persona en el encargo.
 - No se ha entregado un selector persistente de modo o un estado durable de
   progreso de tutoría entre clientes.
 - `project-memory` administra memorias y conexiones, no ejecuta tareas de código.

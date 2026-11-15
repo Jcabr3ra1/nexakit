@@ -53,7 +53,7 @@ test('HTML command guide presents a 3-step route, the new auto-review and handof
     'npx nexakit setup --omitir',
     'npx nexakit setup --reponer',
     'npx nexakit memoria',
-    'nexakit revision',
+    'nexakit fabrica',
     'nexakit modelo',
     '/fabrica',
     '/cerrar-memoria',
@@ -84,7 +84,7 @@ test('README.md documents the 3 AIs, 3-step setup, on-demand review workflow, Sp
     'npx nexakit quitar',
     'npx nexakit reparar --desde',
     'npx nexakit memoria',
-    'nexakit revision',
+    'nexakit fabrica',
     'nexakit modelo',
   ]) {
     assert.ok(readme.includes(cmd), `README should include command: ${cmd}`);

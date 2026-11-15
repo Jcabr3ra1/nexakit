@@ -115,7 +115,7 @@ async function inspect(target) {
 }
 
 function native(name, description, instructions, pick) {
-  return `# Generado por nexakit codex agentes\nname = ${JSON.stringify(name)}\ndescription = ${JSON.stringify(description)}\nmodel = ${JSON.stringify(pick.model)}\nmodel_reasoning_effort = ${JSON.stringify(pick.effort)}\ndeveloper_instructions = ${JSON.stringify(instructions)}\n`;
+  return `# Generado por \`nexakit codex agentes\`.\nname = ${JSON.stringify(name)}\ndescription = ${JSON.stringify(description)}\nmodel = ${JSON.stringify(pick.model)}\nmodel_reasoning_effort = ${JSON.stringify(pick.effort)}\ndeveloper_instructions = ${JSON.stringify(instructions)}\n`;
 }
 const permissions = 'Los permisos efectivos se heredan de la sesión principal/padre; estas instrucciones de solo lectura y presupuesto son orientativas, no restricciones técnicas. No amplíes permisos.';
 const common = `${permissions}\nRespeta AGENTS.md y las skills del proyecto. Haz solo el encargo; el principal decide, verifica el informe e integra. No solicites automáticamente revisiones a otra IA.`;

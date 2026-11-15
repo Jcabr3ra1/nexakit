@@ -283,10 +283,8 @@ nuevas inferencias, clientes reales ni consultas a cuentas. Se preservaron los
 dos inicios históricos, atribución incompleta, fechas, rúbrica y presupuesto.
 No se volvió a leer la evidencia privada ni se calificaron respuestas nuevas.
 
-Actualmente [agent-task prepare](../coordinacion/agent-task-prepare.md) conecta el selector con
-un borrador manual a partir de datos declarados y
-[agent-task verify](../coordinacion/agent-task-verify.md) comprueba archivos listados. Sus salidas
-no verifican disponibilidad real, autenticación, modelo de una respuesta o calidad
+El selector produce una recomendación a partir de datos declarados. Su salida
+no verifica disponibilidad real, autenticación, modelo de una respuesta o calidad
 por rol. Un ejemplo ficticio válido no se transforma en catálogo de producción.
 
 Contraste documental puntual con OpenAI Docs, separado de las fuentes del piloto:

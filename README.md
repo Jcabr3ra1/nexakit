@@ -37,7 +37,7 @@ npx nexakit reparar --desde <ruta>             # Reparar enlaces que apuntan a u
 npx nexakit memoria <subcomando>               # Operaciones avanzadas de memoria (status, doctor, sync…)
 npx nexakit setup --omitir <skill> --apply   # Declarar quitada una skill global que ya no enlazas
 npx nexakit setup --reponer <skill> --apply  # Devolver una skill global que quitaste
-~/.nexakit/nexakit revision --disponibles --principal <ia>  # Ver IA revisoras certificadas
+~/.nexakit/nexakit fabrica proponer --base main  # Proponer un recorrido de revisión (nada se lanza sin tu aprobación)
 ~/.nexakit/nexakit modelo                      # Ver catálogo real de modelos y esfuerzos
 ~/.nexakit/nexakit ahorro                      # Cuánta salida de comandos recortó nexakit-ahorro
 ~/.nexakit/nexakit codex auditar               # Revisar contexto y recomendaciones de Codex

@@ -4,8 +4,6 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { resolveCliInvocation } from "../src/cli-executable.js";
-import { createCodexCliRunner } from "../src/codex-cli-runner.js";
-import { createClaudeCodeRunner } from "../src/claude-code-runner.js";
 
 const windowsOnly = { skip: process.platform !== "win32" ? "Windows npm shim resolution; POSIX executable behavior is covered by runner tests." : false };
 
@@ -45,37 +43,6 @@ test("Windows npm bin resolution rejects escaping, missing and unsupported execu
   const text = path.join(f.directory, "executable.txt");
   await fs.writeFile(text, "not a supported executable");
   await assert.rejects(resolveCliInvocation({ name: "claude", override: text }), { code: "ENOENT" });
-});
-
-test("Windows Node runner previews exactly match executed argv even when npm paths contain spaces and metacharacters", windowsOnly, async t => {
-  for (const name of ["codex", "claude"]) {
-    const f = await fixture(t, name), calls = path.join(f.directory, "calls.jsonl");
-    const projectRoot = path.join(f.directory, "project"), home = path.join(f.directory, "home");
-    await fs.mkdir(projectRoot); await fs.mkdir(home);
-    const plan = { summary: "Valid plan", claude: { model: "sonnet", effort: "medium" },
-      files: [{ path: "file.js", action: "modify", reason: "Fixture" }], acceptance: ["Done"], checks: ["npm test"] };
-    await fs.writeFile(f.script, `const fs = require('node:fs');
-const args = process.argv.slice(2);
-fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ executable: process.execPath, args: process.argv.slice(1) }) + '\\n');
-if (args[0] === '--version') { console.log(${JSON.stringify(name === "codex" ? "codex-cli 0.163.0" : "2.1.300")}); process.exit(0); }
-if (args[0] === 'login') { console.error('Logged in using ChatGPT'); process.exit(0); }
-if (args[0] === 'auth') { console.log(JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty' })); process.exit(0); }
-fs.readFileSync(0);
-if (args[0] === 'exec') fs.writeFileSync(args[args.indexOf('--output-last-message') + 1], ${JSON.stringify(JSON.stringify(plan))});
-else console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'Valid proposal' }));
-`);
-    const create = name === "codex" ? createCodexCliRunner : createClaudeCodeRunner;
-    const runner = create({ home, env: { ...process.env, PATH: f.directory }, [`${name}Path`]: f.shim });
-    const preview = await runner.preview({ projectRoot, task: { title: "Fixture", project: "P", objective: "Test", mode: "tutor" },
-      plan: "Valid plan", model: name === "codex" ? "gpt-6.1-sol" : "sonnet", effort: "medium" });
-    assert.equal(preview.command.executable, process.execPath);
-    assert.equal(preview.command.args[0], await fs.realpath(f.script));
-    assert.equal(preview.command.shell, false);
-    await runner.run(preview);
-    const executed = (await fs.readFile(calls, "utf8")).trim().split("\n").map(line => JSON.parse(line)).at(-1);
-    assert.deepEqual(executed, { executable: preview.command.executable, args: preview.command.args });
-    await runner.cleanup(preview);
-  }
 });
 
 test("agy (Antigravity) is resolved as a native executable on the PATH, never as an npm shim", async t => {

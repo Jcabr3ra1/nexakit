@@ -1,7 +1,7 @@
 # Tu primera prueba con NexaKit
 
 Esta guía te permite comprobar la base local sin conectar cuentas, modificar un
-proyecto ni gastar cuota de IA. Usarás un ejemplo inventado; después podrás
+proyecto ni gastar cuota de IA. Después podrás
 decidir qué memoria o encargo real quieres preparar.
 
 ## 1. Comprueba tu copia
@@ -41,60 +41,28 @@ o clientes de IA por su cuenta. No necesitas añadir API keys para estos ejemplo
 
 ```bash
 node bin/project-memory.js --help
-node bin/agent-task.js --help
+node bin/nexakit.js --help
 ```
 
 - `project-memory` trabaja con memorias de proyecto: crear, diagnosticar,
   preparar conexiones y revisar cambios con controles.
-- `agent-task` ayuda a preparar un encargo y comprobar archivos enumerados.
+- `nexakit` deja listas tus IA y consulta modelos y consumo. Su orden
+  `nexakit fabrica` propone y lanza una revisión por otras IA, pero solo cuando
+  la pides.
 
 Se espera la ayuda de cada herramienta y exit 0. Estos comandos no crean una
 bóveda, conectan clientes ni consultan una cuenta. Usar `node bin/...` evita
 suponer que ya instalaste un comando global.
 
-## 3. Prepara un encargo ficticio
+## 3. Entiende cómo se pide una revisión
 
-Copia este comando completo, todavía desde la raíz de Agent-Toolkit:
+La revisión por otras IA no ocurre sola. Cuando quieras una, pide `/fabrica`
+(o `$fabrica` en Codex): primero verás un recorrido propuesto, con las IA, los
+modelos y el coste en llamadas, y solo se lanza si lo apruebas. Las IA externas
+leen el diff sin escribir. Consulta [la fábrica de revisión](../agentes/coordinacion/fabrica.md)
+antes de usarla con un proyecto real; esta guía no la ejecuta.
 
-```bash
-node bin/agent-task.js prepare \
-  --task examples/task-prepare/task.example.json \
-  --request examples/model-selection/request.preference.example.json \
-  --catalog examples/model-selection/catalog.preference.example.json \
-  --policy examples/model-selection/policy.preference.example.json \
-  --json
-```
-
-Verás un resumen estructurado. Los resultados principales esperados son:
-
-- `state`: `prepared-draft`, es decir, borrador preparado, no autorizado.
-- `mode`: `tutor`; el usuario conserva la escritura del paso.
-- Modelo ficticio `example-alpha-r2`, con esfuerzo ficticio `brief`.
-- `executed`, `sent`, `wrote`, `runtimeReady` y `verifiedAdmission`: `false`.
-- `modelVerification`: `unknown` y `observedModels`: lista vacía.
-- `availabilityCurrentVerified`: `false`; no comprobó disponibilidad hoy.
-
-No se ejecutó ese modelo ni se enviaron instrucciones a Claude o Codex.
-Las fechas y perfiles del ejemplo son históricos e inventados: no sirven como
-catálogo real ni prueban acceso a tu suscripción.
-
-Si aparece `needs-info`, `blocked`, `invalid` o un error, conserva el diagnóstico
-y revisa la copia/entradas. No actives créditos, cambies permisos o sustituyas
-los archivos con datos de un proyecto para hacer pasar el ejemplo.
-
-## 4. Entiende qué comprueba una entrega
-
-```bash
-node bin/agent-task.js verify --help
-```
-
-Se espera la ayuda y exit 0. `verify` compara los archivos listados con huellas
-de contenido revisadas. No prueba que el código sea correcto ni que alguien
-haya autorizado aplicarlo. Para una prueba con archivos, consulta el
-[ejemplo de verificación](../../examples/task-verify/README.md); no inventes un
-contrato para una carpeta real o calcules un pin sin revisar primero su contenido.
-
-## 5. Elige el siguiente uso real
+## 4. Elige el siguiente uso real
 
 No tienes que hacerlo todo a la vez:
 
@@ -126,6 +94,6 @@ de R2 no publica por sí solo los archivos pendientes ni reemplaza su revisión.
 ## Instalación y recuperación
 
 Consulta [Consolidación](consolidacion.md) para `doctor`, instalación de skills,
-registro de consumo y cierre a un borrador. Son comandos adicionales a los
+el consumo de Codex y de Gemini. Son comandos adicionales a los
 ejemplos ficticios de esta guía; no necesitas llamar a ningún modelo para probar
 `doctor`, las vistas previas, `consumo` o el historial local de Gemini.

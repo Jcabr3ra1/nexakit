@@ -5,7 +5,6 @@ import { runAhorroCommand } from './ahorro-command.js';
 import { runCodexCommand } from './codex-command.js';
 import { runAntigravityCommand } from './antigravity-command.js';
 import { runLeccionesCommand } from './lecciones-command.js';
-import { runRevisionCommand } from './revision.js';
 import path from 'node:path';
 import readline from 'node:readline';
 import { pathToFileURL } from 'node:url';
@@ -38,8 +37,6 @@ const HELP = `Uso: npx nexakit [--project <ruta>] [--si]
      npx nexakit quitar [--project <ruta>] [--global] [--agent codex|claude|antigravity|all] [--si|--apply] [--json]
      npx nexakit reparar --desde <ruta> [--agent codex|claude|antigravity|all]
      npx nexakit memoria <subcomando> [opciones]
-     nexakit revision --disponibles [--principal claude|codex|antigravity]
-     nexakit revision --con <ia> --modelo <m> --esfuerzo <e> --encargo <archivo> [--base <rama>]
      nexakit modelo [--nivel <nivel>] [--ia claude|codex|antigravity] [--perfil-codex <nombre>]
      nexakit codex auditar|preparar|agentes|actividad|consumo|recomendar|hook|ejecutar|comparar [opciones]
      nexakit antigravity barra|preparar|agentes|recomendar|hook|ejecutar [opciones]
@@ -62,7 +59,7 @@ scan revisa el contenido de una skill sin ejecutarla (1 si encuentra un bloqueo)
 reparar re-apunta enlaces rotos de una instalación anterior (--desde es la carpeta
 que ya no existe); lista lo que encontró y siempre pregunta.
 memoria ejecuta los subcomandos de project-memory (init, connect, doctor, status, sync).
-revision y modelo piden una revisión a otra IA o consultan los modelos disponibles.
+modelo consulta los modelos disponibles.
 fabrica propone, lanza y consulta un recorrido de revisión con varias IA en paralelo, solo lectura (ver nexakit fabrica --help).
 ahorro resume cuánta salida de comandos recortó el mod nexakit-ahorro (caracteres y tokens estimados).
 lecciones resume las correcciones y lecciones que registra el mod nexakit-lecciones y las que siguen pendientes.
@@ -108,7 +105,10 @@ export async function runToolkitCli(
   if (command === 'fabrica') return (await import('../dist/fabrica/cli.js')).ejecutarCli(rest, { out, err }, options);
   if (command === 'ahorro') return runAhorroCommand(rest, { out, err }, options);
   if (command === 'lecciones') return runLeccionesCommand(rest, { out, err }, options);
-  if (command === 'revision') return runRevisionCommand(rest, { out, err }, { options });
+  if (command === 'revision') {
+    await err('Orden retirada: usa /fabrica o `nexakit fabrica`.\n');
+    return 2;
+  }
   if (command === 'memoria') {
     return runCli(
       rest,
