@@ -93,7 +93,7 @@ export function calcularHuella(
     .digest('hex');
 }
 
-interface Candidato {
+export interface Candidato {
   ia: IA;
   modelo: string;
   esfuerzo: string | null;
@@ -133,7 +133,7 @@ function candidatosDe(estacion: NombreEstacion, cfg: ConfigEstacion | undefined,
 }
 
 /** Devuelve el motivo del descarte, o `null` si el candidato está disponible. */
-function descarte(c: Candidato, catalogos: Catalogos): string | null {
+export function descarte(c: Candidato, catalogos: Catalogos): string | null {
   // Las estaciones de Claude son subagentes nativos: no dependen de un catálogo vivo.
   if (c.ia === 'claude') return null;
   const catalogo = catalogos[c.ia];

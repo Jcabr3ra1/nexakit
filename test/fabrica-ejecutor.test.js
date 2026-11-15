@@ -21,7 +21,7 @@ import { proponer, calcularHuella } from '../dist/fabrica/enrutador.js';
 import { leerDiff } from '../dist/fabrica/diff.js';
 import { ESTACIONES } from '../dist/fabrica/estaciones.js';
 import { ErrorFabrica } from '../dist/fabrica/errores.js';
-import { lanzar, estado, esperar, cancelar, construirEncargo } from '../dist/fabrica/ejecutor.js';
+import { lanzar, estado, esperar, cancelar, construirEncargo, MAX_TERMINADOS } from '../dist/fabrica/ejecutor.js';
 import * as rastro from '../dist/fabrica/rastro.js';
 import { fileSymlinkSkipReason } from '../testing/symlink-capability.js';
 
@@ -453,5 +453,121 @@ test('cancelar aborta las estaciones en curso, cancela las pendientes y deja la 
   const enDisco = JSON.parse(readFileSync(path.join(final.dir, 'estado.json'), 'utf8'));
   assert.equal(enDisco.fase, 'cancelado');
   await cancelar(id); // ya terminado: no hace nada
-  assert.throws(() => estado('fab-00000000-0000-0000'), ErrorFabrica);
+  assert.throws(() => estado('fab-00000000-0000-0000', home), ErrorFabrica);
+});
+
+/** Un conector roto: ignora la señal y nunca devuelve. */
+const nuncaDevuelve = () => new Promise(() => {});
+
+test('si el conector ignora el aborto, tras la gracia la estación queda fallida y el recorrido sigue', async () => {
+  const dir = crearRepo();
+  const home = temporal('fabrica-home-');
+  const r = await recorridoCon(dir, [externa('seguridad'), externa('pruebas')]);
+  const codex = conector('codex', (encargo) => (encargo.estacion === 'pruebas' ? nuncaDevuelve() : ok(encargo)));
+  const { id } = await lanzar(r, { raiz: dir, conectores: { codex }, timeoutMs: 30, graciaMs: 30, home });
+  const final = await esperar(id);
+  assert.deepEqual(deEstacion(final, 'pruebas'), {
+    estacion: 'pruebas',
+    estado: 'fallida',
+    motivo: 'el revisor no respondió a la cancelación',
+  });
+  assert.equal(deEstacion(final, 'seguridad').estado, 'ok');
+  assert.equal(final.fase, 'terminado');
+
+  // También al cancelar: cancelar no se queda colgado.
+  let avisar;
+  const empezada = new Promise((resolve) => {
+    avisar = resolve;
+  });
+  const roto = conector('codex', () => {
+    avisar();
+    return nuncaDevuelve();
+  });
+  const { id: id2 } = await lanzar(r, { raiz: dir, conectores: { codex: roto }, paralelismo: 1, graciaMs: 30, home });
+  await empezada;
+  await cancelar(id2);
+  const cancelado = estado(id2);
+  assert.equal(cancelado.fase, 'cancelado');
+  assert.equal(deEstacion(cancelado, 'seguridad').motivo, 'el revisor no respondió a la cancelación');
+  assert.equal(deEstacion(cancelado, 'pruebas').estado, 'cancelada');
+});
+
+test('un catálogo vivo que no responde a tiempo deja esa IA como no disponible', async () => {
+  const dir = crearRepo();
+  const home = temporal('fabrica-home-');
+  const r = await recorridoCon(dir, [externa('seguridad'), externa('arquitectura', 'antigravity', 'gemini-4-argon-high')]);
+  let llamadas = 0;
+  const codex = { ...conector('codex', async (e) => ((llamadas += 1), ok(e))), catalogo: nuncaDevuelve };
+  const antigravity = conector('antigravity', async (e) => ok(e));
+  const { id } = await lanzar(r, { raiz: dir, conectores: { codex, antigravity }, topeCatalogoMs: 30, home });
+  const final = await esperar(id);
+  assert.equal(deEstacion(final, 'seguridad').estado, 'fallida');
+  assert.match(deEstacion(final, 'seguridad').motivo, /^codex no está disponible/u);
+  assert.equal(deEstacion(final, 'arquitectura').estado, 'ok');
+  assert.equal(llamadas, 0);
+});
+
+test('la revalidación usa el criterio del enrutador: codex sin esfuerzo no pasa', async () => {
+  const dir = crearRepo();
+  const home = temporal('fabrica-home-');
+  const r = await recorridoCon(dir, [{ ...externa('seguridad'), esfuerzo: null }]);
+  let llamadas = 0;
+  const codex = conector('codex', async (e) => ((llamadas += 1), ok(e)));
+  const { id } = await lanzar(r, { raiz: dir, conectores: { codex }, home });
+  const final = await esperar(id);
+  assert.deepEqual(deEstacion(final, 'seguridad'), {
+    estacion: 'seguridad',
+    estado: 'fallida',
+    motivo: 'el modelo ya no está en el catálogo',
+  });
+  assert.equal(llamadas, 0);
+});
+
+test('lanzar poda en segundo plano los rastros de más de 90 días', async () => {
+  const dir = crearRepo();
+  const home = temporal('fabrica-home-');
+  const viejo = await rastro.crear(home, 'otro-12345678', { huella: 'vieja' });
+  const hace100Dias = new Date(Date.now() - 100 * 24 * 60 * 60 * 1000);
+  utimesSync(viejo.dir, hace100Dias, hace100Dias);
+  const r = await recorridoCon(dir, [deClaude('codigo')]);
+  const { id } = await lanzar(r, { raiz: dir, conectores: {}, home });
+  await esperar(id);
+  assert.equal(existsSync(viejo.dir), false);
+  assert.equal(existsSync(estado(id).dir), true);
+});
+
+test(`conserva en memoria como mucho ${MAX_TERMINADOS} terminados y lee los demás de estado.json`, async () => {
+  const dir = crearRepo();
+  const home = temporal('fabrica-home-');
+  const r = await recorridoCon(dir, [deClaude('codigo')]);
+  const primero = (await lanzar(r, { raiz: dir, conectores: {}, home })).id;
+  const finalPrimero = await esperar(primero);
+  await Promise.all(
+    Array.from({ length: MAX_TERMINADOS }, async () => {
+      const { id } = await lanzar(r, { raiz: dir, conectores: {}, home });
+      await esperar(id);
+    }),
+  );
+  assert.deepEqual(estado(primero, home), finalPrimero);
+  assert.deepEqual(await esperar(primero, home), finalPrimero);
+  await cancelar(primero, home);
+  // Ya no está en memoria: sin su estado.json no se encuentra.
+  rmSync(path.join(finalPrimero.dir, 'estado.json'));
+  assert.throws(() => estado(primero, home), ErrorFabrica);
+  await assert.rejects(cancelar(primero, home), ErrorFabrica);
+});
+
+test('si falla la escritura del estado final, el motivo lo dice y el recorrido sigue en memoria', async () => {
+  const dir = crearRepo();
+  const home = temporal('fabrica-home-');
+  const r = await recorridoCon(dir, [deClaude('codigo')]);
+  const { id } = await lanzar(r, { raiz: dir, conectores: {}, home });
+  // Antes de que acabe (falta la instantánea final): estado.json pasa a ser una carpeta.
+  const enCurso = estado(id);
+  rmSync(path.join(enCurso.dir, 'estado.json'));
+  mkdirSync(path.join(enCurso.dir, 'estado.json', 'bloqueo'), { recursive: true });
+  const final = await esperar(id);
+  assert.equal(final.fase, 'fallido');
+  assert.match(final.motivo, /^no se pudo guardar el estado final en el rastro/u);
+  assert.deepEqual(estado(id, home), final);
 });

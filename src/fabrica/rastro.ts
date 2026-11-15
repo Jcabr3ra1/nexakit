@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { chmod, lstat, mkdir, open, readdir, realpath, rename, rm, unlink } from 'node:fs/promises';
-import type { Stats } from 'node:fs';
+import { constants, closeSync, lstatSync, openSync, readdirSync, readFileSync, type Stats } from 'node:fs';
 import path from 'node:path';
 import type { Encargo, ResultadoEstacion } from './conectores/tipos.js';
 import type { Recorrido } from './enrutador.js';
@@ -137,6 +137,34 @@ export async function guardarEstacion(
 /** Reescribe `estado.json` con el estado actual del recorrido. */
 export async function guardarEstado(dir: string, estado: unknown): Promise<void> {
   await escribirReemplazando(path.join(dir, 'estado.json'), json(estado));
+}
+
+/**
+ * Lee `estado.json` del recorrido `id` en cualquier repo del rastro, sin seguir enlaces.
+ * Devuelve `null` si el id no tiene la forma esperada o no hay estado guardado.
+ */
+export function leerEstado(home: string, id: string): unknown {
+  if (!PATRON_ID.test(id)) return null;
+  const base = path.join(home, '.nexakit', 'fabrica');
+  const carpetaReal = (ruta: string): boolean => {
+    const info = lstatSync(ruta, { throwIfNoEntry: false });
+    return info !== undefined && info.isDirectory() && !info.isSymbolicLink();
+  };
+  if (!carpetaReal(base)) return null;
+  for (const repo of readdirSync(base).sort()) {
+    const dir = path.join(base, repo, id);
+    if (!carpetaReal(path.join(base, repo)) || !carpetaReal(dir)) continue;
+    const archivo = path.join(dir, 'estado.json');
+    const info = lstatSync(archivo, { throwIfNoEntry: false });
+    if (info === undefined || !info.isFile()) continue;
+    const fd = openSync(archivo, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    try {
+      return JSON.parse(readFileSync(fd, 'utf8')) as unknown;
+    } finally {
+      closeSync(fd);
+    }
+  }
+  return null;
 }
 
 /**
