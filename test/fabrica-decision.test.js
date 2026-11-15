@@ -54,6 +54,7 @@ test('con evidencia sintética se elige el más barato con cuantil >= umbral, au
   const d = elegir({ estacion: 'codigo', riesgo: 'medio', candidatos: [SOL, FLASH, LUNA], evidencia: EV });
   assert.deepEqual(d.eleccion, LUNA);
   assert.equal(d.sinDatos, false);
+  assert.equal(d.alcanzaUmbral, true);
   assert.ok(d.calidad >= UMBRALES.medio);
   assert.equal(d.calidad, cuantil05(13, 1));
   assert.equal(d.tokensEsperados, 3200);
@@ -95,12 +96,14 @@ test('si ninguno supera el umbral se elige el de mayor calidad y se avisa', () =
   assert.ok(d.calidad < UMBRALES.alto);
   assert.match(d.explicacion, /ningún modelo alcanza el umbral/u);
   assert.equal(d.sinDatos, false);
+  assert.equal(d.alcanzaUmbral, false);
   assert.match(d.descartados[0].motivo, /^calidad ≥ 0,63 < 0,85$/u);
 });
 
 test('sin evidencia: sinDatos y se elige el primer candidato de la tabla', () => {
   const d = elegir({ estacion: 'codigo', riesgo: 'bajo', candidatos: [SOL, LUNA], evidencia: evidenciaVacia() });
   assert.equal(d.sinDatos, true);
+  assert.equal(d.alcanzaUmbral, false);
   assert.deepEqual(d.eleccion, SOL);
   assert.equal(d.calidad, null);
   assert.equal(d.tokensEsperados, null);
@@ -181,4 +184,132 @@ test('Antigravity: el esfuerzo null se compara por el id del modelo y no se conf
   });
   assert.equal(d.eleccion.esfuerzo, null);
   assert.deepEqual(d.descartados, [{ candidato: cand('antigravity', 'gemini-3.8-flash-low', 'low'), motivo: 'sin datos medidos' }]);
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// Ronda de corrección 1
+// ---------------------------------------------------------------------------------------------------------------
+
+test('evidencia mixta: si ningún medido alcanza el umbral, manda el primer candidato sin medir de la tabla', () => {
+  const ev = evidenciaCon(fila('antigravity', 'gemini-3.8-flash-low', null, 3, 6, 1500));
+  const d = elegir({ estacion: 'codigo', riesgo: 'alto', candidatos: [FLASH, SOL, LUNA], evidencia: ev });
+  assert.deepEqual(d.eleccion, SOL);
+  assert.equal(d.sinDatos, false);
+  assert.equal(d.alcanzaUmbral, false);
+  assert.equal(d.calidad, null);
+  assert.equal(d.tokensEsperados, null);
+  assert.equal(d.explicacion, 'ningún modelo medido alcanza el umbral; se usa gpt-6-sol high de la tabla, sin datos medidos');
+  assert.equal(d.descartados.length, 2);
+  assert.deepEqual(d.descartados[0].candidato, FLASH);
+  assert.match(d.descartados[0].motivo, /^calidad ≥ 0,\d\d < 0,85$/u);
+  assert.deepEqual(d.descartados[1], { candidato: LUNA, motivo: 'sin datos medidos' });
+});
+
+test('evidencia mixta: si un medido alcanza el umbral, gana aunque haya otros sin medir antes en la tabla', () => {
+  const ev = evidenciaCon(fila('codex', 'gpt-6-luna', 'low', 12, 0, 3200));
+  const d = elegir({ estacion: 'codigo', riesgo: 'medio', candidatos: [SOL, LUNA], evidencia: ev });
+  assert.deepEqual(d.eleccion, LUNA);
+  assert.equal(d.alcanzaUmbral, true);
+});
+
+test('todos medidos y ninguno alcanza el umbral: se mantiene el de mayor calidad con su aviso', () => {
+  const d = elegir({ estacion: 'codigo', riesgo: 'alto', candidatos: [LUNA, FLASH], evidencia: EV });
+  assert.deepEqual(d.eleccion, LUNA);
+  assert.equal(d.alcanzaUmbral, false);
+  assert.equal(d.sinDatos, false);
+  assert.match(d.explicacion, /ningún modelo alcanza el umbral/u);
+});
+
+test('un coste de 0 o no finito es desconocido: pierde ante uno de coste conocido y se dice «tokens sin medir»', () => {
+  for (const sinCoste of [0, Number.NaN, Number.POSITIVE_INFINITY]) {
+    const ev = evidenciaCon(fila('claude', 'haiku', null, 100, 0, sinCoste), fila('claude', 'sonnet', null, 100, 0, 4000));
+    const d = elegir({
+      estacion: 'codigo',
+      riesgo: 'alto',
+      candidatos: [cand('claude', 'haiku', null), cand('claude', 'sonnet', null)],
+      evidencia: ev,
+    });
+    assert.equal(d.eleccion.modelo, 'sonnet', `coste ${sinCoste}`);
+    assert.equal(d.tokensEsperados, 4000);
+    assert.match(d.descartados[0].motivo, /^cuesta más \(tokens sin medir\)/u);
+  }
+  const solo = evidenciaCon(fila('claude', 'haiku', null, 100, 0, 0));
+  const d = elegir({ estacion: 'codigo', riesgo: 'bajo', candidatos: [cand('claude', 'haiku', null)], evidencia: solo });
+  assert.equal(d.tokensEsperados, null);
+  assert.match(d.explicacion, /tokens sin medir/u);
+  assert.doesNotMatch(d.explicacion, /~0/u);
+});
+
+test('entre costes desconocidos decide la familia', () => {
+  const ev = evidenciaCon(fila('claude', 'sonnet', null, 100, 0, 0), fila('claude', 'haiku', null, 100, 0, 0));
+  const d = elegir({
+    estacion: 'codigo',
+    riesgo: 'bajo',
+    candidatos: [cand('claude', 'sonnet', null), cand('claude', 'haiku', null)],
+    evidencia: ev,
+  });
+  assert.equal(d.eleccion.modelo, 'haiku');
+});
+
+test('margen de empate del 10 %: opus con 3000 no gana a haiku con 3001, pero sí con más de un 10 % de ventaja', () => {
+  const haiku = cand('claude', 'haiku', null);
+  const opus = cand('claude', 'opus', null);
+  const elige = (tokensHaiku, tokensOpus, candidatos) =>
+    elegir({
+      estacion: 'codigo',
+      riesgo: 'alto',
+      candidatos,
+      evidencia: evidenciaCon(fila('claude', 'haiku', null, 100, 0, tokensHaiku), fila('claude', 'opus', null, 100, 0, tokensOpus)),
+    }).eleccion.modelo;
+  assert.equal(elige(3001, 3000, [opus, haiku]), 'haiku');
+  assert.equal(elige(3001, 3000, [haiku, opus]), 'haiku');
+  assert.equal(elige(3300, 3000, [opus, haiku]), 'haiku');
+  assert.equal(elige(3301, 3000, [opus, haiku]), 'opus');
+});
+
+test('un esfuerzo desconocido cuenta como el más caro', () => {
+  const ev = evidenciaCon(
+    fila('codex', 'gpt-6-luna', 'raro', 100, 0, 2000),
+    fila('codex', 'gpt-6-luna', 'xhigh', 100, 0, 2000),
+    fila('codex', 'gpt-6-luna', null, 100, 0, 2000),
+  );
+  const todos = [cand('codex', 'gpt-6-luna', 'raro'), cand('codex', 'gpt-6-luna', null), cand('codex', 'gpt-6-luna', 'xhigh')];
+  const d = elegir({ estacion: 'codigo', riesgo: 'alto', candidatos: todos, evidencia: ev });
+  assert.equal(d.eleccion.esfuerzo, 'xhigh');
+  assert.deepEqual(d.descartados.map((x) => x.candidato.esfuerzo), [null, 'raro']);
+});
+
+test('los candidatos duplicados se cuentan una vez', () => {
+  const d = elegir({ estacion: 'codigo', riesgo: 'bajo', candidatos: [SOL, { ...SOL }, LUNA, LUNA], evidencia: evidenciaVacia() });
+  assert.deepEqual(d.eleccion, SOL);
+  assert.deepEqual(d.descartados, [{ candidato: LUNA, motivo: 'sin datos medidos' }]);
+});
+
+test('los descartados sin datos salen igual de ordenados con o sin evidencia de otros', () => {
+  const a = cand('codex', 'gpt-6-astra', 'low');
+  const b = cand('codex', 'gpt-6-hydrogen', 'low');
+  const c = cand('codex', 'gpt-6-luna', 'low');
+  const sin = elegir({ estacion: 'codigo', riesgo: 'bajo', candidatos: [a, b, c, SOL], evidencia: evidenciaVacia() });
+  assert.deepEqual(sin.descartados.map((x) => x.candidato), [c, b, SOL]);
+  const ev = evidenciaCon(fila('codex', 'gpt-6-luna', 'low', 100, 0, 1000));
+  const mixto = elegir({ estacion: 'codigo', riesgo: 'bajo', candidatos: [a, b, c, SOL], evidencia: ev });
+  assert.deepEqual(mixto.descartados.map((x) => x.candidato), [b, SOL, a]);
+});
+
+test('orden de coste por familia: luna < hydrogen/terra < sol/argon/opus < astra/carbon/fable < desconocida', () => {
+  const l = (modelo, ia = 'codex', esfuerzo = 'low') => cand(ia, modelo, esfuerzo);
+  const esperado = [
+    l('gpt-6-hydrogen'),
+    l('gpt-6-terra'),
+    l('claude-opus-5-5-high', 'claude', null),
+    l('claude-opus-5-5', 'claude', null),
+    l('fable', 'claude'),
+    l('gpt-6-astra'),
+    l('gpt-6-carbon'),
+    l('modelo-raro'),
+  ];
+  const entrada = [l('gpt-6-luna'), ...[...esperado].reverse()];
+  const d = elegir({ estacion: 'codigo', riesgo: 'bajo', candidatos: entrada, evidencia: evidenciaVacia() });
+  assert.deepEqual(d.eleccion, entrada[0]);
+  assert.deepEqual(d.descartados.map((x) => x.candidato), esperado);
 });
