@@ -472,3 +472,32 @@ test('si el servidor se cierra mientras se lanza, el recorrido nuevo se cancela 
   assert.equal(otra.isError, true);
   assert.match(otra.texto, /cerrando/u);
 });
+
+test('una segunda llamada rechazada por ocupada no impide que el cierre espere al lanzamiento a medias', { skip: !posix }, async () => {
+  const e = escenario({ codex: guionCodexLento() });
+  const servidor = crearServidorFabrica({ homeDirectory: e.home, cwd: e.dir, environment: { ...process.env, ...GIT_ENTORNO, ...e.env }, avisar: () => {} });
+  const [extremoCliente, extremoServidor] = InMemoryTransport.createLinkedPair();
+  await servidor.server.connect(extremoServidor);
+  const cliente = new Client({ name: 'prueba', version: '0.0.0' }, { capabilities: {} });
+  clientes.push(cliente);
+  await cliente.connect(extremoCliente);
+
+  const propuesta = await proponer(cliente);
+  await hasta(() => conectoresVivos(e.guiones).length === 0, 'los conectores de la propuesta se cierran');
+  const a = llamar(cliente, 'fabrica_lanzar', { huella: propuesta.huella });
+  await hasta(() => conectoresVivos(e.guiones).length > 0, 'A crea sus conectores');
+  const b = await llamar(cliente, 'fabrica_lanzar', { huella: propuesta.huella });
+  assert.equal(b.isError, true);
+  assert.equal(b.texto, 'Ya hay un recorrido en curso; espera a que termine o cancélalo');
+  await servidor.detener();
+
+  // Nada de esperar a la respuesta de A: al volver `detener()` el cierre ya tiene que haberlo cancelado todo,
+  // porque un proceso que sale ahí no tiene quien termine el trabajo.
+  const base = path.join(e.home, '.nexakit', 'fabrica', readdirUnico(path.join(e.home, '.nexakit', 'fabrica')));
+  const rastros = readdirSync(base).filter((n) => n.startsWith('fab-'));
+  assert.equal(rastros.length, 1, 'A ya creó su rastro');
+  const estado = JSON.parse(readFileSync(path.join(base, rastros[0], 'estado.json'), 'utf8'));
+  assert.equal(estado.fase, 'cancelado');
+  assert.equal(conectoresVivos(e.guiones).length, 0, 'no queda ningún conector al volver detener()');
+  assert.equal((await a).isError, true);
+});

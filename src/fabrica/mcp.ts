@@ -101,8 +101,9 @@ export function crearServidorFabrica(opciones: OpcionesServidorFabrica = {}): Se
   // Un solo recorrido a la vez: se reserva de forma síncrona al empezar a lanzar y se libera cuando
   // el recorrido termina y sus conectores se cierran, así el tope de estaciones externas no se supera.
   let ocupado = false;
-  // El lanzamiento que está a medias; el cierre espera a que acabe para no dejar un recorrido sin atender.
-  let enVuelo: Promise<unknown> | null = null;
+  // Los lanzamientos a medias (también los rechazados, que acaban enseguida): el cierre espera a todos para no
+  // dejar un recorrido sin atender.
+  const enVuelo = new Set<Promise<unknown>>();
 
   async function lanzar(huella: string, cambios: z.infer<typeof EsquemaCambios> | undefined): Promise<{ id: string }> {
     // Sin ningún await antes de la reserva: dos llamadas simultáneas no pueden pasar las dos.
@@ -182,11 +183,11 @@ export function crearServidorFabrica(opciones: OpcionesServidorFabrica = {}): Se
     ({ huella, cambios }) =>
       invocar(async () => {
         const lanzamiento = lanzar(huella, cambios);
-        enVuelo = lanzamiento;
+        enVuelo.add(lanzamiento);
         try {
           return await lanzamiento;
         } finally {
-          if (enVuelo === lanzamiento) enVuelo = null;
+          enVuelo.delete(lanzamiento);
         }
       }),
   );
@@ -260,7 +261,7 @@ export function crearServidorFabrica(opciones: OpcionesServidorFabrica = {}): Se
 
   async function detener(): Promise<void> {
     cerrado = true;
-    await enVuelo?.catch(() => {});
+    await Promise.allSettled([...enVuelo]);
     const pendientes = [...enCurso.entries()];
     await Promise.allSettled(pendientes.map(([id]) => ejecutor.cancelar(id, home)));
     await Promise.allSettled(pendientes.map(([, terminado]) => terminado));
