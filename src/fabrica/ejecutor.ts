@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import os from 'node:os';
-import type { Conector, Encargo, ResultadoEstacion } from './conectores/tipos.js';
+import type { AlProgreso, Conector, Encargo, ResultadoEstacion } from './conectores/tipos.js';
 import { leerDiff } from './diff.js';
 import { comparar, instantanea, type Instantanea } from './disco.js';
 import { calcularCoste, comprobarHuella, descarte, type EstacionRecorrido, type Recorrido } from './enrutador.js';
@@ -18,6 +18,8 @@ export const GRACIA_MS = 30_000;
 export const TOPE_CATALOGO_MS = 30_000;
 /** Recorridos terminados que se conservan en memoria; los demás se leen de `estado.json`. */
 export const MAX_TERMINADOS = 50;
+/** Como mucho una escritura de `activo.json` por este tiempo: 1 segundo. */
+export const INTERVALO_ACTIVO_MS = 1_000;
 
 const AVISO_SOLO_LECTURA = 'Revisa SOLO, sin modificar nada.';
 const MENSAJE_HUELLA = 'El cambio ya no es el que aprobaste; vuelve a proponer';
@@ -60,6 +62,8 @@ export interface OpcionesLanzar {
   /** Espera máxima a cada catálogo vivo. */
   topeCatalogoMs?: number;
   home?: string;
+  /** Mínimo entre dos escrituras de `activo.json`. */
+  intervaloActivoMs?: number;
 }
 
 type Catalogo = Array<{ modelo: string; esfuerzos: string[] }>;
@@ -75,6 +79,16 @@ interface Ejecucion {
   /** Cadena de escrituras de `estado.json`, en orden. */
   guardado: Promise<void>;
   errorRastro: unknown;
+  home: string;
+  /** Nombre del repo en el rastro, para `activo.json`. */
+  repo: string;
+  intervaloActivoMs: number;
+  /** Datos de cada estación para `activo.json`, en el mismo orden que `estado.estaciones`. */
+  detalle: Array<Pick<rastro.EstacionActiva, 'ia' | 'modelo' | 'esfuerzo'>>;
+  /** Últimos tokens conocidos de cada estación. */
+  tokens: Map<NombreEstacion, number>;
+  /** Ya salió de `activo.json`: nada más se publica. */
+  activoCerrado: boolean;
 }
 
 interface Lanzable {
@@ -201,6 +215,105 @@ function persistir(ej: Ejecucion): Promise<void> {
   return ej.guardado;
 }
 
+/** Quién escribe `activo.json` en una carpeta de usuario: un solo archivo, aunque haya varios recorridos. */
+interface Publicador {
+  ultimaEscritura: number;
+  temporizador: NodeJS.Timeout | undefined;
+  /** Escrituras y borrado en orden. */
+  cadena: Promise<void>;
+  /** Recorridos de este proceso que siguen en curso, del más antiguo al más reciente. */
+  activas: Ejecucion[];
+  /** El que se muestra: el último que cambió. */
+  mostrada: Ejecucion | undefined;
+}
+
+const publicadores = new Map<string, Publicador>();
+
+function publicadorDe(home: string): Publicador {
+  let pub = publicadores.get(home);
+  if (pub === undefined) {
+    pub = { ultimaEscritura: 0, temporizador: undefined, cadena: Promise.resolve(), activas: [], mostrada: undefined };
+    publicadores.set(home, pub);
+  }
+  return pub;
+}
+
+function contenidoActivo(ej: Ejecucion): rastro.Activo {
+  return {
+    pid: process.pid,
+    id: ej.estado.id,
+    repo: ej.repo,
+    actualizado: new Date().toISOString(),
+    estaciones: ej.estado.estaciones.map((fila, i) => ({
+      estacion: fila.estacion,
+      ia: ej.detalle[i]?.ia ?? null,
+      modelo: ej.detalle[i]?.modelo ?? null,
+      esfuerzo: ej.detalle[i]?.esfuerzo ?? null,
+      estado: fila.estado,
+      tokens: ej.tokens.get(fila.estacion) ?? 0,
+    })),
+  };
+}
+
+/** Encola la escritura del estado de la ejecución mostrada. El estado vivo es de cortesía: un fallo se ignora. */
+function escribirActivo(home: string, pub: Publicador): void {
+  pub.ultimaEscritura = Date.now();
+  pub.cadena = pub.cadena
+    .then(() => {
+      const mostrada = pub.mostrada;
+      return mostrada === undefined ? undefined : rastro.guardarActivo(home, contenidoActivo(mostrada));
+    })
+    .catch(() => {});
+}
+
+/** Publica el estado vivo, con como mucho una escritura por intervalo: lo que cambie entre medias sale en la siguiente. */
+function publicarActivo(ej: Ejecucion): void {
+  if (ej.activoCerrado) return;
+  const pub = publicadorDe(ej.home);
+  pub.mostrada = ej;
+  const espera = pub.ultimaEscritura + ej.intervaloActivoMs - Date.now();
+  if (espera <= 0) {
+    escribirActivo(ej.home, pub);
+  } else if (pub.temporizador === undefined) {
+    // Sin `unref` un recorrido terminado retendría el proceso.
+    pub.temporizador = setTimeout(() => {
+      pub.temporizador = undefined;
+      escribirActivo(ej.home, pub);
+    }, espera);
+    pub.temporizador.unref();
+  }
+}
+
+/**
+ * La ejecución termina: si no queda otra en curso, escribe el estado final y borra `activo.json`. Si
+ * otro proceso se lo quedó, no lo toca. Nunca lanza.
+ */
+function cerrarActivo(ej: Ejecucion): Promise<void> {
+  ej.activoCerrado = true;
+  const pub = publicadorDe(ej.home);
+  pub.activas = pub.activas.filter((otra) => otra !== ej);
+  if (pub.mostrada === ej) pub.mostrada = pub.activas.at(-1);
+  pub.cadena = pub.cadena
+    .then(async () => {
+      const actual = rastro.leerActivo(ej.home);
+      if (actual !== null && actual.pid !== process.pid) return;
+      const siguiente = pub.activas.at(-1);
+      if (siguiente !== undefined) {
+        pub.mostrada = siguiente;
+        pub.ultimaEscritura = Date.now();
+        await rastro.guardarActivo(ej.home, contenidoActivo(siguiente));
+        return;
+      }
+      clearTimeout(pub.temporizador);
+      pub.temporizador = undefined;
+      await rastro.guardarActivo(ej.home, contenidoActivo(ej));
+      await rastro.guardarActivo(ej.home, null);
+      if (pub.activas.length === 0 && publicadores.get(ej.home) === pub) publicadores.delete(ej.home);
+    })
+    .catch(() => {});
+  return pub.cadena;
+}
+
 function marcar(fila: FilaEstado, estado: EstadoEstacionEjecucion, motivo?: string): void {
   fila.estado = estado;
   if (motivo === undefined) delete fila.motivo;
@@ -228,12 +341,18 @@ async function correrEstacion(
     }, timeoutMs);
     marcar(trabajo.fila, 'en-curso');
     void persistir(ej);
+    publicarActivo(ej);
 
     let resultado: ResultadoEstacion;
     let sinRespuesta = false;
     try {
       // `then` convierte también una excepción síncrona del conector en un rechazo.
-      const llamada = Promise.resolve().then(() => trabajo.conector.ejecutar(trabajo.encargo, control.signal));
+      const alProgreso: AlProgreso = ({ tokens }) => {
+        if (trabajo.fila.estado !== 'en-curso' || !Number.isFinite(tokens)) return;
+        ej.tokens.set(trabajo.fila.estacion, tokens);
+        publicarActivo(ej);
+      };
+      const llamada = Promise.resolve().then(() => trabajo.conector.ejecutar(trabajo.encargo, control.signal, alProgreso));
       const respuesta = await conGracia(llamada, control.signal, graciaMs);
       if (respuesta === AGOTADO) {
         sinRespuesta = true;
@@ -266,8 +385,10 @@ async function correrEstacion(
     try {
       await rastro.guardarEstacion(ej.estado.dir, trabajo.fila.estacion, trabajo.encargoRastro, final);
     } finally {
+      if (final.tokens !== null) ej.tokens.set(trabajo.fila.estacion, final.tokens.total);
       marcar(trabajo.fila, final.estado, final.motivo);
       void persistir(ej);
+      publicarActivo(ej);
     }
   } finally {
     semaforo.liberar();
@@ -327,6 +448,7 @@ export async function lanzar(r: Recorrido, opciones: OpcionesLanzar): Promise<{ 
     graciaMs = GRACIA_MS,
     topeCatalogoMs = TOPE_CATALOGO_MS,
     home = os.homedir(),
+    intervaloActivoMs = INTERVALO_ACTIVO_MS,
   } = opciones;
   if (!Number.isInteger(paralelismo) || paralelismo < 1) {
     throw new ErrorFabrica('El paralelismo debe ser un número entero mayor que cero');
@@ -335,6 +457,7 @@ export async function lanzar(r: Recorrido, opciones: OpcionesLanzar): Promise<{ 
     [timeoutMs, 'El tiempo máximo por estación'],
     [graciaMs, 'La espera tras cancelar'],
     [topeCatalogoMs, 'La espera al catálogo'],
+    [intervaloActivoMs, 'El intervalo del estado vivo'],
   ] as const) {
     if (!Number.isFinite(valor) || valor <= 0) throw new ErrorFabrica(`${nombre} debe ser un número positivo de milisegundos`);
   }
@@ -411,7 +534,8 @@ export async function lanzar(r: Recorrido, opciones: OpcionesLanzar): Promise<{ 
   }
 
   const antes = await instantanea(raiz);
-  const { id, dir } = await rastro.crear(home, await rastro.nombreRepo(raiz), recorrido);
+  const repo = await rastro.nombreRepo(raiz);
+  const { id, dir } = await rastro.crear(home, repo, recorrido);
   const ej: Ejecucion = {
     estado: { id, dir, fase: 'en-curso', estaciones: filas, escriturasDetectadas: [] },
     controladores: new Set(),
@@ -420,6 +544,12 @@ export async function lanzar(r: Recorrido, opciones: OpcionesLanzar): Promise<{ 
     fin: Promise.resolve(),
     guardado: Promise.resolve(),
     errorRastro: undefined,
+    home,
+    repo,
+    intervaloActivoMs,
+    detalle: r.estaciones.map((e) => ({ ia: e.ia, modelo: e.modelo, esfuerzo: e.esfuerzo })),
+    tokens: new Map(),
+    activoCerrado: false,
   };
   registro.set(id, ej);
   await persistir(ej);
@@ -427,6 +557,8 @@ export async function lanzar(r: Recorrido, opciones: OpcionesLanzar): Promise<{ 
     registro.delete(id);
     throw new ErrorFabrica(`No se pudo guardar el estado del rastro: ${mensajeDe(ej.errorRastro)}`);
   }
+  publicadorDe(home).activas.push(ej);
+  publicarActivo(ej);
   // La poda corre en segundo plano y nunca hace fallar el recorrido.
   const poda = rastro.podar(home).then(
     () => undefined,
@@ -442,7 +574,7 @@ export async function lanzar(r: Recorrido, opciones: OpcionesLanzar): Promise<{ 
       ej.estado.fase = 'fallido';
       ej.terminado = true;
     },
-  );
+  ).then(() => cerrarActivo(ej));
   return { id };
 }
 

@@ -29,9 +29,12 @@ export interface ResultadoEstacion {
   motivo?: string;
 }
 
+/** Avance de una estación en curso: los tokens usados hasta ahora. */
+export type AlProgreso = (progreso: { tokens: number }) => void;
+
 export interface Conector {
   ia: IA;
   catalogo(): Promise<Array<{ modelo: string; esfuerzos: string[] }>>;
-  ejecutar(encargo: Encargo, señal: AbortSignal): Promise<ResultadoEstacion>;
+  ejecutar(encargo: Encargo, señal: AbortSignal, alProgreso?: AlProgreso): Promise<ResultadoEstacion>;
   cerrar(): Promise<void>;
 }

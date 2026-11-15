@@ -40,7 +40,7 @@ import type {
 } from '@agentclientprotocol/sdk';
 import { resolveCliInvocation } from '../../../src/cli-executable.js';
 import { hallazgosJsonSchema, InformeEstacion } from '../esquemas.js';
-import type { Conector, Encargo, ResultadoEstacion } from './tipos.js';
+import type { AlProgreso, Conector, Encargo, ResultadoEstacion } from './tipos.js';
 
 const NO_INSTALADO = 'Antigravity no está instalado';
 const HALLAZGOS_INVALIDOS = 'El revisor no devolvió hallazgos válidos';
@@ -293,6 +293,7 @@ type Desenlace =
   | { tipo: 'muerto'; motivo: string };
 
 interface EnCurso {
+  alProgreso?: AlProgreso;
   resultado: ResultadoEstacion;
   /** Texto del agente en el turno actual. */
   texto: string;
@@ -348,7 +349,7 @@ class ConectorAntigravity implements Conector {
       });
   }
 
-  async ejecutar(encargo: Encargo, señal: AbortSignal): Promise<ResultadoEstacion> {
+  async ejecutar(encargo: Encargo, señal: AbortSignal, alProgreso?: AlProgreso): Promise<ResultadoEstacion> {
     const resultado: ResultadoEstacion = { estado: 'fallida', crudo: '', modeloInformado: null, tokens: null, denegaciones: [] };
     const cancelada = (): ResultadoEstacion => ({ ...resultado, estado: 'cancelada', motivo: CANCELADA });
     if (señal.aborted) return cancelada();
@@ -376,7 +377,7 @@ class ConectorAntigravity implements Conector {
       const modoInseguro = new Promise<Desenlace>((resolver) => {
         alertarModo = (modo) => resolver({ tipo: 'inseguro', modo });
       });
-      const enCurso: EnCurso = { resultado, texto: '', alertarModo, modoInseguro };
+      const enCurso: EnCurso = { resultado, texto: '', alertarModo, modoInseguro, ...(alProgreso !== undefined ? { alProgreso } : {}) };
       this.sesiones.set(id, enCurso);
       const anunciado = this.modosSinSesion.get(id);
       this.modosSinSesion.delete(id);
@@ -630,6 +631,11 @@ class ConectorAntigravity implements Conector {
         break;
       case 'usage_update':
         enCurso.resultado.tokens = { entrada: 0, salida: 0, total: actualizacion.used };
+        try {
+          enCurso.alProgreso?.({ tokens: actualizacion.used });
+        } catch {
+          // Quien escucha el avance nunca debe romper la revisión.
+        }
         break;
       default:
         break;

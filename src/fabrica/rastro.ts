@@ -5,7 +5,8 @@ import path from 'node:path';
 import type { Encargo, ResultadoEstacion } from './conectores/tipos.js';
 import type { Recorrido } from './enrutador.js';
 import { ErrorFabrica } from './errores.js';
-import { NOMBRES_ESTACION, type NombreEstacion } from './esquemas.js';
+import type { EstadoEstacionEjecucion } from './ejecutor.js';
+import { NOMBRES_ESTACION, type IA, type NombreEstacion } from './esquemas.js';
 
 /** Días que se conserva un rastro antes de que `podar` lo borre. */
 export const DIAS_RASTRO = 90;
@@ -93,15 +94,21 @@ async function escribirReemplazando(ruta: string, texto: string): Promise<void> 
 
 const json = (valor: unknown): string => `${JSON.stringify(valor, null, 2)}\n`;
 
+/** Deja lista `~/.nexakit/fabrica/` y devuelve su ruta. */
+async function prepararBase(home: string): Promise<string> {
+  const nexakit = path.join(home, '.nexakit');
+  await mkdir(nexakit, { recursive: true, mode: 0o700 });
+  const base = path.join(nexakit, 'fabrica');
+  await carpetaPropia(base);
+  return base;
+}
+
 /** Valida el nombre del repo y deja listas `~/.nexakit/fabrica/` y `~/.nexakit/fabrica/<repo>/`. */
 async function prepararCarpetaRepo(home: string, repo: string): Promise<string> {
   if (!PATRON_REPO.test(repo) || repo === '.' || repo === '..') {
     throw new ErrorFabrica(`Nombre de repo no válido para el rastro: ${repo}`);
   }
-  const nexakit = path.join(home, '.nexakit');
-  await mkdir(nexakit, { recursive: true, mode: 0o700 });
-  const base = path.join(nexakit, 'fabrica');
-  await carpetaPropia(base);
+  const base = await prepararBase(home);
   const dirRepo = path.join(base, repo);
   await carpetaPropia(dirRepo);
   return dirRepo;
@@ -153,6 +160,70 @@ export function leerPropuesta(home: string, repo: string): unknown {
     return JSON.parse(readFileSync(fd, 'utf8')) as unknown;
   } finally {
     closeSync(fd);
+  }
+}
+
+/** Estado vivo de una estación del recorrido en curso, tal como lo muestra la barra. */
+export interface EstacionActiva {
+  estacion: NombreEstacion;
+  ia: IA | null;
+  modelo: string | null;
+  esfuerzo: string | null;
+  estado: EstadoEstacionEjecucion;
+  tokens: number;
+}
+
+/** Contenido de `~/.nexakit/fabrica/activo.json`: el recorrido que corre ahora en ese proceso. */
+export interface Activo {
+  pid: number;
+  id: string;
+  repo: string;
+  /** Hora de la escritura, en ISO 8601. */
+  actualizado: string;
+  estaciones: EstacionActiva[];
+}
+
+/**
+ * Lee `activo.json` sin seguir enlaces. `null` si no existe, no es un archivo normal o no se entiende:
+ * es un dato de cortesía para la barra, nunca debe hacer fallar a nadie.
+ */
+export function leerActivo(home: string): Activo | null {
+  try {
+    const base = path.join(home, '.nexakit', 'fabrica');
+    const carpeta = lstatSync(base, { throwIfNoEntry: false });
+    if (carpeta === undefined || !carpeta.isDirectory() || carpeta.isSymbolicLink()) return null;
+    const archivo = path.join(base, 'activo.json');
+    const info = lstatSync(archivo, { throwIfNoEntry: false });
+    if (info === undefined || !info.isFile()) return null;
+    const fd = openSync(archivo, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    try {
+      const valor: unknown = JSON.parse(readFileSync(fd, 'utf8'));
+      if (typeof valor !== 'object' || valor === null || typeof (valor as { pid?: unknown }).pid !== 'number') return null;
+      return valor as Activo;
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Publica el estado vivo en `~/.nexakit/fabrica/activo.json` (escritura atómica, `0o600`, sin seguir enlaces).
+ * Con `null` lo borra, pero solo si es de este proceso: el de otro `pid` no se toca.
+ */
+export async function guardarActivo(home: string, activo: Activo | null): Promise<void> {
+  if (activo !== null) {
+    await escribirReemplazando(path.join(await prepararBase(home), 'activo.json'), json(activo));
+    return;
+  }
+  const actual = leerActivo(home);
+  if (actual === null || actual.pid !== process.pid) return;
+  try {
+    // `unlink` quita el archivo o el enlace mismo, nunca su destino.
+    await unlink(path.join(home, '.nexakit', 'fabrica', 'activo.json'));
+  } catch (error) {
+    if (codigoError(error) !== 'ENOENT') throw error;
   }
 }
 

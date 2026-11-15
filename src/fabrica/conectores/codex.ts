@@ -9,7 +9,7 @@ import { promisify } from 'node:util';
 import { resolveCliInvocation } from '../../../src/cli-executable.js';
 import { hallazgosJsonSchema, InformeEstacion } from '../esquemas.js';
 import { ClienteJsonRpc, ErrorProceso } from '../jsonrpc.js';
-import type { Conector, Denegacion, Encargo, ResultadoEstacion } from './tipos.js';
+import type { AlProgreso, Conector, Denegacion, Encargo, ResultadoEstacion } from './tipos.js';
 import type { ApplyPatchApprovalResponse } from '../protocolos/codex/ApplyPatchApprovalResponse.js';
 import type { ExecCommandApprovalParams } from '../protocolos/codex/ExecCommandApprovalParams.js';
 import type { ExecCommandApprovalResponse } from '../protocolos/codex/ExecCommandApprovalResponse.js';
@@ -247,6 +247,7 @@ interface EnCurso {
   encargo: Encargo;
   resultado: ResultadoEstacion;
   terminarTurno: (fin: FinTurno) => void;
+  alProgreso?: AlProgreso;
 }
 
 interface Proceso {
@@ -300,7 +301,7 @@ class ConectorCodex implements Conector {
     return modelos;
   }
 
-  async ejecutar(encargo: Encargo, señal: AbortSignal): Promise<ResultadoEstacion> {
+  async ejecutar(encargo: Encargo, señal: AbortSignal, alProgreso?: AlProgreso): Promise<ResultadoEstacion> {
     const resultado: ResultadoEstacion = { estado: 'fallida', crudo: '', modeloInformado: null, tokens: null, denegaciones: [] };
     const cancelada = (): ResultadoEstacion => ({ ...resultado, estado: 'cancelada', motivo: CANCELADA });
     if (señal.aborted) return cancelada();
@@ -333,7 +334,7 @@ class ConectorCodex implements Conector {
         terminarTurno = (fin) => resolver({ tipo: 'turno', fin });
       });
       // Se registra antes de `turn/start`: sus notificaciones pueden llegar antes que la respuesta.
-      this.hilos.set(idHilo, { encargo, resultado, terminarTurno });
+      this.hilos.set(idHilo, { encargo, resultado, terminarTurno, ...(alProgreso !== undefined ? { alProgreso } : {}) });
       await this.comprobarAislamiento(cliente, idHilo);
       if (señal.aborted) return cancelada();
 
@@ -516,6 +517,11 @@ class ConectorCodex implements Conector {
       const { inputTokens, outputTokens, totalTokens } = total;
       if (typeof inputTokens !== 'number' || typeof outputTokens !== 'number' || typeof totalTokens !== 'number') return;
       enCurso.resultado.tokens = { entrada: inputTokens, salida: outputTokens, total: totalTokens };
+      try {
+        enCurso.alProgreso?.({ tokens: totalTokens });
+      } catch {
+        // Quien escucha el avance nunca debe romper la revisión.
+      }
     } else if (metodo === 'turn/completed') {
       const turno = params['turn'];
       if (!esObjeto(turno)) return;
