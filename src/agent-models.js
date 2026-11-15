@@ -29,8 +29,10 @@ const FAMILY_ROLES = Object.freeze({
   terra: "uso diario",
   sol: "uso diario",
   sonnet: "uso diario",
+  hydrogen: "uso diario",
   astra: "el más capaz",
   argon: "el más capaz",
+  carbon: "el más capaz",
   opus: "el más capaz"
 });
 

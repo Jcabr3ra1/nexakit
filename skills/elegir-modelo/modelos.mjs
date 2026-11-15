@@ -107,4 +107,41 @@ if (missing) {
   out('El id indica el esfuerzo cuando el modelo ofrece variantes: -low, -medium, -high, -xhigh o -max. Comprueba el modelo y el esfuerzo activos con /model y /effort dentro de agy.');
 }
 
+// Evidencia medida por la fábrica de nexakit. Solo lectura, sin seguir enlaces y con tope de tamaño: si no existe o no
+// es válida, no se imprime nada.
+const evidenciaMedida = () => {
+  const file = path.join(home, '.nexakit', 'fabrica', 'evidencia.json');
+  let fd;
+  try {
+    fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile() || stat.size > 1024 * 1024) return null;
+    const data = JSON.parse(fs.readFileSync(fd, 'utf8'));
+    if (data?.version !== 1 || !Array.isArray(data.filas)) return null;
+    const mejores = new Map();
+    for (const f of data.filas) {
+      if (!f || typeof f.estacion !== 'string' || typeof f.modelo !== 'string' || typeof f.ia !== 'string') return null;
+      if (![f.alfa, f.beta, f.banco, f.real].every(Number.isFinite) || f.alfa <= 0 || f.beta <= 0) return null;
+      const media = f.alfa / (f.alfa + f.beta);
+      const actual = mejores.get(f.estacion);
+      if (!actual || media > actual.media) mejores.set(f.estacion, { fila: f, media });
+    }
+    return mejores;
+  } catch {
+    return null;
+  } finally {
+    if (fd !== undefined) try { fs.closeSync(fd); } catch { /* nada */ }
+  }
+};
+const mejores = evidenciaMedida();
+if (mejores && mejores.size > 0) {
+  out('', '## Evidencia medida');
+  for (const [estacion, { fila, media }] of [...mejores].sort((a, b) => a[0].localeCompare(b[0]))) {
+    const esfuerzo = typeof fila.esfuerzo === 'string' ? ` · ${fila.esfuerzo}` : '';
+    const limpio = texto => String(texto).replace(/[\u0000-\u001f\u007f]/gu, ' ');
+    out(`- ${limpio(estacion)}: ${limpio(fila.ia)} · ${limpio(fila.modelo)}${esfuerzo} · media ${media.toFixed(2)} · ${fila.banco + fila.real} observaciones (${fila.banco} de banco, ${fila.real} reales)`);
+  }
+  out('Nota: la fábrica decide con un criterio más prudente (el cuantil del 5 % de la Beta frente al umbral de riesgo), no con la media.');
+}
+
 process.stdout.write(lines.join('\n') + '\n');
