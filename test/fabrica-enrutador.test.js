@@ -6,13 +6,14 @@ import { tmpdir } from 'node:os';
 import { gitConfigGlobalVacio } from '../test-support/git-aislado.js';
 import path from 'node:path';
 import {
-  proponer,
+  proponer as proponerReal,
   aplicarCambios,
   comprobarHuella,
   calcularHuella,
   jsonCanonico,
 } from '../dist/fabrica/enrutador.js';
 import { ErrorFabrica } from '../dist/fabrica/errores.js';
+import { actualizar, evidenciaVacia, guardar } from '../dist/fabrica/evidencia.js';
 
 process.env.GIT_CONFIG_GLOBAL = gitConfigGlobalVacio;
 process.env.GIT_CONFIG_NOSYSTEM = '1';
@@ -50,6 +51,25 @@ function crearRepo({ config } = {}) {
   git(dir, 'checkout', '-q', '-b', 'trabajo');
   return dir;
 }
+
+/** Casi todas las pruebas parten sin evidencia: un HOME temporal vacío, nunca el real de quien las ejecuta. */
+const HOME_VACIO = mkdtempSync(path.join(tmpdir(), 'fabrica-enrutador-home-'));
+temporales.push(HOME_VACIO);
+const proponer = (entrada) => proponerReal({ home: HOME_VACIO, ...entrada });
+
+/** HOME temporal con una evidencia guardada: `filas` son [ia, modelo, esfuerzo, estacion, aciertos, fallos, tokens]. */
+async function homeConEvidencia(filas, { ahora = new Date() } = {}) {
+  const home = mkdtempSync(path.join(tmpdir(), 'fabrica-enrutador-ev-'));
+  temporales.push(home);
+  let ev = evidenciaVacia(ahora);
+  for (const [ia, modelo, esfuerzo, estacion, aciertos, fallos, tokens] of filas) {
+    ev = actualizar(ev, { ia, modelo, esfuerzo, estacion }, { aciertos, fallos, tokens, segundos: 10, fuente: 'banco', ahora });
+  }
+  await guardar(home, ev, ahora);
+  return home;
+}
+
+const hace = (dias) => new Date(Date.now() - dias * 24 * 60 * 60 * 1000);
 
 const CATALOGOS = {
   codex: [
@@ -391,4 +411,197 @@ test('aplicarCambios solo conserva las órdenes vistas: las mantiene quien sigue
   assert.deepEqual(porNombre(quitada, 'pruebas').ordenesPermitidas, []);
   assert.deepEqual(porNombre(r, 'pruebas').ordenesPermitidas, ['npm test', 'npm run lint']);
   assert.notEqual(quitada.huella, r.huella);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Decisión basada en evidencia
+
+test('sin evidencia usa la tabla manual, lo explica y avisa de que conviene ejecutar el banco', async () => {
+  const dir = crearRepo();
+  escribir(dir, 'src/a.js', 'export {};\n');
+  const r = await proponer({ raiz: dir, base: 'main', catalogos: CATALOGOS });
+  const pruebas = porNombre(r, 'pruebas');
+  assert.equal(pruebas.modelo, 'gpt-6.1-terra');
+  assert.equal(pruebas.calidad, null);
+  assert.match(pruebas.explicacion, /sin datos medidos/u);
+  assert.ok(r.avisos.some((a) => a.startsWith('pruebas: sin datos medidos: ejecuta el banco')), r.avisos.join('\n'));
+  assert.ok(r.avisos.every((a) => !/caducada/u.test(a)), 'sin ningún dato no se habla de caducidad');
+  assert.equal(porNombre(r, 'codigo').explicacion, 'la ejecuta la sesión de Claude');
+  assert.equal(porNombre(r, 'codigo').calidad, null);
+  assert.equal(porNombre(r, 'documentacion').explicacion, '');
+});
+
+test('con evidencia elige el modelo más barato que alcanza el umbral y lo explica', async () => {
+  const dir = crearRepo();
+  escribir(dir, 'hooks/pre-tool.js', 'export {};\n');
+  const home = await homeConEvidencia([
+    ['codex', 'gpt-6.1-sol', 'high', 'seguridad', 200, 2, 9000],
+    ['codex', 'gpt-6-sol', 'high', 'seguridad', 200, 2, 3000],
+  ]);
+  const r = await proponerReal({ raiz: dir, base: 'main', catalogos: CATALOGOS, home });
+  const seguridad = porNombre(r, 'seguridad');
+  // La tabla pone primero gpt-6.1-sol; la evidencia dice que gpt-6-sol basta y cuesta menos.
+  assert.equal(seguridad.modelo, 'gpt-6-sol');
+  assert.equal(seguridad.esfuerzo, 'high');
+  assert.ok(seguridad.calidad > 0.85 && seguridad.calidad < 1, String(seguridad.calidad));
+  assert.match(seguridad.explicacion, /^gpt-6-sol high: calidad ≥ 0,9\d \(\d+ obs\.\)/u);
+  assert.ok(r.avisos.every((a) => !a.startsWith('seguridad:')), r.avisos.join('\n'));
+});
+
+test('la explicación y la calidad entran en la huella', async () => {
+  const dir = crearRepo();
+  escribir(dir, 'src/a.js', 'export {};\n');
+  const home = await homeConEvidencia([['codex', 'gpt-6.1-terra', 'medium', 'pruebas', 100, 2, 4000]]);
+  const r = await proponerReal({ raiz: dir, base: 'main', catalogos: CATALOGOS, home });
+  assert.equal(typeof porNombre(r, 'pruebas').calidad, 'number');
+  await comprobarHuella(r, dir);
+  for (const cambio of [{ explicacion: 'otra cosa' }, { calidad: 0.99 }]) {
+    const alterado = structuredClone(r);
+    Object.assign(porNombre(alterado, 'pruebas'), cambio);
+    await assert.rejects(comprobarHuella(alterado, dir), /ya no es el que aprobaste/u);
+  }
+  // Los avisos solo informan: no son parte de lo que la persona aprueba.
+  await comprobarHuella({ ...structuredClone(r), avisos: ['otro aviso'] }, dir);
+});
+
+test('un par vivo que solo está en la evidencia compite con los de la tabla; uno que ya no está en el catálogo, no', async () => {
+  const dir = crearRepo();
+  escribir(dir, 'src/a.js', 'export {};\n');
+  const home = await homeConEvidencia([
+    ['codex', 'gpt-6.1-terra', 'medium', 'pruebas', 100, 2, 4000],
+    // No está en la tabla de «pruebas», pero está vivo (esfuerzo del catálogo) y es más barato.
+    ['codex', 'gpt-6.1-terra', 'low', 'pruebas', 100, 2, 1000],
+    // Medido en su día, ya no existe en el catálogo vivo: no puede elegirse por barato que fuera.
+    ['codex', 'gpt-5-retirado', 'low', 'pruebas', 500, 0, 10],
+    // Esfuerzo que el catálogo ya no admite para ese modelo.
+    ['codex', 'gpt-6.1-terra', 'xhigh', 'pruebas', 500, 0, 10],
+  ]);
+  const pruebas = porNombre(await proponerReal({ raiz: dir, base: 'main', catalogos: CATALOGOS, home }), 'pruebas');
+  assert.equal(pruebas.modelo, 'gpt-6.1-terra');
+  assert.equal(pruebas.esfuerzo, 'low');
+  assert.deepEqual(pruebas.ordenesPermitidas, ['npm test']);
+});
+
+test('un par de Antigravity con evidencia se elige sin esfuerzo aparte', async () => {
+  const dir = crearRepo({ config: { rutasCriticas: ['src/**'] } });
+  escribir(dir, 'src/a.js', 'export {};\n');
+  const home = await homeConEvidencia([
+    ['antigravity', 'gemini-4-argon-high', null, 'arquitectura', 300, 1, 8000],
+    ['antigravity', 'gemini-4-hydrogen-high', null, 'arquitectura', 300, 1, 2000],
+  ]);
+  const arquitectura = porNombre(await proponerReal({ raiz: dir, base: 'main', catalogos: CATALOGOS, home }), 'arquitectura');
+  assert.equal(arquitectura.ia, 'antigravity');
+  assert.equal(arquitectura.modelo, 'gemini-4-hydrogen-high');
+  assert.equal(arquitectura.esfuerzo, null);
+});
+
+test('lo fijado en .nexakit/fabrica.json no se decide por evidencia y la explicación lo dice', async () => {
+  const dir = crearRepo({ config: { estaciones: { pruebas: { ia: 'codex', modelo: 'gpt-6-luna', esfuerzo: 'medium' } } } });
+  escribir(dir, 'src/a.js', 'export {};\n');
+  const home = await homeConEvidencia([
+    ['codex', 'gpt-6.1-terra', 'low', 'pruebas', 500, 0, 100],
+    ['codex', 'gpt-6-luna', 'medium', 'pruebas', 3, 20, 100],
+  ]);
+  const r = await proponerReal({ raiz: dir, base: 'main', catalogos: CATALOGOS, home });
+  const pruebas = porNombre(r, 'pruebas');
+  assert.equal(pruebas.modelo, 'gpt-6-luna');
+  assert.equal(pruebas.explicacion, 'fijado en .nexakit/fabrica.json');
+  assert.equal(pruebas.calidad, null);
+  assert.ok(r.avisos.every((a) => !a.startsWith('pruebas:')), 'lo fijado no genera aviso de evidencia');
+
+  // Solo la IA fijada: también manda la configuración (sigue la tabla dentro de esa IA).
+  const dir2 = crearRepo({ config: { rutasCriticas: ['src/**'], estaciones: { arquitectura: { ia: 'codex' } } } });
+  escribir(dir2, 'src/a.js', 'export {};\n');
+  const arq = porNombre(await proponerReal({ raiz: dir2, base: 'main', catalogos: CATALOGOS, home }), 'arquitectura');
+  assert.equal(arq.ia, 'codex');
+  assert.equal(arq.explicacion, 'fijado en .nexakit/fabrica.json');
+});
+
+test('si lo fijado no está disponible la explicación lo reconoce y usa la tabla', async () => {
+  const dir = crearRepo({ config: { estaciones: { pruebas: { ia: 'codex', modelo: 'gpt-9-inexistente', esfuerzo: 'medium' } } } });
+  escribir(dir, 'src/a.js', 'export {};\n');
+  const pruebas = porNombre(await proponer({ raiz: dir, base: 'main', catalogos: CATALOGOS }), 'pruebas');
+  assert.equal(pruebas.modelo, 'gpt-6.1-terra');
+  assert.match(pruebas.explicacion, /^fijado en \.nexakit\/fabrica\.json no está disponible; se usa gpt-6\.1-terra medium de la tabla$/u);
+  assert.ok(pruebas.descartes.some((d) => d.includes('gpt-9-inexistente')));
+});
+
+test('con la evidencia caducada avisa con sus motivos y la orden del banco, sin relanzar nada', async () => {
+  const dir = crearRepo();
+  escribir(dir, 'src/a.js', 'export {};\n');
+  const home = await homeConEvidencia([['codex', 'gpt-6.1-terra', 'medium', 'pruebas', 100, 2, 4000]], { ahora: hace(40) });
+  const r = await proponerReal({ raiz: dir, base: 'main', catalogos: CATALOGOS, home });
+  const aviso = r.avisos.find((a) => /caducada/u.test(a));
+  assert.ok(aviso, r.avisos.join('\n'));
+  assert.match(aviso, /la evidencia tiene 40 días/u);
+  assert.match(aviso, /modelos sin medir: .*gpt-6-sol/u);
+  assert.match(aviso, /ejecuta `nexakit fabrica banco planificar`/u);
+  // Solo avisa: la elección sigue siendo la medida.
+  assert.equal(porNombre(r, 'pruebas').modelo, 'gpt-6.1-terra');
+  assert.ok(porNombre(r, 'pruebas').calidad > 0.75);
+});
+
+test('con la evidencia al día y todo el catálogo medido no hay aviso de caducidad', async () => {
+  const dir = crearRepo();
+  escribir(dir, 'src/a.js', 'export {};\n');
+  const filas = [];
+  for (const [ia, catalogo] of Object.entries(CATALOGOS)) {
+    for (const m of catalogo) filas.push([ia, m.modelo, ia === 'codex' ? m.esfuerzos[0] : null, 'pruebas', 100, 2, 4000]);
+  }
+  const home = await homeConEvidencia(filas);
+  const r = await proponerReal({ raiz: dir, base: 'main', catalogos: CATALOGOS, home });
+  assert.ok(r.avisos.every((a) => !/caducada/u.test(a)), r.avisos.join('\n'));
+});
+
+test('si ningún modelo medido alcanza el umbral avisa por estación', async () => {
+  const dir = crearRepo();
+  escribir(dir, 'src/a.js', 'export {};\n');
+  const home = await homeConEvidencia([
+    ['codex', 'gpt-6.1-terra', 'medium', 'pruebas', 2, 30, 4000],
+    ['codex', 'gpt-6.1-terra', 'low', 'pruebas', 1, 40, 1000],
+  ]);
+  const r = await proponerReal({ raiz: dir, base: 'main', catalogos: CATALOGOS, home });
+  assert.ok(r.avisos.some((a) => /^pruebas: ningún modelo alcanza la calidad que pide el riesgo medio \(0,75\)/u.test(a)), r.avisos.join('\n'));
+  assert.match(porNombre(r, 'pruebas').explicacion, /ningún modelo alcanza el umbral/u);
+});
+
+test('una evidencia ilegible se avisa y se parte sin datos medidos', async () => {
+  const dir = crearRepo();
+  escribir(dir, 'src/a.js', 'export {};\n');
+  const home = mkdtempSync(path.join(tmpdir(), 'fabrica-enrutador-corrupta-'));
+  temporales.push(home);
+  mkdirSync(path.join(home, '.nexakit', 'fabrica'), { recursive: true });
+  writeFileSync(path.join(home, '.nexakit', 'fabrica', 'evidencia.json'), '{ no es json');
+  const r = await proponerReal({ raiz: dir, base: 'main', catalogos: CATALOGOS, home });
+  assert.ok(r.avisos.some((a) => /No se pudo leer la evidencia guardada \(JSON corrupto\)/u.test(a)), r.avisos.join('\n'));
+  assert.ok(r.avisos.some((a) => a.startsWith('pruebas: sin datos medidos')));
+  assert.equal(porNombre(r, 'pruebas').modelo, 'gpt-6.1-terra');
+});
+
+test('el riesgo sale de lo que toca el diff: con hooks la misma evidencia ya no basta', async () => {
+  const filas = [['codex', 'gpt-6.1-terra', 'medium', 'pruebas', 12, 1, 4000]];
+  const home = await homeConEvidencia(filas);
+  // Calidad ≥ 0,6 pero < 0,85: alcanza el umbral medio (0,75)? Con 12 aciertos y 1 fallo, el cuantil del 5 % ronda 0,70.
+  const normal = crearRepo();
+  escribir(normal, 'src/a.js', 'export {};\n');
+  const rn = await proponerReal({ raiz: normal, base: 'main', catalogos: CATALOGOS, home });
+  const conHooks = crearRepo();
+  escribir(conHooks, 'hooks/pre-tool.js', 'export {};\n');
+  const rh = await proponerReal({ raiz: conHooks, base: 'main', catalogos: CATALOGOS, home });
+  const calidad = porNombre(rn, 'pruebas').calidad;
+  assert.ok(calidad > 0.6 && calidad < 0.75, String(calidad));
+  assert.ok(rn.avisos.some((a) => /^pruebas: ningún modelo alcanza la calidad que pide el riesgo medio/u.test(a)));
+  assert.ok(rh.avisos.some((a) => /^pruebas: ningún modelo alcanza la calidad que pide el riesgo alto \(0,85\)/u.test(a)));
+});
+
+test('aplicarCambios marca la estación cambiada como elegida por la persona y conserva los avisos', async () => {
+  const dir = crearRepo();
+  escribir(dir, 'hooks/pre-tool.js', 'export {};\n');
+  const r = await proponer({ raiz: dir, base: 'main', catalogos: CATALOGOS });
+  const cambiado = aplicarCambios(r, [{ estacion: 'seguridad', modelo: 'gpt-6-sol', esfuerzo: 'medium' }, { estacion: 'pruebas', quitar: true }]);
+  assert.equal(porNombre(cambiado, 'seguridad').explicacion, 'elegida por la persona');
+  assert.equal(porNombre(cambiado, 'seguridad').calidad, null);
+  assert.equal(porNombre(cambiado, 'pruebas').explicacion, '');
+  assert.deepEqual(cambiado.avisos, r.avisos);
+  await comprobarHuella(cambiado, dir);
 });

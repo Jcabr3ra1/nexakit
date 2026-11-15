@@ -158,12 +158,15 @@ const RecorridoGuardado = z.object({
       esfuerzo: z.string().nullable(),
       motivo: z.string(),
       descartes: z.array(z.string()),
+      explicacion: z.string(),
+      calidad: z.number().nullable(),
       ordenesPermitidas: z.array(z.string()),
       estado: z.enum(['propuesta', 'sin-modelo', 'omitida']),
     }),
   ),
   coste: z.object({ llamadasExternas: z.number(), subagentesClaude: z.number() }),
   catalogos: z.partialRecord(IA, Catalogo),
+  avisos: z.array(z.string()),
 });
 
 /** Lista de cambios que una persona puede pedir sobre una propuesta antes de lanzarla. */
@@ -211,7 +214,7 @@ export async function proponerEnRaiz(entrada: {
   } finally {
     await cerrarConectores(conectores);
   }
-  const recorrido = await proponer({ raiz, base, ...(foco === undefined ? {} : { foco }), catalogos });
+  const recorrido = await proponer({ raiz, base, ...(foco === undefined ? {} : { foco }), catalogos, home });
   await rastro.guardarPropuesta(home, await rastro.nombreRepo(raiz), recorrido);
   return recorrido;
 }

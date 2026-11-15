@@ -42,7 +42,9 @@ const AYUDA = `Uso: nexakit fabrica proponer --base <rama> [--foco <texto>] [--j
      nexakit fabrica cancelar --id <id>
 
 proponer lee el diff contra la rama base, consulta los modelos disponibles y muestra el
-recorrido de revisión: estaciones, IA, modelo, esfuerzo, órdenes permitidas y huella.
+recorrido de revisión: estaciones, IA, modelo, esfuerzo, órdenes permitidas y huella. Cada
+modelo se elige con la evidencia medida (el más barato que basta según el riesgo) y se explica;
+sin datos manda la tabla manual y se avisa de que conviene medir.
 lanzar ejecuta ese recorrido en primer plano si la huella coincide con la propuesta y el
 diff sigue siendo el mismo; muestra el progreso y, al terminar, la ruta de consolidado.md.
   --cambios es un JSON con una lista de { "estacion", "quitar"?, "ia"?, "modelo"?, "esfuerzo"? }.
@@ -58,6 +60,14 @@ const MAX_BYTES_CAMBIOS = 1024 * 1024;
 class ErrorUso extends Error {}
 
 const celda = (texto: string): string => escaparMarkdown(limpiar(texto));
+
+const COLUMNAS_EXPLICACION = 160;
+
+/** Recorta a `max` columnas (caracteres) con «…» al final si no cabe. */
+function recortar(texto: string, max: number): string {
+  const letras = [...texto];
+  return letras.length <= max ? texto : `${letras.slice(0, max - 1).join('')}…`;
+}
 
 // ---------------------------------------------------------------------------------------------
 // Formato
@@ -77,6 +87,12 @@ function tablaRecorrido(r: Recorrido): string[] {
     const campos = [e.estacion, e.ia ?? '-', e.modelo ?? '-', e.esfuerzo ?? '-', e.estado, e.motivo, notas.join('; ')];
     lineas.push(`| ${campos.map(celda).join(' | ')} |`);
   }
+  const elecciones = r.estaciones.filter((e) => e.explicacion !== '');
+  if (elecciones.length > 0) {
+    lineas.push('', 'Por qué cada modelo:');
+    for (const e of elecciones) lineas.push(recortar(`  ${limpiar(e.estacion)}: ${limpiar(e.explicacion)}`, COLUMNAS_EXPLICACION));
+  }
+  if (r.avisos.length > 0) lineas.push('', ...r.avisos.map((a) => `Aviso: ${limpiar(a)}`));
   lineas.push('', `Coste estimado: ${r.coste.llamadasExternas} llamadas externas y ${r.coste.subagentesClaude} subagentes de Claude.`);
   return lineas;
 }

@@ -7,6 +7,7 @@ import { gitConfigGlobalVacio } from '../test-support/git-aislado.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ejecutarCli } from '../dist/fabrica/cli.js';
+import { actualizar, evidenciaVacia, guardar } from '../dist/fabrica/evidencia.js';
 import { nombreRepo } from '../dist/fabrica/rastro.js';
 import { runToolkitCli } from '../src/toolkit-cli.js';
 
@@ -168,6 +169,61 @@ test('proponer en texto muestra la tabla con las órdenes permitidas, la nota de
   assert.match(out, /Coste estimado: 1 llamadas externas y 1 subagentes de Claude\./u);
   const huella = out.match(/huella ([0-9a-f]{64})/u)[1];
   assert.ok(out.includes(`nexakit fabrica lanzar --huella ${huella}`));
+});
+
+test('proponer --json incluye la explicación y la calidad de cada estación', async () => {
+  const e = escenario({ config: CONFIG_AGY });
+  const r = JSON.parse((await cli(['proponer', '--base', 'main', '--json'], e)).out);
+  for (const x of r.estaciones) {
+    assert.equal(typeof x.explicacion, 'string', x.estacion);
+    assert.ok(x.calidad === null || typeof x.calidad === 'number', x.estacion);
+  }
+  assert.match(porNombre(r, 'pruebas').explicacion, /sin datos medidos/u);
+  assert.equal(porNombre(r, 'codigo').explicacion, 'la ejecuta la sesión de Claude');
+  assert.ok(Array.isArray(r.avisos));
+  assert.ok(r.avisos.some((a) => /^pruebas: sin datos medidos: ejecuta el banco/u.test(a)), r.avisos.join('\n'));
+});
+
+test('proponer en texto muestra la explicación de cada estación en una línea aparte y los avisos de evidencia', async () => {
+  const e = escenario({ config: CONFIG_AGY });
+  const { codigo, out } = await cli(['proponer', '--base', 'main'], e);
+  assert.equal(codigo, 0);
+  assert.match(out, /^Por qué cada modelo:$/mu);
+  assert.match(out, /^ {2}pruebas: gpt-6\.1-terra medium: sin datos medidos, se usa la tabla manual/mu);
+  assert.match(out, /^ {2}codigo: la ejecuta la sesión de Claude$/mu);
+  assert.doesNotMatch(out, /^ {2}documentacion:/mu, 'las estaciones omitidas no llevan explicación');
+  assert.match(out, /^Aviso: pruebas: sin datos medidos: ejecuta el banco/mu);
+  // La explicación va fuera de la tabla, que sigue siendo una tabla válida.
+  const tabla = out.split('\n').filter((l) => l.startsWith('|'));
+  assert.equal(tabla.length, 2 + 7);
+});
+
+test('con evidencia en el HOME la CLI explica la elección medida', async () => {
+  const e = escenario({ config: CONFIG_AGY });
+  const ahora = new Date();
+  let ev = evidenciaVacia(ahora);
+  ev = actualizar(ev, { ia: 'codex', modelo: 'gpt-6.1-terra', esfuerzo: 'medium', estacion: 'pruebas' }, { aciertos: 100, fallos: 2, tokens: 4000, segundos: 10, fuente: 'banco', ahora });
+  await guardar(e.home, ev, ahora);
+  const { codigo, out } = await cli(['proponer', '--base', 'main'], e);
+  assert.equal(codigo, 0);
+  assert.match(out, /^ {2}pruebas: gpt-6\.1-terra medium: calidad ≥ 0,9\d \(102 obs\.\), ~4,0k tokens$/mu);
+  assert.doesNotMatch(out, /^Aviso: pruebas:/mu);
+});
+
+test('la explicación se recorta a 160 columnas con la sangría incluida', async () => {
+  const largo = 'x'.repeat(200);
+  const catalogo = { resultado: { data: [modeloCodex('gpt-6.1-terra', [largo]), modeloCodex('gpt-6.1-sol', ['high'])], nextCursor: null } };
+  const codex = guionCodexOk();
+  codex.metodos['model/list'] = catalogo;
+  const e = escenario({ config: CONFIG_AGY, codex });
+  const ahora = new Date();
+  const ev = actualizar(evidenciaVacia(ahora), { ia: 'codex', modelo: 'gpt-6.1-terra', esfuerzo: largo, estacion: 'pruebas' }, { aciertos: 100, fallos: 2, tokens: 4000, segundos: 10, fuente: 'banco', ahora });
+  await guardar(e.home, ev, ahora);
+  const { out } = await cli(['proponer', '--base', 'main'], e);
+  const linea = out.split('\n').find((l) => l.startsWith('  pruebas: '));
+  assert.ok(linea, out);
+  assert.equal([...linea].length, 160);
+  assert.ok(linea.endsWith('…'));
 });
 
 test('proponer no aborta si una IA no está instalada: avisa y pasa al siguiente candidato', async () => {
