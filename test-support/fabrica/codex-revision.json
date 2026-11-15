@@ -8,6 +8,57 @@
         "platformOs": "macos"
       }
     },
+    "config/read": {
+      "resultado": {
+        "config": {
+          "mcp_servers": {
+            "memoria": {
+              "command": "memoria-mcp",
+              "enabled": true
+            },
+            "railway": {
+              "url": "https://example.com/mcp",
+              "enabled": true
+            }
+          }
+        },
+        "origins": {},
+        "layers": null
+      }
+    },
+    "mcpServerStatus/list": {
+      "resultado": {
+        "data": [
+          {
+            "name": "memoria",
+            "runtimeStatus": "disabled",
+            "pluginId": null,
+            "httpOrigin": null,
+            "serverInfo": null,
+            "serverCapabilities": null,
+            "toolListMeta": null,
+            "tools": {},
+            "resources": [],
+            "resourceTemplates": [],
+            "authStatus": "unsupported"
+          },
+          {
+            "name": "railway",
+            "runtimeStatus": "disabled",
+            "pluginId": null,
+            "httpOrigin": null,
+            "serverInfo": null,
+            "serverCapabilities": null,
+            "toolListMeta": null,
+            "tools": {},
+            "resources": [],
+            "resourceTemplates": [],
+            "authStatus": "unsupported"
+          }
+        ],
+        "nextCursor": null
+      }
+    },
     "thread/start": {
       "resultado": {
         "thread": {
@@ -287,6 +338,83 @@
       ]
     },
     "srv-14": {
+      "peticiones": [
+        {
+          "metodo": "item/commandExecution/requestApproval",
+          "params": {
+            "threadId": "hilo-1",
+            "turnId": "turno-1",
+            "itemId": "item-1",
+            "startedAtMs": 0,
+            "kind": "command",
+            "environmentId": null,
+            "command": "/bin/zsh -lc 'npm\ntest'"
+          },
+          "id": "srv-15"
+        }
+      ]
+    },
+    "srv-15": {
+      "peticiones": [
+        {
+          "metodo": "execCommandApproval",
+          "params": {
+            "conversationId": "hilo-1",
+            "callId": "c-4",
+            "approvalId": null,
+            "command": [
+              "bash",
+              "-lc",
+              "npm\ntest"
+            ],
+            "cwd": ".",
+            "reason": null,
+            "parsedCmd": []
+          },
+          "id": "srv-16"
+        }
+      ]
+    },
+    "srv-16": {
+      "peticiones": [
+        {
+          "metodo": "execCommandApproval",
+          "params": {
+            "conversationId": "hilo-1",
+            "callId": "c-5",
+            "approvalId": null,
+            "command": [
+              "./tools/bash",
+              "-lc",
+              "npm test"
+            ],
+            "cwd": ".",
+            "reason": null,
+            "parsedCmd": []
+          },
+          "id": "srv-17"
+        }
+      ]
+    },
+    "srv-17": {
+      "peticiones": [
+        {
+          "metodo": "item/tool/call",
+          "params": {
+            "threadId": "hilo-1",
+            "turnId": "turno-1",
+            "itemId": "item-1",
+            "startedAtMs": 0,
+            "callId": "c-6",
+            "namespace": null,
+            "tool": "escribir",
+            "arguments": {}
+          },
+          "id": "srv-18"
+        }
+      ]
+    },
+    "srv-18": {
       "notificaciones": [
         {
           "metodo": "thread/tokenUsage/updated",

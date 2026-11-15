@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Ajv } from 'ajv';
-import { crearConectorCodex, versionTiposCodex } from '../dist/fabrica/conectores/codex.js';
+import { crearConectorCodex, esShellDelSistema, ordenPermitida, versionTiposCodex } from '../dist/fabrica/conectores/codex.js';
 import { hallazgosJsonSchema } from '../dist/fabrica/esquemas.js';
 import { resolveCliInvocation } from '../src/cli-executable.js';
 
@@ -97,6 +97,14 @@ test('ejecutar abre un hilo de solo lectura y pide hallazgos con el esquema; den
     assert.equal(hilo.cwd, p.dir);
     assert.equal(hilo.ephemeral, true);
     assert.equal(hilo.approvalsReviewer, 'user');
+    // Aislamiento: cada MCP de la configuración efectiva en la raíz se desactiva por nombre, y también las funciones
+    // con herramientas fuera del sandbox.
+    assert.deepEqual(mensajes.find((m) => m.method === 'config/read').params, { cwd: p.dir });
+    assert.deepEqual(hilo.config.mcp_servers, { memoria: { enabled: false }, railway: { enabled: false } });
+    for (const funcion of ['apps', 'plugins', 'computer_use', 'browser_use', 'multi_agent']) assert.equal(hilo.config.features[funcion], false, funcion);
+    const comprobacion = mensajes.find((m) => m.method === 'mcpServerStatus/list');
+    assert.equal(comprobacion.params.threadId, 'hilo-1');
+    assert.ok(mensajes.indexOf(comprobacion) < mensajes.findIndex((m) => m.method === 'turn/start'), 'se comprueba antes del turno');
     const turno = mensajes.find((m) => m.method === 'turn/start').params;
     assert.equal(turno.threadId, 'hilo-1');
     assert.equal(turno.model, 'gpt-5.5');
@@ -122,13 +130,21 @@ test('ejecutar abre un hilo de solo lectura y pide hallazgos con el esquema; den
     // Preguntas a la persona y elicitaciones MCP: siempre denegadas.
     assert.deepEqual(respuesta(mensajes, 'srv-13').result, { answers: {} });
     assert.equal(respuesta(mensajes, 'srv-14').result.action, 'decline');
+    // Saltos de línea y shells que no son del sistema: denegados aunque el texto parezca `npm test`.
+    assert.deepEqual(respuesta(mensajes, 'srv-15').result, { decision: 'decline' }, "zsh -lc 'npm\\ntest'");
+    assert.ok(respuesta(mensajes, 'srv-16').result.decision.denied, "bash -lc 'npm\\ntest'");
+    assert.ok(respuesta(mensajes, 'srv-17').result.decision.denied, './tools/bash -lc npm test');
+    // Un método desconocido nunca se acepta: se contesta con error.
+    const desconocida = respuesta(mensajes, 'srv-18');
+    assert.equal(desconocida.result, undefined);
+    assert.equal(desconocida.error.code, -32603);
 
     const tipos = resultado.denegaciones.map((d) => d.tipo);
     assert.ok(tipos.includes('item/fileChange/requestApproval'));
     assert.ok(tipos.includes('applyPatchApproval'));
     assert.ok(tipos.includes('item/permissions/requestApproval'));
     assert.ok(resultado.denegaciones.some((d) => d.tipo === 'item/commandExecution/requestApproval' && d.detalle.includes('rm -rf x')));
-    assert.equal(resultado.denegaciones.length, 11);
+    assert.equal(resultado.denegaciones.length, 14);
   } finally {
     await p.limpiar();
   }
@@ -144,7 +160,85 @@ test('sin ordenesPermitidas, npm test también se deniega', async () => {
     assert.deepEqual(respuesta(mensajes, 'srv-4').result, { decision: 'decline' });
     assert.deepEqual(respuesta(mensajes, 'srv-7').result, { decision: 'decline' });
     assert.ok(respuesta(mensajes, 'srv-11').result.decision.denied);
-    assert.equal(resultado.denegaciones.length, 14);
+    assert.equal(resultado.denegaciones.length, 17);
+  } finally {
+    await p.limpiar();
+  }
+});
+
+test('ordenPermitida compara exacto: separadores, redirecciones y saltos de línea se deniegan', () => {
+  const permitidas = ['npm test'];
+  const bash = (guion) => ['bash', '-lc', guion];
+  assert.equal(ordenPermitida(bash('npm test'), permitidas), true);
+  assert.equal(ordenPermitida(bash('  npm test  '), permitidas), true, 'solo se quitan los espacios de los extremos');
+  assert.equal(ordenPermitida(['npm', 'test'], permitidas), true);
+  for (const guion of ['npm\ntest', 'npm\rtest', 'npm test\n', 'npm test; rm -rf x', 'npm test & rm -rf x', 'npm test && rm -rf x',
+    'npm test | sh', 'npm test || x', 'npm `rm -rf x`', 'npm $(rm -rf x)', 'npm test > salida', 'npm test < entrada', 'npm  test', 'npm\ttest']) {
+    assert.equal(ordenPermitida(bash(guion), permitidas), false, JSON.stringify(guion));
+  }
+  assert.equal(ordenPermitida(['npm', 'test;'], permitidas), false);
+  assert.equal(ordenPermitida(['npm test'], permitidas), false);
+  assert.equal(ordenPermitida(null, permitidas), false);
+  assert.equal(ordenPermitida(bash('npm test'), []), false);
+});
+
+test('solo se reconoce un shell por su nombre o por su ruta en una carpeta del sistema', () => {
+  assert.equal(esShellDelSistema('bash'), true);
+  assert.equal(esShellDelSistema('/bin/zsh', 'darwin'), true);
+  assert.equal(esShellDelSistema('/usr/bin/bash', 'linux'), true);
+  assert.equal(esShellDelSistema('./tools/bash', 'linux'), false);
+  assert.equal(esShellDelSistema('tools/bash', 'linux'), false);
+  assert.equal(esShellDelSistema('/home/x/bin/bash', 'linux'), false);
+  assert.equal(esShellDelSistema('/bin/../tmp/bash', 'linux'), false);
+  assert.equal(esShellDelSistema('/bin/python', 'linux'), false);
+  assert.equal(esShellDelSistema('C:\\Windows\\System32\\bash.exe', 'win32', 'C:\\Windows'), true);
+  assert.equal(esShellDelSistema('c:\\windows\\system32\\BASH.EXE', 'win32', 'C:\\Windows'), true);
+  assert.equal(esShellDelSistema('C:\\Users\\x\\bash.exe', 'win32', 'C:\\Windows'), false);
+  assert.equal(esShellDelSistema('C:\\Windows\\System32\\bash.exe', 'win32', undefined), false);
+  assert.equal(esShellDelSistema('/bin/bash', 'win32', 'C:\\Windows'), false);
+  assert.equal(ordenPermitida(['./tools/bash', '-lc', 'npm test'], ['npm test']), false);
+});
+
+test('una petición para un hilo ya cerrado se deniega', async () => {
+  const p = preparar('hilo-cerrado');
+  try {
+    const conector = await p.conector;
+    const primero = await conector.ejecutar(encargo(p.dir), AbortSignal.timeout(5000));
+    assert.equal(primero.estado, 'ok', primero.motivo);
+    const segundo = await conector.ejecutar(encargo(p.dir), AbortSignal.timeout(5000));
+    assert.equal(segundo.estado, 'ok', segundo.motivo);
+    const mensajes = p.mensajes();
+    assert.deepEqual(respuesta(mensajes, 'srv-cerrado').result, { decision: 'decline' }, 'npm test permitida, pero de un hilo cerrado');
+    assert.deepEqual(respuesta(mensajes, 'srv-cerrado-2').result, { decision: 'decline' });
+    assert.equal(mensajes.filter((m) => m.method === 'initialize').length, 1, 'un solo proceso e initialize para los dos encargos');
+  } finally {
+    await p.limpiar();
+  }
+});
+
+test('si el hilo conserva un MCP activo o con herramientas, no empieza el turno', async () => {
+  const p = preparar('mcp-activo');
+  try {
+    const resultado = await (await p.conector).ejecutar(encargo(p.dir), AbortSignal.timeout(5000));
+    assert.equal(resultado.estado, 'fallida');
+    assert.equal(resultado.motivo, 'Codex mantiene activos servidores MCP que podrían escribir: plugin-raro');
+    const mensajes = p.mensajes();
+    assert.deepEqual(mensajes.filter((m) => m.method === 'mcpServerStatus/list').map((m) => m.params.cursor ?? null), [null, 'p2']);
+    assert.equal(mensajes.some((m) => m.method === 'turn/start'), false);
+  } finally {
+    await p.limpiar();
+  }
+});
+
+test('si no se puede comprobar el aislamiento de MCP, no empieza el turno', async () => {
+  const guion = JSON.parse(readFileSync(join(GUIONES, 'codex-cancelar.json'), 'utf8'));
+  delete guion.metodos['mcpServerStatus/list'];
+  const p = preparar('cancelar', { metodos: guion.metodos });
+  try {
+    const resultado = await (await p.conector).ejecutar(encargo(p.dir), AbortSignal.timeout(5000));
+    assert.equal(resultado.estado, 'fallida');
+    assert.match(resultado.motivo, /No se pudo comprobar que los servidores MCP de Codex estén desactivados/);
+    assert.equal(p.mensajes().some((m) => m.method === 'turn/start'), false);
   } finally {
     await p.limpiar();
   }
@@ -322,6 +416,8 @@ test(
           'thread/start': 'v2/ThreadStartParams.json',
           'turn/start': 'v2/TurnStartParams.json',
           'turn/interrupt': 'v2/TurnInterruptParams.json',
+          'config/read': 'v2/ConfigReadParams.json',
+          'mcpServerStatus/list': 'v2/ListMcpServerStatusParams.json',
         };
         for (const m of enviados.filter((x) => x.method && x.id !== undefined)) {
           assert.ok(porMetodo[m.method], `método sin esquema conocido: ${m.method}`);
@@ -335,6 +431,9 @@ test(
           'srv-14': 'McpServerElicitationRequestResponse.json',
           'srv-11': 'ExecCommandApprovalResponse.json',
           'srv-12': 'ExecCommandApprovalResponse.json',
+          'srv-16': 'ExecCommandApprovalResponse.json',
+          'srv-17': 'ExecCommandApprovalResponse.json',
+          'srv-15': 'CommandExecutionRequestApprovalResponse.json',
         };
         for (let i = 4; i <= 10; i++) respuestas[`srv-${i}`] = 'CommandExecutionRequestApprovalResponse.json';
         const deRevision = revision.mensajes();

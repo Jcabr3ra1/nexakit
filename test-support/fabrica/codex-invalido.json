@@ -8,6 +8,57 @@
         "platformOs": "macos"
       }
     },
+    "config/read": {
+      "resultado": {
+        "config": {
+          "mcp_servers": {
+            "memoria": {
+              "command": "memoria-mcp",
+              "enabled": true
+            },
+            "railway": {
+              "url": "https://example.com/mcp",
+              "enabled": true
+            }
+          }
+        },
+        "origins": {},
+        "layers": null
+      }
+    },
+    "mcpServerStatus/list": {
+      "resultado": {
+        "data": [
+          {
+            "name": "memoria",
+            "runtimeStatus": "disabled",
+            "pluginId": null,
+            "httpOrigin": null,
+            "serverInfo": null,
+            "serverCapabilities": null,
+            "toolListMeta": null,
+            "tools": {},
+            "resources": [],
+            "resourceTemplates": [],
+            "authStatus": "unsupported"
+          },
+          {
+            "name": "railway",
+            "runtimeStatus": "disabled",
+            "pluginId": null,
+            "httpOrigin": null,
+            "serverInfo": null,
+            "serverCapabilities": null,
+            "toolListMeta": null,
+            "tools": {},
+            "resources": [],
+            "resourceTemplates": [],
+            "authStatus": "unsupported"
+          }
+        ],
+        "nextCursor": null
+      }
+    },
     "thread/start": {
       "resultado": {
         "thread": {

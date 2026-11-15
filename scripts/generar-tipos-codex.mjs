@@ -22,6 +22,8 @@ const RAICES = [
   'ApplyPatchApprovalResponse',
   'ExecCommandApprovalParams',
   'ExecCommandApprovalResponse',
+  'v2/ConfigReadParams',
+  'v2/ListMcpServerStatusParams',
   'v2/ModelListParams',
   'v2/ModelListResponse',
   'v2/ThreadStartParams',

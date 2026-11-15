@@ -15,6 +15,8 @@ import type { ExecCommandApprovalParams } from '../protocolos/codex/ExecCommandA
 import type { ExecCommandApprovalResponse } from '../protocolos/codex/ExecCommandApprovalResponse.js';
 import type { InitializeParams } from '../protocolos/codex/InitializeParams.js';
 import type { JsonValue } from '../protocolos/codex/serde_json/JsonValue.js';
+import type { ConfigReadParams } from '../protocolos/codex/v2/ConfigReadParams.js';
+import type { ListMcpServerStatusParams } from '../protocolos/codex/v2/ListMcpServerStatusParams.js';
 import type { CommandExecutionRequestApprovalParams } from '../protocolos/codex/v2/CommandExecutionRequestApprovalParams.js';
 import type { CommandExecutionRequestApprovalResponse } from '../protocolos/codex/v2/CommandExecutionRequestApprovalResponse.js';
 import type { FileChangeRequestApprovalResponse } from '../protocolos/codex/v2/FileChangeRequestApprovalResponse.js';
@@ -40,9 +42,30 @@ const MAX_PAGINAS_MODELOS = 20;
 const MAX_DETALLE = 500;
 /** `src/fabrica/protocolos/codex/VERSION`; la ruta vale igual desde `src/fabrica/conectores` y desde `dist/fabrica/conectores`. */
 const RUTA_VERSION_TIPOS = new URL('../../../src/fabrica/protocolos/codex/VERSION', import.meta.url);
+const MAX_PAGINAS_MCP = 20;
 const SHELLS = new Set(['bash', 'zsh', 'sh']);
+/** Carpetas del sistema desde las que se reconoce un shell dado por ruta absoluta (fuera de Windows). */
+const CARPETAS_SHELL = new Set(['/bin', '/usr/bin']);
 /** Palabra sin comillas, espacios ni metacaracteres de shell. */
 const PALABRA_SIMPLE = /^[A-Za-z0-9_@%+=:,./-]+$/;
+/** Lo que convierte un guion en más de una orden, o redirige: se deniega siempre. */
+const METACARACTERES_GUION = /[\n\r;&|`<>]|\$\(/u;
+/** Caracteres de control (salvo el tabulador): una orden que los contenga no se interpreta. */
+const CONTROL = /[\u0000-\u0008\u000a-\u001f\u007f]/u;
+/**
+ * Funciones de Codex que dan herramientas fuera del sandbox (apps, plugins con MCP, uso del ordenador o del navegador,
+ * subagentes, imágenes). Se desactivan en cada hilo de revisión. Comprobado con codex-cli 0.167.2.
+ */
+const FUNCIONES_DESACTIVADAS = [
+  'apps',
+  'plugins',
+  'computer_use',
+  'browser_use',
+  'browser_use_external',
+  'in_app_browser',
+  'multi_agent',
+  'image_generation',
+];
 
 export interface OpcionesConectorCodex {
   /** Ejecutable que se lanza; por defecto se resuelve `codex` (sin shell, también `codex.cmd` en Windows). */
@@ -63,6 +86,14 @@ class ErrorNoInstalado extends Error {
   constructor() {
     super(NO_INSTALADO);
     this.name = 'ErrorNoInstalado';
+  }
+}
+
+/** No se pudo garantizar que el hilo no tenga herramientas MCP que corren fuera del sandbox. */
+class ErrorAislamiento extends Error {
+  constructor(mensaje: string) {
+    super(mensaje);
+    this.name = 'ErrorAislamiento';
   }
 }
 
@@ -97,16 +128,13 @@ function mensajeDe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Espacios repetidos y en los extremos no cambian la orden. */
-export function normalizarOrden(orden: string): string {
-  return orden.trim().split(/\s+/u).filter(Boolean).join(' ');
-}
-
 /**
  * Parte una orden como lo haría un shell POSIX, solo con comillas simples, dobles y barra invertida.
- * Devuelve null si no es segura de interpretar (comillas sin cerrar o expansiones dentro de comillas dobles).
+ * Devuelve null si no es segura de interpretar: caracteres de control (saltos de línea incluidos), comillas sin
+ * cerrar o expansiones dentro de comillas dobles.
  */
 function partirOrden(orden: string): string[] | null {
+  if (CONTROL.test(orden)) return null;
   const palabras: string[] = [];
   let actual = '';
   let enPalabra = false;
@@ -141,7 +169,7 @@ function partirOrden(orden: string): string[] | null {
       actual += siguiente;
       enPalabra = true;
       i++;
-    } else if (/\s/u.test(c)) {
+    } else if (c === ' ' || c === '\t') {
       if (enPalabra) palabras.push(actual);
       actual = '';
       enPalabra = false;
@@ -155,25 +183,45 @@ function partirOrden(orden: string): string[] | null {
 }
 
 /**
- * Orden que se compara con `ordenesPermitidas`: el guion de `bash|zsh|sh -c|-lc '<guion>'`, o las palabras
- * simples unidas por un espacio. Cualquier otra forma (operadores, redirecciones, comillas raras) da null.
+ * Un shell se reconoce por su nombre sin carpeta (`bash`) o por su ruta absoluta en una carpeta del sistema
+ * (`/bin/zsh`, `/usr/bin/bash`; en Windows, `<SystemRoot>\System32\bash.exe`). `./tools/bash` no cuenta.
+ */
+export function esShellDelSistema(
+  programa: string,
+  plataforma: NodeJS.Platform = process.platform,
+  raizSistema: string | undefined = process.env['SystemRoot'],
+): boolean {
+  if (!programa.includes('/') && !programa.includes('\\')) return SHELLS.has(programa);
+  if (plataforma === 'win32') {
+    if (!raizSistema || !path.win32.isAbsolute(raizSistema)) return false;
+    const system32 = path.win32.join(raizSistema, 'System32').toLowerCase();
+    const nombre = path.win32.basename(programa).toLowerCase();
+    return path.win32.dirname(programa).toLowerCase() === system32 && nombre.endsWith('.exe') && SHELLS.has(nombre.slice(0, -4));
+  }
+  return CARPETAS_SHELL.has(path.posix.dirname(programa)) && SHELLS.has(path.posix.basename(programa));
+}
+
+/**
+ * Orden que se compara con `ordenesPermitidas`: el guion de `<shell del sistema> -c|-lc '<guion>'` (sin saltos de
+ * línea, `;`, `&`, `|`, `` ` ``, `$(` ni redirecciones, y solo sin espacios en los extremos), o las palabras simples
+ * unidas por un espacio. Cualquier otra forma da null.
  */
 function ordenComparable(argv: string[]): string | null {
   const [programa, opcion, guion] = argv;
-  if (argv.length === 3 && programa !== undefined && guion !== undefined && SHELLS.has(path.posix.basename(programa)) &&
+  if (argv.length === 3 && programa !== undefined && guion !== undefined && esShellDelSistema(programa) &&
       (opcion === '-c' || opcion === '-lc')) {
-    return normalizarOrden(guion);
+    return METACARACTERES_GUION.test(guion) ? null : guion.trim();
   }
   if (argv.length === 0 || !argv.every((palabra) => PALABRA_SIMPLE.test(palabra))) return null;
   return argv.join(' ');
 }
 
-/** La comparación es exacta sobre la orden normalizada: `npm test && rm -rf x` no es `npm test`. */
+/** La comparación es exacta (solo se quitan los espacios de los extremos): `npm test && rm -rf x` no es `npm test`. */
 export function ordenPermitida(argv: string[] | null, permitidas: readonly string[]): boolean {
   if (argv === null) return false;
   const comparable = ordenComparable(argv);
   if (comparable === null || comparable === '') return false;
-  return permitidas.some((permitida) => normalizarOrden(permitida) === comparable);
+  return permitidas.some((permitida) => permitida.trim() === comparable);
 }
 
 function canonica(ruta: string): string {
@@ -271,6 +319,8 @@ class ConectorCodex implements Conector {
         approvalsReviewer: 'user',
         // Hilo efímero: no ensucia el historial de Codex de la persona.
         ephemeral: true,
+        // Sin servidores MCP ni funciones con herramientas que corren fuera del sandbox.
+        config: await this.configAislada(cliente, encargo.raiz),
       };
       const hilo: unknown = await cliente.solicitar('thread/start', paramsHilo, { timeoutMs: TIEMPO_PETICION_MS });
       const idHilo = esObjeto(hilo) && esObjeto(hilo['thread']) ? texto(hilo['thread']['id']) : null;
@@ -284,6 +334,7 @@ class ConectorCodex implements Conector {
       });
       // Se registra antes de `turn/start`: sus notificaciones pueden llegar antes que la respuesta.
       this.hilos.set(idHilo, { encargo, resultado, terminarTurno });
+      await this.comprobarAislamiento(cliente, idHilo);
       if (señal.aborted) return cancelada();
 
       const entrada: UserInput[] = [
@@ -320,6 +371,7 @@ class ConectorCodex implements Conector {
       return this.cerrarTurno(resultado, desenlace.fin, señal);
     } catch (error) {
       if (error instanceof ErrorNoInstalado) return { ...resultado, motivo: NO_INSTALADO };
+      if (error instanceof ErrorAislamiento) return { ...resultado, motivo: error.message };
       if (señal.aborted) return cancelada();
       if (error instanceof ErrorProceso) {
         return { ...resultado, motivo: `El proceso de Codex terminó antes de acabar la revisión: ${error.message}` };
@@ -336,6 +388,52 @@ class ConectorCodex implements Conector {
     const proceso = this.proceso;
     this.proceso = undefined;
     if (proceso) await proceso.cliente.cerrar();
+  }
+
+  /**
+   * `config` del hilo: desactiva cada servidor MCP de la configuración efectiva en la raíz (la de la persona y la del
+   * proyecto) y las funciones con herramientas fuera del sandbox. `mcp_servers = {}` no sirve: Codex fusiona la
+   * tabla en vez de sustituirla; hay que desactivarlos por nombre.
+   */
+  private async configAislada(cliente: ClienteJsonRpc, raiz: string): Promise<{ [clave: string]: JsonValue }> {
+    const params: ConfigReadParams = { cwd: raiz };
+    const leida: unknown = await cliente.solicitar('config/read', params, { timeoutMs: TIEMPO_PETICION_MS });
+    const config = esObjeto(leida) ? leida['config'] : undefined;
+    const servidores = esObjeto(config) && esObjeto(config['mcp_servers']) ? Object.keys(config['mcp_servers']) : [];
+    return {
+      mcp_servers: Object.fromEntries(servidores.map((nombre) => [nombre, { enabled: false }])),
+      features: Object.fromEntries(FUNCIONES_DESACTIVADAS.map((funcion) => [funcion, false])),
+    };
+  }
+
+  /** Falla cerrado: si el hilo conserva algún servidor MCP activo o con herramientas, no se empieza el turno. */
+  private async comprobarAislamiento(cliente: ClienteJsonRpc, threadId: string): Promise<void> {
+    const activos: string[] = [];
+    let cursor: string | null = null;
+    for (let pagina = 0; ; pagina++) {
+      if (pagina >= MAX_PAGINAS_MCP) throw new ErrorAislamiento('No se pudo comprobar que los servidores MCP de Codex estén desactivados');
+      const params: ListMcpServerStatusParams = { threadId, detail: 'toolsAndAuthOnly', ...(cursor === null ? {} : { cursor }) };
+      let respuesta: unknown;
+      try {
+        respuesta = await cliente.solicitar('mcpServerStatus/list', params, { timeoutMs: TIEMPO_PETICION_MS });
+      } catch (error) {
+        if (error instanceof ErrorProceso) throw error;
+        throw new ErrorAislamiento(`No se pudo comprobar que los servidores MCP de Codex estén desactivados: ${mensajeDe(error)}`);
+      }
+      if (!esObjeto(respuesta) || !Array.isArray(respuesta['data'])) {
+        throw new ErrorAislamiento('No se pudo comprobar que los servidores MCP de Codex estén desactivados');
+      }
+      for (const servidor of respuesta['data']) {
+        const nombre = esObjeto(servidor) ? texto(servidor['name']) ?? 'sin nombre' : 'sin nombre';
+        const herramientas = esObjeto(servidor) && esObjeto(servidor['tools']) ? Object.keys(servidor['tools']).length : 0;
+        if (!esObjeto(servidor) || servidor['runtimeStatus'] !== 'disabled' || herramientas > 0) activos.push(nombre);
+      }
+      cursor = texto(respuesta['nextCursor']) || null;
+      if (cursor === null) break;
+    }
+    if (activos.length > 0) {
+      throw new ErrorAislamiento(`Codex mantiene activos servidores MCP que podrían escribir: ${activos.join(', ')}`);
+    }
   }
 
   private cerrarTurno(resultado: ResultadoEstacion, fin: FinTurno, señal: AbortSignal): ResultadoEstacion {
