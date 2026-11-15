@@ -3,6 +3,7 @@
 // El formato del guion está documentado en .superpowers/sdd/2026-11-14-fabrica-nucleo/tarea-3-report.md.
 // Añadidos para ACP (tarea 5):
 // - `registroArgs`: ruta donde se guardan, como JSON, los argumentos que siguen al guion.
+// - `registroCwd`: ruta donde se guarda la carpeta de trabajo con que se lanzó el servidor.
 // - `diferir: true` en un paso: no responde todavía; guarda el id de la petición para ese método.
 // - `responder: [{ metodo, resultado?, error? }]` en los efectos (pasos y `alResponder`): contesta la petición
 //   diferida de ese método. Va después de las notificaciones y peticiones del mismo efecto.
@@ -21,6 +22,7 @@ if (process.argv[3] === '--version') {
   process.exit(0);
 }
 if (guion.registroArgs) writeFileSync(guion.registroArgs, JSON.stringify(process.argv.slice(3)));
+if (guion.registroCwd) writeFileSync(guion.registroCwd, process.cwd());
 const metodos = guion.metodos ?? {};
 const contadores = new Map();
 const diferidas = new Map();

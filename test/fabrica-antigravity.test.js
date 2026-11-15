@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { crearConectorAntigravity, personalizacionesPeligrosas } from '../dist/fabrica/conectores/antigravity.js';
+import { borrarCarpetaAislada, crearConectorAntigravity, modoAnunciado, personalizacionesPeligrosas } from '../dist/fabrica/conectores/antigravity.js';
 import { hallazgosJsonSchema } from '../dist/fabrica/esquemas.js';
 
 const SERVIDOR = fileURLToPath(new URL('../test-support/fabrica/servidor-falso.mjs', import.meta.url));
@@ -24,6 +24,7 @@ function preparar(nombre, cambios = {}) {
   const guion = { ...guionBase(nombre), ...cambios };
   guion.registro = join(dir, 'registro.ndjson');
   guion.registroArgs = join(dir, 'args.json');
+  guion.registroCwd = join(dir, 'cwd.txt');
   const rutaGuion = join(dir, 'guion.json');
   writeFileSync(rutaGuion, JSON.stringify(guion));
   const conector = crearConectorAntigravity({ orden: process.execPath, argsPrefijo: [SERVIDOR, rutaGuion] });
@@ -33,6 +34,7 @@ function preparar(nombre, cambios = {}) {
     conector,
     mensajes: () => (existsSync(guion.registro) ? readFileSync(guion.registro, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []),
     args: () => JSON.parse(readFileSync(guion.registroArgs, 'utf8')),
+    cwd: () => readFileSync(guion.registroCwd, 'utf8'),
     async limpiar() {
       await (await conector).cerrar();
       rmSync(dir, { recursive: true, force: true });
@@ -109,6 +111,7 @@ test('initialize no declara escritura de archivos ni terminal, y el proceso se l
     assert.ok(isAbsolute(carpeta), 'la carpeta de datos aislada es absoluta');
     assert.ok(!carpeta.startsWith(process.env.HOME ?? '\0'), 'no está en el HOME real');
     assert.equal(statSync(carpeta).mode & 0o777, 0o700);
+    assert.equal(p.cwd(), realpathSync(carpeta), 'el proceso arranca en la carpeta aislada, no en el directorio de trabajo');
     await conector.cerrar();
     assert.equal(existsSync(carpeta), false, 'la carpeta aislada se borra al cerrar');
   } finally {
@@ -290,20 +293,38 @@ test('si Antigravity no acepta el modelo, da fallida sin turno', async () => {
   }
 });
 
-test('con hooks, plugins o MCP del repo, no se abre la sesión', async () => {
-  for (const [ruta, esCarpeta] of [['.agents/hooks.json', false], ['.agents/plugins', true], ['_agent/mcp_config.json', false], ['.agent/plugins.json', false]]) {
+/** Prepara en el repo de prueba una personalización: carpeta, archivo o enlace simbólico. */
+function crearEn(raiz, ruta, tipo) {
+  const destino = join(raiz, ruta);
+  mkdirSync(join(destino, '..'), { recursive: true });
+  if (tipo === 'carpeta') mkdirSync(destino, { recursive: true });
+  else if (tipo === 'archivo') writeFileSync(destino, '{}');
+  else {
+    const objetivo = join(raiz, 'objetivo-enlace');
+    mkdirSync(join(objetivo, 'skills'), { recursive: true });
+    symlinkSync(objetivo, destino);
+  }
+  return destino;
+}
+
+test('lista blanca: .gemini/, entradas desconocidas o enlaces en .agents impiden abrir la sesión', async () => {
+  const casos = [
+    ['.gemini/settings.json', 'archivo', '.gemini'],
+    ['.agents/hooks.json', 'archivo', '.agents/hooks.json'],
+    ['.agents/plugins', 'carpeta', '.agents/plugins'],
+    ['.agents/otra-cosa', 'carpeta', '.agents/otra-cosa'],
+    ['_agent/mcp_config.json', 'archivo', '_agent/mcp_config.json'],
+    ['.agent/skills', 'enlace', '.agent/skills'],
+    ['.agents', 'enlace', '.agents'],
+  ];
+  for (const [ruta, tipo, esperada] of casos) {
     const p = preparar('revision');
     try {
-      const destino = join(p.raiz, ruta);
-      if (esCarpeta) mkdirSync(destino, { recursive: true });
-      else {
-        mkdirSync(join(destino, '..'), { recursive: true });
-        writeFileSync(destino, '{}');
-      }
+      crearEn(p.raiz, ruta, tipo);
       const resultado = await (await p.conector).ejecutar(encargo(p.raiz), AbortSignal.timeout(10_000));
       assert.equal(resultado.estado, 'fallida', ruta);
-      assert.match(resultado.motivo, /personalizaciones que ejecutan código/, ruta);
-      assert.ok(resultado.motivo.includes(destino), ruta);
+      assert.match(resultado.motivo, /personalizaciones de Antigravity que la fábrica no admite/, ruta);
+      assert.ok(resultado.motivo.includes(join(p.raiz, esperada)), `${ruta}: ${resultado.motivo}`);
       assert.equal(p.mensajes().some((m) => m.method === 'session/new'), false, ruta);
     } finally {
       await p.limpiar();
@@ -311,21 +332,107 @@ test('con hooks, plugins o MCP del repo, no se abre la sesión', async () => {
   }
 });
 
-test('personalizacionesPeligrosas sube hasta la raíz git y admite skills', () => {
+test('lista blanca: .gemini/ en un ancestro hasta la raíz git también impide abrir la sesión', async () => {
+  const p = preparar('revision');
+  try {
+    const sub = join(p.raiz, 'paquete');
+    mkdirSync(sub, { recursive: true });
+    crearEn(p.raiz, '.gemini/settings.json', 'archivo');
+    const resultado = await (await p.conector).ejecutar(encargo(sub), AbortSignal.timeout(10_000));
+    assert.equal(resultado.estado, 'fallida');
+    assert.ok(resultado.motivo.includes(join(p.raiz, '.gemini')), resultado.motivo);
+    assert.equal(p.mensajes().some((m) => m.method === 'session/new'), false);
+  } finally {
+    await p.limpiar();
+  }
+});
+
+test('lista blanca: skills, rules y workflows en .agents se admiten', async () => {
+  const p = preparar('revision');
+  try {
+    for (const nombre of ['skills/x', 'rules', 'workflows']) crearEn(p.raiz, `.agents/${nombre}`, 'carpeta');
+    // Dentro de skills puede haber enlaces (así lo usa nexakit): no se mira más allá del primer nivel.
+    symlinkSync(join(p.raiz, '.agents', 'skills', 'x'), join(p.raiz, '.agents', 'skills', 'enlazada'));
+    const resultado = await (await p.conector).ejecutar(encargo(p.raiz), AbortSignal.timeout(10_000));
+    assert.equal(resultado.estado, 'ok', resultado.motivo);
+  } finally {
+    await p.limpiar();
+  }
+});
+
+test('personalizacionesPeligrosas sube hasta la raíz git y no mira más arriba', () => {
   const dir = mkdtempSync(join(tmpdir(), 'nexakit-agy-personal-'));
   try {
     const repo = join(dir, 'repo');
     const sub = join(repo, 'paquete');
     mkdirSync(join(repo, '.git'), { recursive: true });
     mkdirSync(join(sub, '.agents', 'skills', 'x'), { recursive: true });
+    mkdirSync(join(dir, '.gemini'), { recursive: true });
     mkdirSync(join(dir, '.agents'), { recursive: true });
     writeFileSync(join(dir, '.agents', 'hooks.json'), '{}');
-    assert.deepEqual(personalizacionesPeligrosas(sub), [], 'las skills solas no cuentan; fuera del repo no se mira');
+    assert.deepEqual(personalizacionesPeligrosas(sub), [], 'las skills se admiten; fuera del repo no se mira');
     mkdirSync(join(repo, '.agents'), { recursive: true });
     writeFileSync(join(repo, '.agents', 'hooks.json'), '{}');
-    assert.deepEqual(personalizacionesPeligrosas(sub), [join(repo, '.agents', 'hooks.json')]);
+    mkdirSync(join(repo, '.gemini'), { recursive: true });
+    assert.deepEqual(personalizacionesPeligrosas(sub), [join(repo, '.gemini'), join(repo, '.agents', 'hooks.json')]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('el propio repo de nexakit pasa la lista blanca', () => {
+  assert.deepEqual(personalizacionesPeligrosas(fileURLToPath(new URL('..', import.meta.url))), []);
+});
+
+test('borrarCarpetaAislada no lanza aunque el borrado falle', () => {
+  const fallo = () => {
+    throw Object.assign(new Error('EBUSY: recurso ocupado'), { code: 'EBUSY' });
+  };
+  assert.equal(borrarCarpetaAislada('/no/importa', fallo), false);
+  const dir = mkdtempSync(join(tmpdir(), 'nexakit-agy-borrar-'));
+  writeFileSync(join(dir, 'x'), 'x');
+  assert.equal(borrarCarpetaAislada(dir), true);
+  assert.equal(existsSync(dir), false);
+});
+
+test('modoAnunciado: un modo sin valor o una lista de opciones rara no cuentan como default', () => {
+  assert.equal(modoAnunciado({ sessionUpdate: 'usage_update', used: 1, size: 2 }), undefined);
+  assert.equal(modoAnunciado({ sessionUpdate: 'current_mode_update', currentModeId: 'default' }), 'default');
+  assert.equal(modoAnunciado({ sessionUpdate: 'current_mode_update' }), null);
+  assert.equal(modoAnunciado({ sessionUpdate: 'config_option_update', configOptions: [{ id: 'model', currentValue: 'x' }] }), undefined);
+  assert.equal(modoAnunciado({ sessionUpdate: 'config_option_update', configOptions: [{ id: 'mode', currentValue: 'auto' }] }), 'auto');
+  assert.equal(modoAnunciado({ sessionUpdate: 'config_option_update', configOptions: [{ id: 'mode', name: 'Mode' }] }), null);
+  assert.equal(modoAnunciado({ sessionUpdate: 'config_option_update', configOptions: 'rara' }), null);
+});
+
+test('una opción de modo sin valor a mitad del turno se cancela y da fallida', async () => {
+  const guion = guionBase('cambio-modo');
+  guion.metodos['session/prompt'].notificaciones = [{
+    metodo: 'session/update',
+    params: { sessionId: 'ses-1', update: { sessionUpdate: 'config_option_update', configOptions: [{ id: 'mode', name: 'Mode', type: 'select', options: [] }] } },
+  }];
+  const p = preparar('cambio-modo', { metodos: guion.metodos });
+  try {
+    const resultado = await (await p.conector).ejecutar(encargo(p.raiz), AbortSignal.timeout(10_000));
+    assert.equal(resultado.estado, 'fallida');
+    assert.match(resultado.motivo, /modo «desconocido»/);
+    await esperarMensaje(p.mensajes, 'session/cancel');
+  } finally {
+    await p.limpiar();
+  }
+});
+
+test('si session/new trae la opción de modo sin valor, no empieza el turno', async () => {
+  const guion = guionBase('revision');
+  delete guion.metodos['session/new'].resultado.configOptions[0].currentValue;
+  const p = preparar('revision', { metodos: guion.metodos });
+  try {
+    const resultado = await (await p.conector).ejecutar(encargo(p.raiz), AbortSignal.timeout(10_000));
+    assert.equal(resultado.estado, 'fallida');
+    assert.match(resultado.motivo, /modo «desconocido»/);
+    assert.equal(p.mensajes().some((m) => m.method === 'session/prompt'), false);
+  } finally {
+    await p.limpiar();
   }
 });
 

@@ -11,19 +11,24 @@
 //   preguntar. `--include-default-customizations=false` no cambia nada de eso. `--gemini-dir <carpeta temporal>` sí:
 //   sin MCP, sin skills ni plugins de la persona, con los ajustes por defecto y la autenticación del llavero intacta.
 // - Siguen activas las personalizaciones del repo (`.agents/`): sus skills e instrucciones pasan por los permisos,
-//   pero sus hooks y los MCP de sus plugins ejecutan código sin preguntar; por eso, si existen, no se abre la sesión.
+//   pero sus hooks y los MCP de sus plugins ejecutan código sin preguntar. `.gemini/` del repo (settings.json con
+//   `mcpServers`, `tools.discoveryCommand` o `permissions.allow`, `mcp_config.json`, skills) no se cargó en
+//   `session/new`; durante un turno no se puede comprobar sin modelo. Por eso se aplica una lista blanca: solo
+//   `skills`, `rules` y `workflows` en `.agents/` (y variantes), sin `.gemini/` ni enlaces simbólicos; si no, no se
+//   abre la sesión.
 // - El modo `default` pide permiso antes de editar y de ejecutar órdenes. Si la sesión abre o pasa a otro modo, se
 //   cancela. `/teamwork`, `/boost` y `/swarm` son órdenes de barra que la fábrica no envía; que sus subagentes pasen
 //   por los mismos permisos no se puede comprobar sin llamar al modelo.
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { lstatSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { client, ndJsonStream, PROTOCOL_VERSION, RequestError } from '@agentclientprotocol/sdk';
 import type {
+  AnyMessage,
   ClientCapabilities,
   ClientConnection,
   ContentBlock,
@@ -56,8 +61,10 @@ const SUFIJO_ESFUERZO = /-(low|medium|high|xhigh)$/u;
 /** Ni lectura ni escritura de archivos por el cliente, ni terminales. */
 const CAPACIDADES_CLIENTE: ClientCapabilities = { fs: { readTextFile: false, writeTextFile: false }, terminal: false };
 const RAICES_PERSONALIZACION = ['.agents', '.agent', '_agents', '_agent'];
-/** Personalizaciones del repo que ejecutan código sin pasar por los permisos (o que traen otras que lo hacen). */
-const PERSONALIZACIONES_PELIGROSAS = ['hooks.json', 'plugins', 'plugins.json', 'mcp_config.json'];
+/** Lo único que se admite dentro de esas carpetas: instrucciones que pasan por los permisos. */
+const PERSONALIZACIONES_ADMITIDAS = new Set(['skills', 'rules', 'workflows']);
+/** Carpeta de configuración de Gemini/Antigravity en el repo: nunca se admite. */
+const CONFIG_GEMINI = '.gemini';
 const TIPOS_IMAGEN: Record<string, string> = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
@@ -134,18 +141,39 @@ function existe(ruta: string): boolean {
   return lstatSync(ruta, { throwIfNoEntry: false }) !== undefined;
 }
 
+/** Una carpeta de verdad (no un enlace simbólico ni un archivo). */
+function esCarpetaReal(ruta: string): boolean {
+  return lstatSync(ruta, { throwIfNoEntry: false })?.isDirectory() === true;
+}
+
 /**
- * Hooks, plugins o MCP en las carpetas `.agents/` (y variantes) que Antigravity cargaría para `raiz`: desde `raiz`
- * hasta la raíz del repo (la carpeta con `.git`), ambas incluidas. Las skills y las reglas no cuentan.
+ * Personalizaciones del repo que la fábrica no admite, desde `raiz` hasta la raíz del repo (la carpeta con `.git`),
+ * ambas incluidas. Lista blanca: en `.agents/` (y variantes) solo `skills`, `rules` y `workflows`, como carpetas
+ * reales; cualquier otra entrada, un enlace simbólico o una carpeta `.gemini/` cuentan.
  */
 export function personalizacionesPeligrosas(raiz: string): string[] {
   const halladas: string[] = [];
   let carpeta = path.resolve(raiz);
   for (;;) {
+    const gemini = path.join(carpeta, CONFIG_GEMINI);
+    if (existe(gemini)) halladas.push(gemini);
     for (const base of RAICES_PERSONALIZACION) {
-      for (const nombre of PERSONALIZACIONES_PELIGROSAS) {
-        const ruta = path.join(carpeta, base, nombre);
-        if (existe(ruta)) halladas.push(ruta);
+      const raizPersonal = path.join(carpeta, base);
+      if (!existe(raizPersonal)) continue;
+      if (!esCarpetaReal(raizPersonal)) {
+        halladas.push(raizPersonal);
+        continue;
+      }
+      let entradas: string[];
+      try {
+        entradas = readdirSync(raizPersonal);
+      } catch {
+        halladas.push(raizPersonal);
+        continue;
+      }
+      for (const nombre of entradas.sort()) {
+        const ruta = path.join(raizPersonal, nombre);
+        if (!PERSONALIZACIONES_ADMITIDAS.has(nombre) || !esCarpetaReal(ruta)) halladas.push(ruta);
       }
     }
     if (existe(path.join(carpeta, '.git'))) break;
@@ -187,8 +215,48 @@ function modoDeSesion(sesion: Record<string, unknown>): string | null {
   const opciones = Array.isArray(sesion['configOptions']) ? sesion['configOptions'] : [];
   const opcion = opciones.find((o: unknown) => esObjeto(o) && o['id'] === 'mode');
   const valor = esObjeto(opcion) ? texto(opcion['currentValue']) : null;
+  // Una opción `mode` sin valor no dice en qué modo está: no se da por buena.
+  if (opcion !== undefined && valor === null) return null;
   if (modo !== null && valor !== null && modo !== valor) return null;
   return modo ?? valor;
+}
+
+/**
+ * Modo que anuncia una notificación `session/update` en crudo (antes de que el SDK la valide y pueda descartarla):
+ * `undefined` si no habla del modo, o el modo (null si no se entiende) si lo hace.
+ */
+export function modoAnunciado(update: unknown): string | null | undefined {
+  if (!esObjeto(update)) return undefined;
+  if (update['sessionUpdate'] === 'current_mode_update') return texto(update['currentModeId']);
+  if (update['sessionUpdate'] !== 'config_option_update') return undefined;
+  if (!Array.isArray(update['configOptions'])) return null;
+  const opcion = update['configOptions'].find((o: unknown) => esObjeto(o) && o['id'] === 'mode');
+  if (opcion === undefined) return undefined;
+  return esObjeto(opcion) ? texto(opcion['currentValue']) : null;
+}
+
+const carpetasAisladas = new Set<string>();
+let limpiezaAlSalir = false;
+
+/** Borra una carpeta aislada sin lanzar nunca: un fallo (EBUSY, EPERM, ENOTEMPTY...) solo deja la carpeta. */
+export function borrarCarpetaAislada(carpeta: string, borrar: typeof rmSync = rmSync): boolean {
+  try {
+    borrar(carpeta, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    carpetasAisladas.delete(carpeta);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Registra la carpeta para borrarla también si Node sale sin cerrar el conector (Ctrl+C, una caída...). */
+function registrarCarpetaAislada(carpeta: string): void {
+  carpetasAisladas.add(carpeta);
+  if (limpiezaAlSalir) return;
+  limpiezaAlSalir = true;
+  process.on('exit', () => {
+    for (const pendiente of [...carpetasAisladas]) borrarCarpetaAislada(pendiente);
+  });
 }
 
 function errorModo(modo: string | null): ErrorAislamiento {
@@ -276,10 +344,12 @@ class ConectorAntigravity implements Conector {
     let proceso: Proceso | undefined;
     const aborto = esperarAborto(señal);
     try {
-      // Antes de abrir la sesión: los hooks del repo podrían ejecutarse al empezar.
+      // Antes de abrir la sesión: los hooks del repo podrían ejecutarse al empezar. Lista blanca, falla cerrado.
       const peligrosas = personalizacionesPeligrosas(encargo.raiz);
       if (peligrosas.length > 0) {
-        throw new ErrorAislamiento(`El repo tiene personalizaciones que ejecutan código sin pedir permiso: ${peligrosas.join(', ')}`);
+        throw new ErrorAislamiento(
+          `El repo tiene personalizaciones de Antigravity que la fábrica no admite (solo skills, rules y workflows en .agents/, sin .gemini/ ni enlaces simbólicos): ${peligrosas.join(', ')}`,
+        );
       }
       const imagenes = await leerImagenes(encargo.imagenes ?? []);
       proceso = await this.asegurarProceso();
@@ -445,8 +515,10 @@ class ConectorAntigravity implements Conector {
   private lanzar(invocacion: Invocacion): Proceso {
     // `mkdtemp` crea la carpeta con permisos 0o700.
     const carpeta = mkdtempSync(path.join(tmpdir(), 'nexakit-agy-'));
+    registrarCarpetaAislada(carpeta);
     const hijo = spawn(invocacion.orden, [...invocacion.argsPrefijo, ...ARGUMENTOS_ACP, '--gemini-dir', carpeta], {
-      cwd: process.cwd(),
+      // Nunca el directorio de trabajo de quien llama: Antigravity cargaría sus personalizaciones.
+      cwd: carpeta,
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: false,
       windowsHide: true,
@@ -468,13 +540,21 @@ class ConectorAntigravity implements Conector {
         resolver({ motivo: `el proceso terminó ${como}`, noEncontrado: false });
       });
     });
-    void terminado.then(() => rmSync(carpeta, { recursive: true, force: true }));
+    void terminado.then(() => borrarCarpetaAislada(carpeta));
 
     if (!hijo.stdin || !hijo.stdout) throw new Error('no se pudo abrir la entrada y la salida del proceso');
-    const flujo = ndJsonStream(
+    const crudo = ndJsonStream(
       Writable.toWeb(hijo.stdin) as WritableStream<Uint8Array>,
       Readable.toWeb(hijo.stdout) as ReadableStream<Uint8Array>,
     );
+    // El modo se vigila en crudo: el SDK descarta (sin avisar al manejador) las notificaciones que no valida.
+    const vigilarModo = new TransformStream<AnyMessage, AnyMessage>({
+      transform: (mensaje, controlador) => {
+        this.vigilarModo(mensaje);
+        controlador.enqueue(mensaje);
+      },
+    });
+    const flujo = { writable: crudo.writable, readable: crudo.readable.pipeThrough(vigilarModo) };
     const app = client({ name: 'nexakit-fabrica' })
       // Sin validar la forma: una petición de permiso inesperada también se rechaza (y queda registrada).
       .onRequest('session/request_permission', (params: unknown) => params, ({ params }) => this.rechazarPermiso(params))
@@ -536,18 +616,21 @@ class ConectorAntigravity implements Conector {
       case 'usage_update':
         enCurso.resultado.tokens = { entrada: 0, salida: 0, total: actualizacion.used };
         break;
-      case 'current_mode_update':
-        if (actualizacion.currentModeId !== MODO_CON_PERMISOS) enCurso.alertarModo(actualizacion.currentModeId);
-        break;
-      case 'config_option_update': {
-        const modo = actualizacion.configOptions.find((o) => o.id === 'mode');
-        const valor = modo && 'currentValue' in modo ? modo.currentValue : MODO_CON_PERMISOS;
-        if (valor !== MODO_CON_PERMISOS) enCurso.alertarModo(String(valor));
-        break;
-      }
       default:
         break;
     }
+  }
+
+  /** Falla cerrado si una sesión en curso anuncia un modo que no es `default` o uno que no se entiende. */
+  private vigilarModo(mensaje: AnyMessage): void {
+    if (!('method' in mensaje) || mensaje.method !== 'session/update' || 'id' in mensaje) return;
+    const params: unknown = mensaje.params;
+    if (!esObjeto(params)) return;
+    const sessionId = texto(params['sessionId']);
+    const enCurso = sessionId === null ? undefined : this.sesiones.get(sessionId);
+    if (!enCurso) return;
+    const modo = modoAnunciado(params['update']);
+    if (modo !== undefined && modo !== MODO_CON_PERMISOS) enCurso.alertarModo(modo ?? 'desconocido');
   }
 
   /** Toda petición de permiso se rechaza: la opción de rechazo si la hay; si no, `cancelled`. */
