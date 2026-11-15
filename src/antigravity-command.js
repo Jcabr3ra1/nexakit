@@ -1,6 +1,7 @@
 import path from 'node:path';
 import {
   buildAntigravityStatusSegments,
+  leerActivoDeFabrica,
   extractContextPercent,
   extractQuotaSummary,
   formatAntigravityStatusLine,
@@ -82,12 +83,13 @@ async function handleBarra(flags, io, options) {
     options,
   );
 
+  const fabrica = leerActivoDeFabrica(options.environment?.HOME || undefined);
   if (flags['--json']) {
-    await io.out(JSON.stringify(buildAntigravityStatusSegments(payload, { recommendation, now })) + '\n');
+    await io.out(JSON.stringify(buildAntigravityStatusSegments(payload, { recommendation, now, fabrica })) + '\n');
     return 0;
   }
   const color = !flags['--sin-color'] && !(options.environment?.NO_COLOR || process.env.NO_COLOR);
-  const line = formatAntigravityStatusLine(payload, { recommendation, now, color });
+  const line = formatAntigravityStatusLine(payload, { recommendation, now, color, fabrica });
   if (line) await io.out(`${line}\n`);
   return 0;
 }

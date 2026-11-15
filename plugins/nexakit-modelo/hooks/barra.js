@@ -178,3 +178,52 @@ export function filasDeAgentes(agentes) {
     ];
   });
 }
+
+// Estaciones de la fábrica de nexakit en curso (las que publica ~/.nexakit/fabrica/activo.json). Solo las que
+// corren en una IA externa (codex o antigravity) y que no se omitieron: las de Claude ya salen como subagentes.
+const TOPE_ACTIVO = 64 * 1024;
+const VIDA_ACTIVO = 10 * 60 * 1000;
+const ICONO_FABRICA = {
+  pendiente: ['●', 'warning'], 'en-curso': ['●', 'warning'], ok: ['✓', 'success'], fallida: ['✗', 'error'], cancelada: ['✗', 'error'],
+};
+const IA_CORTA = { codex: 'codex', antigravity: 'agy' };
+
+// Convierte el texto de activo.json en un objeto o null: más de 64 KiB, JSON roto o forma inesperada no dan nada.
+export function activoDeTexto(texto) {
+  try {
+    if (typeof texto !== 'string' || texto.length > TOPE_ACTIVO) return null;
+    const valor = JSON.parse(texto);
+    if (!valor || typeof valor !== 'object' || Array.isArray(valor) || !Array.isArray(valor.estaciones)) return null;
+    return valor;
+  } catch {
+    return null;
+  }
+}
+
+// Una fila por estación externa en curso (como mucho 4), con el formato y los colores de filasDeAgentes.
+// Un estado de hace más de 10 minutos es de un proceso que murió sin limpiar: se ignora.
+export function filasDeFabrica(activo, ahora = Date.now()) {
+  try {
+    if (!activo || typeof activo !== 'object' || !Array.isArray(activo.estaciones)) return [];
+    const edad = ahora - Date.parse(activo.actualizado);
+    if (!Number.isFinite(edad) || edad > VIDA_ACTIVO) return [];
+    const visibles = activo.estaciones
+      .filter((e) => e && typeof e.estacion === 'string' && IA_CORTA[e.ia] && ICONO_FABRICA[e.estado])
+      .slice(0, MAX_FILAS);
+    const etiquetas = visibles.map((e) => e.estacion);
+    const columna = Math.min(MAX_ETIQUETA, Math.max(MIN_ETIQUETA, ...etiquetas.map((t) => t.length))) + 1;
+    return visibles.map((e, i) => {
+      const nombre = etiquetas[i].length > MAX_ETIQUETA ? `${etiquetas[i].slice(0, MAX_ETIQUETA - 1)}…` : etiquetas[i];
+      const [icono, color] = ICONO_FABRICA[e.estado];
+      const modelo = [IA_CORTA[e.ia], e.modelo || '?', e.esfuerzo].filter(Boolean).join(' ');
+      return [
+        { text: `  ↳ ${nombre.padEnd(columna)}`, dim: true },
+        { text: `· ${ancho(modelo, 24)}`, color: 'claude' },
+        { text: ` ${icono}`, color },
+        ...(esNumero(e.tokens) && e.tokens > 0 ? [{ text: `  ${formatoTokens(e.tokens)} tokens` }] : []),
+      ];
+    });
+  } catch {
+    return [];
+  }
+}

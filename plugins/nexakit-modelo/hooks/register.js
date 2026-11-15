@@ -1,4 +1,4 @@
-import { familia, filasDeAgentes, segmentosDeBarra, sumarTokens, tokensVacios } from './barra.js';
+import { activoDeTexto, familia, filasDeAgentes, filasDeFabrica, segmentosDeBarra, sumarTokens, tokensVacios } from './barra.js';
 import { ajustarPorLimite } from './decidir.js';
 import { recomendarPorTexto } from './recomendar.js';
 
@@ -67,6 +67,21 @@ function sumarCache(estado, usage) {
   c.creation += tokens(usage.cache_creation_input_tokens);
   c.input += tokens(usage.input_tokens);
   c.turnos += 1;
+}
+
+// Estado vivo de la fábrica (~/.nexakit/fabrica/activo.json). Solo lectura y en abierto: cualquier fallo no da
+// filas. $.fs no ofrece lstat, así que un enlace simbólico no se puede distinguir aquí (el límite de 64 KiB y
+// la forma del contenido sí se comprueban, y solo se pintan datos tipados, nunca texto libre).
+async function filasDeLaFabrica($) {
+  try {
+    const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'));
+    if (!home) return [];
+    const ruta = `${home}/.nexakit/fabrica/activo.json`;
+    if (!(await $.fs.exists(ruta))) return [];
+    return filasDeFabrica(activoDeTexto(await $.fs.read(ruta)), await $.clock.now());
+  } catch {
+    return [];
+  }
 }
 
 // Una sola barra sobre el prompt con modelo, esfuerzo, recomendación y uso. Solo muestra:
@@ -178,7 +193,10 @@ export function register(on) {
       h(Text, { key: String(i), color: s.color, dimColor: s.dim, bold: s.bold }, s.text));
     const linea = (partes, clave) => h(Box, { key: clave, flexDirection: 'row' },
       ...partes.map((s, i) => h(Text, { key: String(i), color: s.color, dimColor: s.dim, bold: s.bold }, s.text)));
-    const filas = filasDeAgentes([...agentes.values()]).map((f, i) => linea(f, `agente-${i}`));
+    const filas = [
+      ...filasDeAgentes([...agentes.values()]).map((f, i) => linea(f, `agente-${i}`)),
+      ...(await filasDeLaFabrica($)).map((f, i) => linea(f, `fabrica-${i}`)),
+    ];
     return h(Box, { flexDirection: 'column' }, h(Box, { key: 'principal', flexDirection: 'row' }, ...tramos), ...filas);
   });
 

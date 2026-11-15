@@ -1,4 +1,7 @@
-import { etiquetaDeAgente, formatoReinicio, medidor, tono, tonoCache } from '../plugins/nexakit-modelo/hooks/barra.js';
+import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { activoDeTexto, etiquetaDeAgente, filasDeFabrica, formatoReinicio, medidor, tono, tonoCache } from '../plugins/nexakit-modelo/hooks/barra.js';
 import { LIMITE_ALTO } from '../plugins/nexakit-modelo/hooks/decidir.js';
 import { parseAntigravityModel } from './antigravity-recommendation.js';
 
@@ -121,8 +124,48 @@ function buildSubagentRows(subagents) {
   });
 }
 
+const TOPE_ACTIVO = 64 * 1024;
+
+const pidVivo = (pid) => {
+  if (!Number.isInteger(pid) || pid <= 0) return true;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === 'EPERM';
+  }
+};
+
+/**
+ * Lee `~/.nexakit/fabrica/activo.json` (solo lectura, sin seguir enlaces, tope de 64 KiB). Falla en abierto:
+ * cualquier problema o un proceso que ya no vive devuelve null.
+ */
+export function leerActivoDeFabrica(home = os.homedir()) {
+  try {
+    const base = path.join(home, '.nexakit', 'fabrica');
+    const carpeta = lstatSync(base, { throwIfNoEntry: false });
+    if (!carpeta || !carpeta.isDirectory() || carpeta.isSymbolicLink()) return null;
+    const archivo = path.join(base, 'activo.json');
+    const info = lstatSync(archivo, { throwIfNoEntry: false });
+    if (!info || !info.isFile() || info.size > TOPE_ACTIVO) return null;
+    const fd = openSync(archivo, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    try {
+      const { size } = fstatSync(fd);
+      if (size > TOPE_ACTIVO) return null;
+      const buffer = Buffer.alloc(size);
+      readSync(fd, buffer, 0, size, 0);
+      const activo = activoDeTexto(buffer.toString('utf8'));
+      return activo && pidVivo(activo.pid) ? activo : null;
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
+}
+
 /** Build structured bar segments and subagent rows from an Antigravity statusLine payload. */
-export function buildAntigravityStatusSegments(payload, { recommendation = null, now = Date.now() } = {}) {
+export function buildAntigravityStatusSegments(payload, { recommendation = null, now = Date.now(), fabrica = null } = {}) {
   const safe = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
   const model = parseAntigravityModel(safe.model);
   const segments = [
@@ -158,7 +201,7 @@ export function buildAntigravityStatusSegments(payload, { recommendation = null,
     segments.push({ text: '   sandbox', dim: true });
   }
 
-  return { segments, subagents: buildSubagentRows(safe.subagents) };
+  return { segments, subagents: [...buildSubagentRows(safe.subagents), ...filasDeFabrica(fabrica, now)] };
 }
 
 function renderSegment(segment, color) {
@@ -171,8 +214,8 @@ function renderSegment(segment, color) {
 }
 
 /** Render Antigravity statusLine payload as ANSI or plain text lines. */
-export function formatAntigravityStatusLine(payload, { recommendation = null, now = Date.now(), color = true } = {}) {
-  const { segments, subagents } = buildAntigravityStatusSegments(payload, { recommendation, now });
+export function formatAntigravityStatusLine(payload, { recommendation = null, now = Date.now(), color = true, fabrica = null } = {}) {
+  const { segments, subagents } = buildAntigravityStatusSegments(payload, { recommendation, now, fabrica });
   const renderRow = (row) => row.map((segment) => renderSegment(segment, color)).join('');
   return [renderRow(segments), ...subagents.map(renderRow)].join('\n');
 }

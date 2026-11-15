@@ -109,3 +109,44 @@ test('handles empty, null, zero-window, single-effort models, and Gemini cache c
   }, { color: true });
   assert.match(colored, /\x1b\[/u);
 });
+
+test('Antigravity pinta las estaciones de la fábrica y lee activo.json sin seguir enlaces', async () => {
+  const { formatAntigravityStatusLine, leerActivoDeFabrica } = await mod();
+  const { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const home = mkdtempSync(join(tmpdir(), 'nexakit-barra-'));
+  try {
+    const now = Date.parse('2026-11-15T10:00:00Z');
+    const activo = {
+      pid: process.pid, id: 'r', repo: 'x', actualizado: '2026-11-15T09:59:00Z',
+      estaciones: [
+        { estacion: 'implementar', ia: 'codex', modelo: 'gpt-5.5', esfuerzo: 'high', estado: 'en-curso', tokens: 900 },
+        { estacion: 'revisar', ia: 'antigravity', modelo: 'Gemini 4', esfuerzo: 'low', estado: 'fallida', tokens: 0 },
+      ],
+    };
+    assert.equal(leerActivoDeFabrica(home), null, 'ausente');
+    const base = join(home, '.nexakit', 'fabrica');
+    mkdirSync(base, { recursive: true });
+    writeFileSync(join(base, 'activo.json'), JSON.stringify(activo));
+    const leido = leerActivoDeFabrica(home);
+    assert.equal(leido.estaciones.length, 2);
+    const lineas = formatAntigravityStatusLine({}, { color: false, now, fabrica: leido }).split('\n');
+    assert.equal(lineas.length, 3);
+    assert.match(lineas[1], /↳ implementar +· codex gpt-5\.5 high +● +900 tokens/u);
+    assert.match(lineas[2], /↳ revisar +· agy Gemini 4 low +✗/u);
+
+    writeFileSync(join(base, 'activo.json'), JSON.stringify({ ...activo, pid: 2 ** 22 + 7 }));
+    assert.equal(leerActivoDeFabrica(home), null, 'proceso muerto');
+    writeFileSync(join(base, 'activo.json'), `{"estaciones":[],"x":"${'a'.repeat(70 * 1024)}"}`);
+    assert.equal(leerActivoDeFabrica(home), null, 'más de 64 KiB');
+    writeFileSync(join(base, 'activo.json'), '{roto');
+    assert.equal(leerActivoDeFabrica(home), null, 'inválido');
+    rmSync(join(base, 'activo.json'));
+    writeFileSync(join(home, 'otro.json'), JSON.stringify(activo));
+    symlinkSync(join(home, 'otro.json'), join(base, 'activo.json'));
+    assert.equal(leerActivoDeFabrica(home), null, 'enlace simbólico');
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});

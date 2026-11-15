@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { recomendarPorTexto } from '../plugins/nexakit-modelo/hooks/recomendar.js';
 import {
-  cacheDeTokens, filasDeAgentes, formatoReinicio, formatoTokens, medidor, nombreModelo, segmentosDeBarra, sumarTokens, tokensNuevos, tokensVacios, tono, totalDeTokens,
+  activoDeTexto, cacheDeTokens, filasDeAgentes, filasDeFabrica, formatoReinicio, formatoTokens, medidor, nombreModelo, segmentosDeBarra, sumarTokens, tokensNuevos, tokensVacios, tono, totalDeTokens,
 } from '../plugins/nexakit-modelo/hooks/barra.js';
 
 const texto = (segmentos) => segmentos.map((s) => s.text).join('');
@@ -531,4 +531,39 @@ test('el reinicio va atenuado y el porcentaje conserva su color', () => {
   assert.equal(tramos[i].color, 'error');
   assert.equal(tramos[i + 1].dim, true);
   assert.match(tramos[i + 1].text, /↻ vie 10:00/);
+});
+
+test('las estaciones externas de la fábrica son filas con su IA, modelo, estado y tokens', () => {
+  const ahora = Date.parse('2026-11-15T10:00:00Z');
+  const activo = {
+    pid: 1, id: 'r1', repo: 'x', actualizado: '2026-11-15T09:59:30Z',
+    estaciones: [
+      { estacion: 'implementar', ia: 'codex', modelo: 'gpt-5.5', esfuerzo: 'high', estado: 'en-curso', tokens: 12500 },
+      { estacion: 'revisar', ia: 'antigravity', modelo: 'Gemini 4', esfuerzo: 'low', estado: 'ok', tokens: 0 },
+      { estacion: 'probar', ia: 'claude', modelo: 'x', esfuerzo: null, estado: 'claude', tokens: 5 },
+      { estacion: 'diseñar', ia: 'codex', modelo: null, esfuerzo: null, estado: 'omitida', tokens: 0 },
+      { estacion: 'otra', ia: 'codex', modelo: 'm', esfuerzo: null, estado: 'sin-modelo', tokens: 0 },
+    ],
+  };
+  const filas = filasDeFabrica(activo, ahora).map(texto);
+  assert.equal(filas.length, 2);
+  assert.equal(filas[0], '  ↳ implementar · codex gpt-5.5 high       ●  13k tokens');
+  assert.equal(filas[1], '  ↳ revisar     · agy Gemini 4 low         ✓');
+  assert.equal(filasDeFabrica({ ...activo, estaciones: Array.from({ length: 7 }, () => activo.estaciones[0]) }, ahora).length, 4);
+});
+
+test('un activo inválido, ajeno, demasiado grande o de más de 10 minutos no da filas ni errores', () => {
+  const ahora = Date.parse('2026-11-15T10:00:00Z');
+  const estacion = { estacion: 'a', ia: 'codex', modelo: 'm', esfuerzo: 'low', estado: 'en-curso', tokens: 1 };
+  const activo = (actualizado) => ({ actualizado, estaciones: [estacion] });
+  assert.equal(filasDeFabrica(activo('2026-11-15T09:49:00Z'), ahora).length, 0);
+  assert.equal(filasDeFabrica(activo('2026-11-15T09:51:00Z'), ahora).length, 1);
+  assert.equal(filasDeFabrica(activo('no es fecha'), ahora).length, 0);
+  for (const malo of [null, undefined, 3, 'x', {}, { estaciones: 'x' }, { actualizado: 'x', estaciones: [null, 5] }]) {
+    assert.deepEqual(filasDeFabrica(malo, ahora), []);
+  }
+  assert.equal(activoDeTexto('{roto'), null);
+  assert.equal(activoDeTexto('[]'), null);
+  assert.equal(activoDeTexto(`{"estaciones":[],"x":"${'a'.repeat(70 * 1024)}"}`), null);
+  assert.deepEqual(activoDeTexto('{"estaciones":[]}'), { estaciones: [] });
 });
