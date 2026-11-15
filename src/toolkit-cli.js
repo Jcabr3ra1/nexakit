@@ -44,6 +44,8 @@ const HELP = `Uso: npx nexakit [--project <ruta>] [--si]
      nexakit fabrica proponer|lanzar|estado|resultado|cancelar [opciones]
      nexakit ahorro [--json]
      nexakit lecciones [--json | --descartar]
+     nexakit lecciones registrar --regla <texto> --porque <texto> [--proyecto <ruta>] [--estacion <estacion>]
+     nexakit lecciones aceptar|retirar <id>
      npx nexakit recommend [--project <ruta>] [--profile frontend|backend|mcp|security] [--client codex|claude] [--dry-run] [--json]
      npx nexakit scan <carpeta de skill> [--json]
      npx nexakit doctor [--agent codex|claude|antigravity|all] [--perfil-codex <nombre>] [--json]

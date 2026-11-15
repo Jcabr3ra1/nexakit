@@ -44,7 +44,8 @@ npx nexakit setup --reponer <skill> --apply  # Devolver una skill global que qui
 ~/.nexakit/nexakit codex agentes               # Ver los cuatro niveles y seis especialistas de Codex
 ~/.nexakit/nexakit codex consumo               # Contadores registrados por los hooks de Codex
 ~/.nexakit/nexakit codex recomendar --tarea "Escribe pruebas para el parser" # Modelo y esfuerzo sugeridos
-~/.nexakit/nexakit lecciones                   # Correcciones, lecciones guardadas y pendientes
+~/.nexakit/nexakit lecciones                   # Correcciones, lecciones vigentes, propuestas y pendientes
+~/.nexakit/nexakit lecciones registrar --regla "Pregunta una sola vez" --porque "Cansa a la persona" # Lección común a Claude, Codex y Antigravity
 npx nexakit memoria allow-dir <bóveda> --apply # Permitir a Claude Code abrir la memoria desde el proyecto
 ```
 

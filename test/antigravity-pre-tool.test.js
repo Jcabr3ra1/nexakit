@@ -140,4 +140,6 @@ test('PreToolUse and PostToolUse enforce lecciones duplicate failure blocking an
   const ledger = await fs.readFile(path.join(homeDirectory, '.nexakit', 'lecciones.jsonl'), 'utf8');
   assert.match(ledger, /"tipo":"freno"/u);
   assert.match(ledger, /"tipo":"repeticion"/u);
+  const repeticion = ledger.trim().split('\n').map((l) => JSON.parse(l)).find((e) => e.tipo === 'repeticion');
+  assert.equal(repeticion.clave, 'FAIL test<ruta> line #', 'la repetición lleva la clave del error');
 });

@@ -164,6 +164,7 @@ test('registra los frenos y el error repetido tres veces', async () => {
   assert.deepEqual(eventos().map((e) => e.tipo), ['freno']);
   for (const c of ['node a.js', 'node b.js', 'node c.js']) await bash($, { tool: 'Bash', command: c }, falla(`Error: Cannot find module '/tmp/${c}'`));
   assert.deepEqual(eventos().map((e) => e.tipo), ['freno', 'repeticion']);
+  assert.equal(eventos().at(-1).clave, 'Error: Cannot find module <…>', 'la repetición lleva la clave del error, que usa el almacén de lecciones');
 });
 
 test('una corrección se apunta con su texto y una frase con un secreto no', async () => {

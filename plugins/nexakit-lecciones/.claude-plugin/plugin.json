@@ -1,6 +1,6 @@
 {
   "name": "nexakit-lecciones",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Frena los comandos que repiten un fallo, avisa cuando un error se repite y pide guardar tus correcciones como lecciones.",
   "author": {
     "name": "Juan Jaller"

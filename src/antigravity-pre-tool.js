@@ -11,6 +11,7 @@ import {
   leerEventos,
   podarEventos,
   sinGuardar,
+  textoSeguro,
 } from '../plugins/nexakit-lecciones/hooks/lecciones.js';
 import { mutateAntigravitySessionState, readAntigravitySessionState } from './antigravity-session.js';
 import { buildOutputWrapperCommand } from './codex-pre-tool.js';
@@ -224,7 +225,7 @@ export async function handleAntigravityPostToolUse(payload, options = {}) {
         }
         return state;
       }, options);
-      if (triggeredRepetition) await appendAntigravityLesson({ tipo: 'repeticion' }, options);
+      if (triggeredRepetition) await appendAntigravityLesson({ tipo: 'repeticion', clave: textoSeguro(errType) }, options);
     }
     return {};
   } catch {

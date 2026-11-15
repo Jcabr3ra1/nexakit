@@ -17,11 +17,11 @@ const DIA_MS = 24 * 60 * 60 * 1000;
 /** Encargo tal como queda en el rastro: sin el texto del diff, solo su huella. */
 export type EncargoRastro = Encargo & { diffSha256: string };
 
-function codigoError(error: unknown): unknown {
+export function codigoError(error: unknown): unknown {
   return typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
 }
 
-async function lstatSiExiste(ruta: string): Promise<Stats | null> {
+export async function lstatSiExiste(ruta: string): Promise<Stats | null> {
   try {
     return await lstat(ruta);
   } catch (error) {
@@ -52,7 +52,7 @@ export async function nombreRepo(raiz: string): Promise<string> {
 }
 
 /** Crea la carpeta con `0o700` o comprueba que la que hay es una carpeta real, no un enlace. */
-async function carpetaPropia(ruta: string): Promise<void> {
+export async function carpetaPropia(ruta: string, quien = 'El rastro'): Promise<void> {
   let info = await lstatSiExiste(ruta);
   if (info === null) {
     try {
@@ -63,7 +63,7 @@ async function carpetaPropia(ruta: string): Promise<void> {
     info = await lstat(ruta);
   }
   if (info.isSymbolicLink() || !info.isDirectory()) {
-    throw new ErrorFabrica(`El rastro no sigue enlaces: ${ruta} no es una carpeta real`);
+    throw new ErrorFabrica(`${quien} no sigue enlaces: ${ruta} no es una carpeta real`);
   }
   await chmod(ruta, 0o700);
 }
@@ -80,7 +80,7 @@ async function escribirNuevo(ruta: string, texto: string): Promise<void> {
 }
 
 /** Reemplaza un archivo de forma atómica: temporal nuevo y `rename`, que no sigue enlaces. */
-async function escribirReemplazando(ruta: string, texto: string): Promise<void> {
+export async function escribirReemplazando(ruta: string, texto: string): Promise<void> {
   const temporal = path.join(path.dirname(ruta), `.${path.basename(ruta)}.${randomBytes(6).toString('hex')}.tmp`);
   try {
     await escribirNuevo(temporal, texto);

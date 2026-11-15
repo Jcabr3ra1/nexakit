@@ -86,7 +86,7 @@ export function register(on) {
     const veces = (b.errores.get(tipo) ?? 0) + 1;
     b.errores.set(tipo, veces);
     if (veces !== TOPE_MISMO_ERROR) return r;
-    await apuntar($, { tipo: 'repeticion' });
+    await apuntar($, { tipo: 'repeticion', clave: textoSeguro(tipo) });
     // Se devuelve la respuesta del motor (con su `ref`) y solo se añade la nota: un objeto rehecho sin `ref` se
     // revalida contra la forma de salida de Bash, y un error llega como texto, que esa forma rechaza.
     return {
