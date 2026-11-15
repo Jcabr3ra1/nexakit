@@ -422,7 +422,7 @@ async function toolkitCopy(dir, { tamper = false } = {}) {
   const pkg = JSON.parse(await fs.readFile(path.join(TOOLKIT_ROOT, 'package.json'), 'utf8'));
   await fs.mkdir(path.join(dir, 'bin'), { recursive: true });
   await fs.writeFile(path.join(dir, 'package.json'), JSON.stringify({ name: 'nexakit', version: pkg.version }));
-  await fs.writeFile(path.join(dir, 'bin/agent-toolkit-mcp.js'), '');
+  await fs.writeFile(path.join(dir, 'bin/nexakit-fabrica-mcp.js'), '');
   await fs.cp(path.join(TOOLKIT_ROOT, 'skills/frontend-design'), path.join(dir, 'skills/frontend-design'), { recursive: true });
   await fs.cp(path.join(TOOLKIT_ROOT, 'catalogs/skills/vercel-react-best-practices'), path.join(dir, 'catalogs/skills/vercel-react-best-practices'), { recursive: true });
   if (tamper) await fs.appendFile(path.join(dir, 'skills/frontend-design/SKILL.md'), '\nmodificado\n');

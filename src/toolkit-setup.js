@@ -44,7 +44,12 @@ const MCP_CLIENTS = ['codex', 'claude'];
 // touched. The last three are now covered by Superpowers (brainstorming/writing-plans, systematic-debugging and
 // test-driven-development), which is required. revision-cruzada merged into revisar when review became on demand.
 export const RETIRED_SKILLS = Object.freeze(['programar', 'estado', 'spec-driven-development', 'depurar', 'desarrollo-con-pruebas', 'revision-cruzada']);
-const MCP_SUFFIX = 'bin/agent-toolkit-mcp.js';
+const MCP_NAME = 'nexakit-fabrica';
+const MCP_SUFFIX = 'bin/nexakit-fabrica-mcp.js';
+// The MCP this one replaces: still recognized so it can be reported as to be removed. Its retirement and the
+// migration of whoever still runs it are a later step.
+const LEGACY_MCP_NAMES = ['agent-toolkit-workflow', 'agent-toolkit'];
+const LEGACY_MCP_SUFFIX = 'bin/agent-toolkit-mcp.js';
 const COMMANDS = { codex: 'codex', claude: 'claude', antigravity: 'agy' };
 export const globalSkillTarget = (home, client, name) => path.join(home, ...SKILL_HOMES[client], name);
 // Registry key of an MCP entry: it has no path of its own in the home folder.
@@ -125,8 +130,8 @@ async function parents(home, target, create = false) {
 export function registrationCommand(client, current, nodePath, entry) {
   const add =
     client === 'codex'
-      ? `codex mcp add agent-toolkit-workflow -- ${quote(nodePath)} ${quote(entry)}`
-      : `claude mcp add --scope user --transport stdio agent-toolkit-workflow -- ${quote(nodePath)} ${quote(entry)}`;
+      ? `codex mcp add ${MCP_NAME} -- ${quote(nodePath)} ${quote(entry)}`
+      : `claude mcp add --scope user --transport stdio ${MCP_NAME} -- ${quote(nodePath)} ${quote(entry)}`;
   if (current.state === 'falta') return add;
   // Moving or repairing an existing entry: remove it first under the name it has now.
   return `${client === 'codex' ? `codex mcp remove ${current.name}` : `claude mcp remove ${current.name} -s user`} && ${add}`;
@@ -294,11 +299,11 @@ export async function setupToolkit({
   }
 
   const obsolete = Object.entries(mcpStates)
-    .filter(([, state]) => state.name)
+    .filter(([, state]) => state.retirar)
     .map(([client, state]) => ({
       message: 'Ya no se usa; si quieres quitarlo:',
       command:
-        client === 'codex' ? `codex mcp remove ${state.name}` : `claude mcp remove ${state.name} -s user`,
+        client === 'codex' ? `codex mcp remove ${state.retirar}` : `claude mcp remove ${state.retirar} -s user`,
     }));
   const agentsPath = path.join(codexHome, 'agents');
   for (const name of await fs.readdir(agentsPath).catch(() => [])) {
@@ -485,8 +490,10 @@ async function boundedConfig(file) {
   if (!info.isFile() || info.isSymbolicLink() || info.size > 1_048_576) throw new Error('config');
   return fs.readFile(file);
 }
-// The entry is recognized by the script it runs (`…/bin/agent-toolkit-mcp.js` under `node`), then classified like
-// a link: installed only if that script exists in a root in use.
+// The entry is recognized by the script it runs (`…/bin/nexakit-fabrica-mcp.js` under `node`), then classified like
+// a link: installed only if that script exists in a root in use. The MCP it replaces (`agent-toolkit-workflow`,
+// `agent-toolkit`) is still found, but only to report it in `retirar`: it never counts as the installed one,
+// except when its root is dead, which `reparar` still needs to see.
 async function inspectMcp(client, home, codexHome, { activeRoots, isOwned }) {
   let servers;
   try {
@@ -501,13 +508,13 @@ async function inspectMcp(client, home, codexHome, { activeRoots, isOwned }) {
   } catch {
     return { state: 'unreadable' };
   }
-  for (const name of ['agent-toolkit-workflow', 'agent-toolkit']) {
+  const classify = async (name, suffix) => {
     const server = servers?.[name];
-    if (!server) continue;
+    if (!server) return null;
     if (server.enabled === false) return { state: 'disabled', name };
     const entry = Array.isArray(server.args)
       ? server.args.find(
-          (arg) => typeof arg === 'string' && arg.replaceAll('\\', '/').endsWith(`/${MCP_SUFFIX}`),
+          (arg) => typeof arg === 'string' && arg.replaceAll('\\', '/').endsWith(`/${suffix}`),
         )
       : undefined;
     const runsNode =
@@ -516,13 +523,22 @@ async function inspectMcp(client, home, codexHome, { activeRoots, isOwned }) {
     const { state, root } = await classifyReference({
       target: mcpRegistryTarget(client, name),
       literal: entry,
-      suffix: MCP_SUFFIX,
+      suffix,
       activeRoots,
       isOwned,
     });
     return { state, name, literal: entry, ...(root && { root }) };
+  };
+  let legacy = null;
+  for (const name of LEGACY_MCP_NAMES) {
+    legacy = await classify(name, LEGACY_MCP_SUFFIX);
+    if (legacy) break;
   }
-  return { state: 'falta' };
+  const retirar = legacy ? { retirar: legacy.name } : {};
+  const current = await classify(MCP_NAME, MCP_SUFFIX);
+  if (current) return { ...current, ...retirar };
+  if (legacy?.state === 'roto-ajeno') return { ...legacy, ...retirar };
+  return { state: 'falta', ...retirar };
 }
 async function findExecutable(name, environment, accept = () => true) {
   const extensions = IS_WINDOWS

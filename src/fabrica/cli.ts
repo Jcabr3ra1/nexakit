@@ -1,22 +1,21 @@
-import { execFile } from 'node:child_process';
-import { constants, lstatSync, openSync, readFileSync, closeSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { parseArgs, promisify, type ParseArgsOptionsConfig } from 'node:util';
-import { z } from 'zod';
-import { crearConectorAntigravity } from './conectores/antigravity.js';
-import { crearConectorCodex, type OpcionesConectorCodex } from './conectores/codex.js';
-import type { Conector } from './conectores/tipos.js';
-import { cargarConfig } from './config.js';
+import { parseArgs, type ParseArgsOptionsConfig } from 'node:util';
+import type { z } from 'zod';
 import { escaparMarkdown, escribirConsolidado, hallazgosDe } from './consolidar.js';
 import * as ejecutor from './ejecutor.js';
-import { aplicarCambios, calcularHuella, proponer, type CambioRecorrido, type Catalogos, type Recorrido } from './enrutador.js';
-import { ErrorFabrica } from './errores.js';
-import { IA, NombreEstacion } from './esquemas.js';
-import * as rastro from './rastro.js';
-
-const ejecutarArchivo = promisify(execFile);
+import type { CambioRecorrido, Recorrido } from './enrutador.js';
+import { ErrorEntorno, ErrorFabrica } from './errores.js';
+import {
+  EsquemaCambios,
+  limpiar,
+  lanzarAprobado,
+  leerSinEnlaces,
+  mensajeDe,
+  proponerEnRaiz,
+  raizDelRepo,
+} from './sesion.js';
 
 export interface IoCli {
   out: (texto: string) => unknown;
@@ -51,97 +50,14 @@ estado y resultado consultan un recorrido por su id; cancelar lo interrumpe (Ctr
 Códigos de salida: 0 bien, 1 fallo de estación o escritura detectada, 2 argumentos inválidos.
 `;
 
-const MENSAJE_SIN_PROPUESTA = 'No hay una propuesta con esa huella; vuelve a proponer';
 const NOTA_CLAUDE = 'la ejecuta la sesión de Claude';
 const SONDEO_MS = 1000;
 const MAX_BYTES_CAMBIOS = 1024 * 1024;
-const AGOTADO: unique symbol = Symbol('agotado');
 
 /** Argumentos inválidos: salida con código 2. */
 class ErrorUso extends Error {}
 
-/** Quita controles, secuencias de escape y marcas de dirección: el texto del repo o de un revisor no es de fiar. */
-function limpiar(texto: string): string {
-  return texto.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f‪-‮⁦-⁩]/gu, '');
-}
-
 const celda = (texto: string): string => escaparMarkdown(limpiar(texto));
-
-function mensajeDe(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function conTope<T>(promesa: Promise<T>, ms: number): Promise<T | typeof AGOTADO> {
-  let reloj: NodeJS.Timeout | undefined;
-  const tope = new Promise<typeof AGOTADO>((resolve) => {
-    reloj = setTimeout(() => resolve(AGOTADO), ms);
-  });
-  return Promise.race([promesa, tope]).finally(() => clearTimeout(reloj));
-}
-
-// ---------------------------------------------------------------------------------------------
-// Conectores
-
-type Conectores = Partial<Record<IA, Conector>>;
-
-/** `NEXAKIT_FABRICA_*`: `[orden, ...argsPrefijo]` en JSON, o la ruta de la orden. Sin valor, el ejecutable real. */
-function opcionesDeEntorno(entorno: NodeJS.ProcessEnv, variable: string): OpcionesConectorCodex {
-  const valor = entorno[variable];
-  if (valor === undefined || valor === '') return {};
-  if (!valor.startsWith('[')) return { orden: valor };
-  let lista: unknown;
-  try {
-    lista = JSON.parse(valor);
-  } catch {
-    throw new ErrorUso(`${variable} no es un JSON válido; usa ["orden", "argumento"...] o la ruta de la orden`);
-  }
-  if (!Array.isArray(lista) || !lista.every((x): x is string => typeof x === 'string') || lista[0] === undefined) {
-    throw new ErrorUso(`${variable} debe ser una lista de textos que empiece por la orden`);
-  }
-  const [orden, ...argsPrefijo] = lista as string[];
-  return { orden: orden as string, argsPrefijo };
-}
-
-/** Crea los conectores pedidos. Si uno no se puede crear, no entra en el resultado y se avisa. */
-async function crearConectores(ias: readonly IA[], entorno: NodeJS.ProcessEnv, avisar: (texto: string) => Promise<void>): Promise<Conectores> {
-  const conectores: Conectores = {};
-  for (const ia of ias) {
-    try {
-      if (ia === 'codex') {
-        conectores.codex = await crearConectorCodex(opcionesDeEntorno(entorno, 'NEXAKIT_FABRICA_CODEX'));
-      } else if (ia === 'antigravity') {
-        conectores.antigravity = await crearConectorAntigravity(opcionesDeEntorno(entorno, 'NEXAKIT_FABRICA_AGY'));
-      }
-    } catch (error) {
-      if (error instanceof ErrorUso) throw error;
-      await avisar(`${ia} no está disponible: ${limpiar(mensajeDe(error))}`);
-    }
-  }
-  return conectores;
-}
-
-async function cerrar(conectores: Conectores): Promise<void> {
-  await Promise.allSettled(
-    Object.values(conectores).map((c) => conTope(Promise.resolve().then(() => c.cerrar()), ejecutor.TOPE_CATALOGO_MS)),
-  );
-}
-
-/** Catálogos vivos con un tope de 30 s por IA. Una IA que falla queda sin catálogo y se avisa. */
-async function consultarCatalogos(conectores: Conectores, avisar: (texto: string) => Promise<void>): Promise<Catalogos> {
-  const catalogos: Catalogos = {};
-  await Promise.all(
-    (Object.entries(conectores) as Array<[IA, Conector]>).map(async ([ia, conector]) => {
-      try {
-        const catalogo = await conTope(Promise.resolve().then(() => conector.catalogo()), ejecutor.TOPE_CATALOGO_MS);
-        if (catalogo === AGOTADO) await avisar(`${ia} no respondió a tiempo; sus estaciones pasan al siguiente candidato`);
-        else catalogos[ia] = catalogo;
-      } catch (error) {
-        await avisar(`${ia} no está disponible: ${limpiar(mensajeDe(error))}`);
-      }
-    }),
-  );
-  return catalogos;
-}
 
 // ---------------------------------------------------------------------------------------------
 // Formato
@@ -187,58 +103,10 @@ function codigoSalida(e: ejecutor.EstadoRecorrido): number {
 // ---------------------------------------------------------------------------------------------
 // Propuesta guardada y cambios
 
-const Catalogo = z.array(z.object({ modelo: z.string(), esfuerzos: z.array(z.string()) }));
-const RecorridoGuardado = z.object({
-  huella: z.string(),
-  head: z.string(),
-  base: z.string(),
-  basePedida: z.string(),
-  diffSha256: z.string(),
-  foco: z.string().optional(),
-  estaciones: z.array(
-    z.object({
-      estacion: NombreEstacion,
-      ia: IA.nullable(),
-      modelo: z.string().nullable(),
-      esfuerzo: z.string().nullable(),
-      motivo: z.string(),
-      descartes: z.array(z.string()),
-      ordenesPermitidas: z.array(z.string()),
-      estado: z.enum(['propuesta', 'sin-modelo', 'omitida']),
-    }),
-  ),
-  coste: z.object({ llamadasExternas: z.number(), subagentesClaude: z.number() }),
-  catalogos: z.partialRecord(IA, Catalogo),
-});
-
-const Cambios = z.array(
-  z
-    .object({
-      estacion: z.string(),
-      quitar: z.literal(true).optional(),
-      ia: IA.optional(),
-      modelo: z.string().optional(),
-      esfuerzo: z.string().optional(),
-    })
-    .strict(),
-);
-
 function detalleZod(error: z.ZodError): string {
   return error.issues
     .map((p) => `campo «${p.path.length > 0 ? p.path.map(String).join('.') : '(raíz)'}»: ${p.message}`)
     .join('; ');
-}
-
-/** Propuesta guardada del repo, o `null` si no existe o no es legible. La huella la comprueba quien la usa. */
-function cargarPropuesta(home: string, repo: string): Recorrido | null {
-  let dato: unknown;
-  try {
-    dato = rastro.leerPropuesta(home, repo);
-  } catch {
-    return null;
-  }
-  const r = RecorridoGuardado.safeParse(dato);
-  return r.success ? (r.data as Recorrido) : null;
 }
 
 async function leerCambios(archivo: string): Promise<CambioRecorrido[]> {
@@ -255,7 +123,7 @@ async function leerCambios(archivo: string): Promise<CambioRecorrido[]> {
   } catch (error) {
     throw new ErrorUso(`El archivo de cambios no es un JSON válido: ${mensajeDe(error)}`);
   }
-  const r = Cambios.safeParse(dato);
+  const r = EsquemaCambios.safeParse(dato);
   if (!r.success) throw new ErrorUso(`El archivo de cambios no es válido: ${detalleZod(r.error)}`);
   return r.data;
 }
@@ -279,27 +147,9 @@ const aviso = (ctx: Contexto) => async (texto: string): Promise<void> => {
   await ctx.io.err(`Aviso: ${texto}\n`);
 };
 
-async function raizDelRepo(cwd: string): Promise<string> {
-  try {
-    const { stdout } = await ejecutarArchivo('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8' });
-    const raiz = stdout.trim();
-    return raiz === '' ? cwd : path.resolve(raiz);
-  } catch {
-    return cwd;
-  }
-}
-
 async function ordenProponer(ctx: Contexto, base: string, foco: string | undefined, json: boolean): Promise<number> {
   const raiz = await raizDelRepo(ctx.cwd);
-  const conectores = await crearConectores(['codex', 'antigravity'], ctx.entorno, aviso(ctx));
-  let catalogos: Catalogos;
-  try {
-    catalogos = await consultarCatalogos(conectores, aviso(ctx));
-  } finally {
-    await cerrar(conectores);
-  }
-  const recorrido = await proponer({ raiz, base, ...(foco === undefined ? {} : { foco }), catalogos });
-  await rastro.guardarPropuesta(ctx.home, await rastro.nombreRepo(raiz), recorrido);
+  const recorrido = await proponerEnRaiz({ raiz, base, foco, home: ctx.home, entorno: ctx.entorno, avisar: aviso(ctx) });
   if (json) await salida(ctx, JSON.stringify(recorrido, null, 2));
   else {
     await salida(ctx, tablaRecorrido(recorrido).join('\n'));
@@ -310,29 +160,23 @@ async function ordenProponer(ctx: Contexto, base: string, foco: string | undefin
 
 async function ordenLanzar(ctx: Contexto, huella: string, archivoCambios: string | undefined, json: boolean): Promise<number> {
   const raiz = await raizDelRepo(ctx.cwd);
-  const propuesta = cargarPropuesta(ctx.home, await rastro.nombreRepo(raiz));
-  // Antes de aplicar nada: `aplicarCambios` recalcula la huella, así que una propuesta editada a mano
-  // (órdenes añadidas, por ejemplo) pasaría con un cambio que no hace nada.
-  if (propuesta === null || propuesta.huella !== huella || calcularHuella(propuesta) !== propuesta.huella) {
-    throw new ErrorFabrica(MENSAJE_SIN_PROPUESTA);
-  }
   const cambios = archivoCambios === undefined ? [] : await leerCambios(archivoCambios);
-  // La huella del recorrido con los cambios ya aplicados es la que `lanzar` comprueba contra el diff.
-  const recorrido = cambios.length > 0 ? aplicarCambios(propuesta, cambios) : propuesta;
-  const config = await cargarConfig(raiz);
-
-  if (!json) {
-    // Lo que se va a ejecutar, con sus órdenes permitidas, queda a la vista antes de empezar.
-    await salida(ctx, tablaRecorrido(recorrido).join('\n'));
-    await salida(ctx, '');
-  }
-  const externas = new Set<IA>();
-  for (const e of recorrido.estaciones) {
-    if (e.estado === 'propuesta' && e.ia !== null && e.ia !== 'claude') externas.add(e.ia);
-  }
-  const conectores = await crearConectores([...externas], ctx.entorno, aviso(ctx));
+  const lanzamiento = await lanzarAprobado({
+    raiz,
+    huella,
+    cambios,
+    home: ctx.home,
+    entorno: ctx.entorno,
+    avisar: aviso(ctx),
+    antesDeLanzar: async (recorrido) => {
+      if (json) return;
+      // Lo que se va a ejecutar, con sus órdenes permitidas, queda a la vista antes de empezar.
+      await salida(ctx, tablaRecorrido(recorrido).join('\n'));
+      await salida(ctx, '');
+    },
+  });
+  const { id, recorrido } = lanzamiento;
   try {
-    const { id } = await ejecutor.lanzar(recorrido, { raiz, conectores, paralelismo: config.paralelismo, home: ctx.home });
     let cancelando: Promise<void> | undefined;
     const alInterrumpir = (): void => {
       // El segundo Ctrl+C termina el proceso aunque el cierre ordenado siga en curso.
@@ -361,8 +205,12 @@ async function ordenLanzar(ctx: Contexto, huella: string, archivoCambios: string
       await salida(ctx, `Consolidado: ${consolidado}`);
     }
     return codigoSalida(final);
+  } catch (error) {
+    // Si algo falla con el recorrido en marcha, se interrumpe en vez de dejarlo sin quien lo atienda.
+    await ejecutor.cancelar(id, ctx.home).catch(() => {});
+    throw error;
   } finally {
-    await cerrar(conectores);
+    await lanzamiento.terminado;
   }
 }
 
@@ -401,18 +249,6 @@ async function ordenEstado(ctx: Contexto, id: string, json: boolean): Promise<nu
   const e = ejecutor.estado(id, ctx.home);
   await salida(ctx, json ? JSON.stringify(e, null, 2) : lineasEstado(e).join('\n'));
   return 0;
-}
-
-/** Lee un archivo del rastro sin seguir enlaces; `null` si no existe o no es un archivo normal. */
-function leerSinEnlaces(archivo: string): string | null {
-  const info = lstatSync(archivo, { throwIfNoEntry: false });
-  if (info === undefined || !info.isFile()) return null;
-  const fd = openSync(archivo, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
-  try {
-    return readFileSync(fd, 'utf8');
-  } finally {
-    closeSync(fd);
-  }
 }
 
 async function ordenResultado(ctx: Contexto, id: string, json: boolean): Promise<number> {
@@ -512,7 +348,7 @@ export async function ejecutarCli(argv: string[], io: IoCli, opciones: OpcionesC
         return await ordenCancelar(ctx, exigir(valorTexto(valores, 'id'), '--id'));
     }
   } catch (error) {
-    if (error instanceof ErrorUso) {
+    if (error instanceof ErrorUso || error instanceof ErrorEntorno) {
       await io.err(`${error.message}\n\n${AYUDA}`);
       return 2;
     }

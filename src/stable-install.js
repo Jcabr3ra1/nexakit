@@ -81,8 +81,8 @@ export async function validatePackageRoot(root, version) {
   if (manifest?.name !== PACKAGE_NAME) fail('el paquete no es nexakit');
   if (manifest.version !== version) fail(`trae la versión ${manifest.version}`);
 
-  const mcp = await lstatOrNull(path.join(root, 'bin/agent-toolkit-mcp.js'));
-  if (!mcp?.isFile()) fail('falta bin/agent-toolkit-mcp.js');
+  const mcp = await lstatOrNull(path.join(root, 'bin/nexakit-fabrica-mcp.js'));
+  if (!mcp?.isFile()) fail('falta bin/nexakit-fabrica-mcp.js');
 
   for (const folder of ['skills', 'catalogs/skills']) {
     let entries;

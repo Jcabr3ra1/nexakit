@@ -13,7 +13,7 @@ export async function writeFakeInstall(prefix, { version = '9.9.9', name = 'nexa
   const modules = path.join(prefix, 'node_modules');
   const root = path.join(modules, 'nexakit');
   await write(path.join(root, 'package.json'), JSON.stringify({ name, version: broken === 'version' ? '0.0.1' : version }));
-  if (broken !== 'bin') await write(path.join(root, 'bin/agent-toolkit-mcp.js'), '');
+  if (broken !== 'bin') await write(path.join(root, 'bin/nexakit-fabrica-mcp.js'), '');
   for (const skill of skills) await write(path.join(root, 'skills', skill, 'SKILL.md'), 'x');
   await write(path.join(root, 'catalogs/skills/catalogada', broken === 'skill' ? 'LEEME.md' : 'SKILL.md'), 'x');
   if (broken !== 'dependencia') {

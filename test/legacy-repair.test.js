@@ -113,7 +113,7 @@ test('an MCP entry on the dead root is reported with the exact commands to move 
   assert.deepEqual(Object.keys(plan.mcp), ['claude']);
   const result = await applyLegacyRepair(plan, options);
   assert.deepEqual(result.mcpCommands, [
-    `claude mcp remove agent-toolkit-workflow -s user && claude mcp add --scope user --transport stdio agent-toolkit-workflow -- '${path.join(bin, 'node')}' '${path.join(f.toolkitRoot, 'bin/agent-toolkit-mcp.js')}'`
+    `claude mcp remove agent-toolkit-workflow -s user && claude mcp add --scope user --transport stdio nexakit-fabrica -- '${path.join(bin, 'node')}' '${path.join(f.toolkitRoot, 'bin/nexakit-fabrica-mcp.js')}'`
   ]);
   assert.equal(await fs.readFile(config, 'utf8'), before);
 });

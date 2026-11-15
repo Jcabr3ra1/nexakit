@@ -69,9 +69,9 @@ test('reuses a complete version without calling npm', async t => {
 test('a complete version that was damaged afterwards is reported, not touched', async t => {
   const f = await fixture(t), mod = await import(moduleUrl);
   await install(f, mod, fakeNpm());
-  await fs.rm(path.join(f.version('9.9.9'), 'node_modules/nexakit/bin/agent-toolkit-mcp.js'));
+  await fs.rm(path.join(f.version('9.9.9'), 'node_modules/nexakit/bin/nexakit-fabrica-mcp.js'));
   await assert.rejects(install(f, mod, () => { throw new Error('npm no debe llamarse'); }),
-    error => error.name === 'StableInstallError' && error.message.includes('agent-toolkit-mcp.js'));
+    error => error.name === 'StableInstallError' && error.message.includes('nexakit-fabrica-mcp.js'));
   assert.equal(await exists(path.join(f.version('9.9.9'), '.completa')), true);
 });
 
@@ -213,7 +213,7 @@ test('validatePackageRoot accepts a good install and names what is wrong with a 
   const f = await fixture(t), { validatePackageRoot } = await import(moduleUrl);
   const good = await writeFakeInstall(path.join(f.root, 'bueno'), { version: '1.2.3' });
   await validatePackageRoot(good, '1.2.3');
-  const reasons = { bin: /agent-toolkit-mcp\.js/u, dependencia: /dependencias/u, version: /0\.0\.1/u, skill: /SKILL\.md/u };
+  const reasons = { bin: /falta bin\/nexakit-fabrica-mcp\.js/u, dependencia: /dependencias/u, version: /0\.0\.1/u, skill: /SKILL\.md/u };
   for (const [broken, pattern] of Object.entries(reasons)) {
     const root = await writeFakeInstall(path.join(f.root, `malo-${broken}`), { version: '1.2.3', broken });
     await assert.rejects(validatePackageRoot(root, '1.2.3'), error => error.name === 'StableInstallError' && pattern.test(error.message), broken);

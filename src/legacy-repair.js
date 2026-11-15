@@ -57,7 +57,7 @@ export async function applyLegacyRepair(plan, {
 
     // The MCP entry is not rewritten here: its client owns that file, so only the exact commands are given.
     const mcpCommands = [];
-    const script = path.join(plan.activeRoot, 'bin/agent-toolkit-mcp.js');
+    const script = path.join(plan.activeRoot, 'bin/nexakit-fabrica-mcp.js');
     if (Object.keys(plan.mcp ?? {}).length && await exists(script)) {
       const nodePath = await resolveNodeExecutable(environment);
       for (const [client, current] of Object.entries(plan.mcp)) {

@@ -5,3 +5,11 @@ export class ErrorFabrica extends Error {
     this.name = 'ErrorFabrica';
   }
 }
+
+/** Configuración del entorno mal formada (por ejemplo `NEXAKIT_FABRICA_CODEX`): la persona debe corregirla. */
+export class ErrorEntorno extends ErrorFabrica {
+  constructor(mensaje: string, opciones?: ErrorOptions) {
+    super(mensaje, opciones);
+    this.name = 'ErrorEntorno';
+  }
+}
