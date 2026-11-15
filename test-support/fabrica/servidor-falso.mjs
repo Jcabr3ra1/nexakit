@@ -1,7 +1,12 @@
 // Servidor JSON-RPC falso por stdio (NDJSON) para probar a los conectores de la fábrica.
 // Uso: node test-support/fabrica/servidor-falso.mjs <guion.json>
 // El formato del guion está documentado en .superpowers/sdd/2026-11-14-fabrica-nucleo/tarea-3-report.md.
-import { appendFileSync, readFileSync } from 'node:fs';
+// Añadidos para ACP (tarea 5):
+// - `registroArgs`: ruta donde se guardan, como JSON, los argumentos que siguen al guion.
+// - `diferir: true` en un paso: no responde todavía; guarda el id de la petición para ese método.
+// - `responder: [{ metodo, resultado?, error? }]` en los efectos (pasos y `alResponder`): contesta la petición
+//   diferida de ese método. Va después de las notificaciones y peticiones del mismo efecto.
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
 const rutaGuion = process.argv[2];
@@ -15,8 +20,10 @@ if (process.argv[3] === '--version') {
   process.stdout.write(`${guion.version ?? 'servidor-falso 0.0.0'}\n`);
   process.exit(0);
 }
+if (guion.registroArgs) writeFileSync(guion.registroArgs, JSON.stringify(process.argv.slice(3)));
 const metodos = guion.metodos ?? {};
 const contadores = new Map();
+const diferidas = new Map();
 let siguientePeticion = 1;
 
 function escribir(texto) {
@@ -54,6 +61,14 @@ async function ejecutarEfectos(paso) {
     if (p.retrasoMs) await pausa(p.retrasoMs);
     await enviar({ id: p.id ?? `srv-${siguientePeticion++}`, method: p.metodo, params: p.params });
   }
+  for (const r of paso.responder ?? []) {
+    if (r.retrasoMs) await pausa(r.retrasoMs);
+    const id = diferidas.get(r.metodo);
+    if (id === undefined) continue;
+    diferidas.delete(r.metodo);
+    if (r.error) await enviar({ id, error: r.error });
+    else await enviar({ id, result: r.resultado ?? null });
+  }
   if (typeof paso.salir === 'number') process.exit(paso.salir);
 }
 
@@ -70,7 +85,8 @@ async function atender(mensaje) {
     if (paso.retrasoMs) await pausa(paso.retrasoMs);
     // El ruido y la salida de error van antes de la respuesta; las notificaciones y peticiones, después.
     for (const linea of paso.ruido ?? []) await escribir(`${linea}\n`);
-    if (tienePeticion && !paso.sinRespuesta) {
+    if (tienePeticion && paso.diferir) diferidas.set(mensaje.method, mensaje.id);
+    else if (tienePeticion && !paso.sinRespuesta) {
       if (paso.error) await enviar({ id: mensaje.id, error: paso.error });
       else await enviar({ id: mensaje.id, result: paso.resultado ?? null });
     }

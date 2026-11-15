@@ -30,6 +30,7 @@
     "node": ">=24"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "^2.7.0",
     "@modelcontextprotocol/client": "^2.4.0",
     "@modelcontextprotocol/server": "^2.4.0",
     "@modelcontextprotocol/server-filesystem": "2.3.0",

@@ -1,0 +1,163 @@
+{
+  "metodos": {
+    "initialize": {
+      "resultado": {
+        "protocolVersion": 1,
+        "agentCapabilities": {
+          "loadSession": true,
+          "promptCapabilities": {
+            "image": true,
+            "audio": false,
+            "embeddedContext": true
+          },
+          "sessionCapabilities": {
+            "close": {}
+          }
+        },
+        "agentInfo": {
+          "name": "agy-falso",
+          "version": "0.0.0"
+        },
+        "authMethods": []
+      }
+    },
+    "session/new": {
+      "resultado": {
+        "sessionId": "ses-1",
+        "models": {
+          "currentModelId": "gemini-4-argon-medium",
+          "availableModels": [
+            {
+              "modelId": "gemini-4-argon-medium",
+              "name": "Gemini 4 Argon (Medium)"
+            },
+            {
+              "modelId": "gemini-4-argon-high",
+              "name": "Gemini 4 Argon (High)"
+            },
+            {
+              "modelId": "gemini-4-hydrogen-xhigh",
+              "name": "Gemini 4 Hydrogen (XHigh)"
+            },
+            {
+              "modelId": "gemini-3.8-flash-low",
+              "name": "Gemini 3.8 Flash (Low)"
+            },
+            {
+              "modelId": "gemini-pro-orchestrator-g1-pro",
+              "name": "Orchestrator (Argon)"
+            }
+          ]
+        },
+        "modes": {
+          "currentModeId": "default",
+          "availableModes": [
+            {
+              "id": "default",
+              "name": "Default"
+            },
+            {
+              "id": "accept-edits",
+              "name": "Accept edits"
+            },
+            {
+              "id": "auto",
+              "name": "Auto"
+            },
+            {
+              "id": "plan",
+              "name": "Plan"
+            }
+          ]
+        },
+        "configOptions": [
+          {
+            "id": "mode",
+            "name": "Mode",
+            "category": "mode",
+            "type": "select",
+            "currentValue": "default",
+            "options": [
+              {
+                "value": "default",
+                "name": "Default"
+              },
+              {
+                "value": "accept-edits",
+                "name": "Accept edits"
+              },
+              {
+                "value": "auto",
+                "name": "Auto"
+              },
+              {
+                "value": "plan",
+                "name": "Plan"
+              }
+            ]
+          }
+        ]
+      },
+      "notificaciones": [
+        {
+          "metodo": "session/update",
+          "params": {
+            "sessionId": "ses-1",
+            "update": {
+              "sessionUpdate": "available_commands_update",
+              "availableCommands": [
+                {
+                  "name": "teamwork",
+                  "description": "Equipo"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "session/set_model": {
+      "resultado": {}
+    },
+    "session/close": {
+      "resultado": {}
+    },
+    "session/prompt": {
+      "diferir": true,
+      "notificaciones": [
+        {
+          "metodo": "session/update",
+          "params": {
+            "sessionId": "ses-1",
+            "update": {
+              "sessionUpdate": "usage_update",
+              "used": 900,
+              "size": 1048576
+            }
+          }
+        },
+        {
+          "metodo": "session/update",
+          "params": {
+            "sessionId": "ses-1",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "content": {
+                "type": "text",
+                "text": "{\"hallazgos\": \"no es una lista\"}"
+              }
+            }
+          }
+        }
+      ],
+      "responder": [
+        {
+          "metodo": "session/prompt",
+          "resultado": {
+            "stopReason": "end_turn"
+          }
+        }
+      ]
+    }
+  }
+}
