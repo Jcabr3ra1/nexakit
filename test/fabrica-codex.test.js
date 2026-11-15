@@ -194,7 +194,7 @@ test('solo se reconoce un shell por su nombre o por su ruta en una carpeta del s
   assert.equal(esShellDelSistema('C:\\Windows\\System32\\bash.exe', 'win32', 'C:\\Windows'), true);
   assert.equal(esShellDelSistema('c:\\windows\\system32\\BASH.EXE', 'win32', 'C:\\Windows'), true);
   assert.equal(esShellDelSistema('C:\\Users\\x\\bash.exe', 'win32', 'C:\\Windows'), false);
-  assert.equal(esShellDelSistema('C:\\Windows\\System32\\bash.exe', 'win32', undefined), false);
+  assert.equal(esShellDelSistema('C:\\Windows\\System32\\bash.exe', 'win32', ''), false);
   assert.equal(esShellDelSistema('/bin/bash', 'win32', 'C:\\Windows'), false);
   assert.equal(ordenPermitida(['./tools/bash', '-lc', 'npm test'], ['npm test']), false);
 });

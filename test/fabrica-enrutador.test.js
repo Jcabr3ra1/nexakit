@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir, devNull } from 'node:os';
+import { tmpdir } from 'node:os';
+import { gitConfigGlobalVacio } from '../test-support/git-aislado.js';
 import path from 'node:path';
 import {
   proponer,
@@ -13,7 +14,7 @@ import {
 } from '../dist/fabrica/enrutador.js';
 import { ErrorFabrica } from '../dist/fabrica/errores.js';
 
-process.env.GIT_CONFIG_GLOBAL = devNull;
+process.env.GIT_CONFIG_GLOBAL = gitConfigGlobalVacio;
 process.env.GIT_CONFIG_NOSYSTEM = '1';
 process.env.GIT_AUTHOR_NAME = process.env.GIT_COMMITTER_NAME = 'Prueba';
 process.env.GIT_AUTHOR_EMAIL = process.env.GIT_COMMITTER_EMAIL = 'prueba@example.com';

@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir, devNull } from 'node:os';
+import { tmpdir } from 'node:os';
+import { gitConfigGlobalVacio } from '../test-support/git-aislado.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
@@ -30,7 +31,7 @@ function temporal(prefijo) {
 }
 
 const GIT_ENTORNO = {
-  GIT_CONFIG_GLOBAL: devNull,
+  GIT_CONFIG_GLOBAL: gitConfigGlobalVacio,
   GIT_CONFIG_NOSYSTEM: '1',
   GIT_AUTHOR_NAME: 'Prueba',
   GIT_COMMITTER_NAME: 'Prueba',

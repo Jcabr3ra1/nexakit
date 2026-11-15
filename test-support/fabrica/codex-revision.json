@@ -205,7 +205,7 @@
             "startedAtMs": 0,
             "kind": "command",
             "environmentId": null,
-            "command": "/bin/zsh -lc 'npm test'"
+            "command": "zsh -lc 'npm test'"
           },
           "id": "srv-7"
         }
@@ -222,7 +222,7 @@
             "startedAtMs": 0,
             "kind": "command",
             "environmentId": null,
-            "command": "/bin/zsh -lc 'npm test; rm -rf x'"
+            "command": "zsh -lc 'npm test; rm -rf x'"
           },
           "id": "srv-8"
         }
@@ -348,7 +348,7 @@
             "startedAtMs": 0,
             "kind": "command",
             "environmentId": null,
-            "command": "/bin/zsh -lc 'npm\ntest'"
+            "command": "zsh -lc 'npm\ntest'"
           },
           "id": "srv-15"
         }
