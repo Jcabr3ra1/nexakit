@@ -7,7 +7,8 @@ import { escribirConsolidado, hallazgosDe } from './consolidar.js';
 import * as ejecutor from './ejecutor.js';
 import { ErrorEntorno, ErrorFabrica } from './errores.js';
 import { Hallazgo } from './esquemas.js';
-import { EsquemaCambios, lanzarAprobado, leerSinEnlaces, limpiar, mensajeDe, proponerEnRaiz, raizDelRepo } from './sesion.js';
+import * as rastro from './rastro.js';
+import { EsquemaCambios, lanzarAprobado, type Lanzamiento, leerSinEnlaces, limpiar, mensajeDe, proponerEnRaiz, raizDelRepo } from './sesion.js';
 
 export const NOMBRE_SERVIDOR = 'nexakit-fabrica';
 const VERSION_SERVIDOR = '0.1.0';
@@ -22,6 +23,8 @@ export const INSTRUCCIONES = [
   'No sondees en bucle: consulta el estado cuando la persona lo pida o cuando termines tus propias estaciones.',
   'Todas las herramientas trabajan sobre el repo del directorio de trabajo del servidor; ninguna acepta una ruta.',
 ].join(' ');
+
+const MENSAJE_OCUPADO = 'Ya hay un recorrido en curso; espera a que termine o cancélalo';
 
 const AVISO_RAIZ = 'El repo es el del directorio de trabajo del servidor; esta herramienta no acepta una raíz.';
 
@@ -60,6 +63,33 @@ async function invocar(operacion: () => Promise<unknown>): Promise<CallToolResul
   }
 }
 
+const RecorridoGuardado = z.object({
+  estaciones: z.array(z.object({ estacion: z.string(), ia: z.string().nullable(), estado: z.string() })),
+});
+
+/** Estaciones del recorrido que la sesión de Claude debe atender: las propuestas con `ia === 'claude'`. */
+function estacionesDeClaude(dir: string): string[] {
+  let dato: unknown;
+  try {
+    dato = rastro.leerRecorrido(dir);
+  } catch {
+    dato = null;
+  }
+  const r = RecorridoGuardado.safeParse(dato);
+  if (!r.success) throw new ErrorFabrica('No se pudo leer el recorrido guardado en el rastro');
+  return r.data.estaciones.filter((x) => x.ia === 'claude' && x.estado === 'propuesta').map((x) => x.estacion);
+}
+
+/** Hallazgos de Claude que ya se pasaron a este recorrido; una lista vacía si no hay o no son válidos. */
+function hallazgosGuardados(dir: string): Hallazgo[] {
+  try {
+    const r = z.array(Hallazgo).safeParse(rastro.leerHallazgosClaude(dir));
+    return r.success ? r.data : [];
+  } catch {
+    return [];
+  }
+}
+
 /** Crea el servidor MCP de la fábrica, sin conectarlo a ningún transporte. */
 export function crearServidorFabrica(opciones: OpcionesServidorFabrica = {}): ServidorFabrica {
   const home = opciones.homeDirectory ?? os.homedir();
@@ -68,6 +98,47 @@ export function crearServidorFabrica(opciones: OpcionesServidorFabrica = {}): Se
   const registrar = opciones.avisar ?? ((t: string) => void process.stderr.write(`${NOMBRE_SERVIDOR}: ${limpiar(t)}\n`));
   const enCurso = new Map<string, Promise<void>>();
   let cerrado = false;
+  // Un solo recorrido a la vez: se reserva de forma síncrona al empezar a lanzar y se libera cuando
+  // el recorrido termina y sus conectores se cierran, así el tope de estaciones externas no se supera.
+  let ocupado = false;
+  // El lanzamiento que está a medias; el cierre espera a que acabe para no dejar un recorrido sin atender.
+  let enVuelo: Promise<unknown> | null = null;
+
+  async function lanzar(huella: string, cambios: z.infer<typeof EsquemaCambios> | undefined): Promise<{ id: string }> {
+    // Sin ningún await antes de la reserva: dos llamadas simultáneas no pueden pasar las dos.
+    if (cerrado) throw new ErrorFabrica('El servidor se está cerrando; no se lanzan más recorridos');
+    if (ocupado) throw new ErrorFabrica(MENSAJE_OCUPADO);
+    ocupado = true;
+    let lanzamiento: Lanzamiento;
+    try {
+      lanzamiento = await lanzarAprobado({
+        raiz: await raizDelRepo(cwd()),
+        huella,
+        cambios,
+        home,
+        entorno,
+        avisar: async (aviso) => {
+          registrar(aviso);
+        },
+      });
+    } catch (error) {
+      ocupado = false;
+      throw error;
+    }
+    const { id, terminado } = lanzamiento;
+    enCurso.set(id, terminado);
+    void terminado.then(() => {
+      enCurso.delete(id);
+      ocupado = false;
+    });
+    if (cerrado) {
+      // El servidor se cerró mientras se lanzaba: este recorrido no tiene a nadie que lo atienda.
+      await ejecutor.cancelar(id, home).catch(() => {});
+      await terminado;
+      throw new ErrorFabrica('El servidor se está cerrando; el recorrido se canceló');
+    }
+    return { id };
+  }
 
   const server = new McpServer({ name: NOMBRE_SERVIDOR, version: VERSION_SERVIDOR }, { instructions: INSTRUCCIONES });
 
@@ -101,7 +172,7 @@ export function crearServidorFabrica(opciones: OpcionesServidorFabrica = {}): Se
   server.registerTool(
     'fabrica_lanzar',
     {
-      description: `Lanza el recorrido de la última propuesta si su huella coincide y el diff sigue siendo el mismo. Hazlo solo tras la aprobación explícita de la persona. Devuelve { id } sin esperar: el recorrido corre dentro de este servidor. Con cambios puedes quitar estaciones o cambiar IA, modelo y esfuerzo antes de lanzar. ${AVISO_RAIZ}`,
+      description: `Lanza el recorrido de la última propuesta si su huella coincide y el diff sigue siendo el mismo. Hazlo solo tras la aprobación explícita de la persona. Devuelve { id } sin esperar: el recorrido corre dentro de este servidor. Solo hay un recorrido a la vez: si ya hay uno en curso, da error hasta que termine o lo canceles. Con cambios puedes quitar estaciones o cambiar IA, modelo y esfuerzo antes de lanzar. ${AVISO_RAIZ}`,
       inputSchema: z.object({
         huella: z.string().min(1).describe('Huella del recorrido que la persona aprobó'),
         cambios: EsquemaCambios.optional().describe('Lista de { estacion, quitar?, ia?, modelo?, esfuerzo? } que la persona pidió'),
@@ -110,20 +181,13 @@ export function crearServidorFabrica(opciones: OpcionesServidorFabrica = {}): Se
     },
     ({ huella, cambios }) =>
       invocar(async () => {
-        if (cerrado) throw new ErrorFabrica('El servidor se está cerrando; no se lanzan más recorridos');
-        const lanzamiento = await lanzarAprobado({
-          raiz: await raizDelRepo(cwd()),
-          huella,
-          cambios,
-          home,
-          entorno,
-          avisar: async (aviso) => {
-            registrar(aviso);
-          },
-        });
-        enCurso.set(lanzamiento.id, lanzamiento.terminado);
-        void lanzamiento.terminado.then(() => enCurso.delete(lanzamiento.id));
-        return { id: lanzamiento.id };
+        const lanzamiento = lanzar(huella, cambios);
+        enVuelo = lanzamiento;
+        try {
+          return await lanzamiento;
+        } finally {
+          if (enVuelo === lanzamiento) enVuelo = null;
+        }
       }),
   );
 
@@ -141,7 +205,7 @@ export function crearServidorFabrica(opciones: OpcionesServidorFabrica = {}): Se
     'fabrica_resultado',
     {
       description:
-        'Hallazgos consolidados de un recorrido terminado y la ruta de su consolidado.md. Las estaciones de Claude las lanzas tú como subagentes: pasa en hallazgosClaude todos sus hallazgos (cada llamada con hallazgos regenera el consolidado con ellos). Si el recorrido sigue en curso, devuelve un error.',
+        'Hallazgos consolidados de un recorrido terminado y la ruta de su consolidado.md. Las estaciones de Claude las lanzas tú como subagentes: pasa en hallazgosClaude todos sus hallazgos, solo de las estaciones de Claude de este recorrido (cada llamada con hallazgos sustituye a los anteriores, los guarda en el rastro y regenera el consolidado; sin hallazgosClaude se reutilizan los guardados). Si el recorrido sigue en curso, devuelve un error.',
       inputSchema: z.object({
         id: z.string().min(1).describe('Id devuelto por fabrica_lanzar'),
         hallazgosClaude: z.array(Hallazgo).max(MAX_HALLAZGOS_CLAUDE).optional().describe('Hallazgos de las estaciones que lanzaste tú como subagentes'),
@@ -154,12 +218,25 @@ export function crearServidorFabrica(opciones: OpcionesServidorFabrica = {}): Se
         if (e.fase === 'en-curso') {
           throw new ErrorFabrica(`El recorrido sigue en curso (${id}); consulta fabrica_estado y vuelve a pedir el resultado cuando termine`);
         }
-        let consolidado = path.join(e.dir, 'consolidado.md');
-        // Sin hallazgos nuevos se conserva el consolidado ya escrito, que puede incluir los de una llamada anterior.
-        if (hallazgosClaude !== undefined || leerSinEnlaces(consolidado) === null) {
-          consolidado = await escribirConsolidado(e, hallazgosClaude);
+        let claude: Hallazgo[];
+        if (hallazgosClaude === undefined) claude = hallazgosGuardados(e.dir);
+        else {
+          const permitidas = estacionesDeClaude(e.dir);
+          const ajenas = [...new Set(hallazgosClaude.map((h) => h.estacion).filter((x) => !permitidas.includes(x)))];
+          if (ajenas.length > 0) {
+            throw new ErrorFabrica(
+              `Solo se aceptan hallazgos de las estaciones de Claude de este recorrido (${permitidas.join(', ') || 'ninguna'}); no se aceptan los de: ${ajenas.join(', ')}`,
+            );
+          }
+          await rastro.guardarHallazgosClaude(e.dir, hallazgosClaude);
+          claude = hallazgosClaude;
         }
-        return { id: e.id, fase: e.fase, consolidado, hallazgos: hallazgosDe(e, hallazgosClaude) };
+        let consolidado = path.join(e.dir, 'consolidado.md');
+        // Sin hallazgos nuevos se conserva el consolidado ya escrito, que incluye los de la llamada anterior.
+        if (hallazgosClaude !== undefined || leerSinEnlaces(consolidado) === null) {
+          consolidado = await escribirConsolidado(e, claude);
+        }
+        return { id: e.id, fase: e.fase, consolidado, hallazgos: hallazgosDe(e, claude) };
       }),
   );
 
@@ -183,6 +260,7 @@ export function crearServidorFabrica(opciones: OpcionesServidorFabrica = {}): Se
 
   async function detener(): Promise<void> {
     cerrado = true;
+    await enVuelo?.catch(() => {});
     const pendientes = [...enCurso.entries()];
     await Promise.allSettled(pendientes.map(([id]) => ejecutor.cancelar(id, home)));
     await Promise.allSettled(pendientes.map(([, terminado]) => terminado));

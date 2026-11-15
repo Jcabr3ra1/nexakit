@@ -189,6 +189,38 @@ export function leerEstacion(dir: string, estacion: NombreEstacion): { encargo?:
   }
 }
 
+/** JSON de un archivo del recorrido, sin seguir enlaces. `null` si no existe o no es un archivo normal; lanza si no es JSON. */
+function leerJsonDelRecorrido(dir: string, nombre: string): unknown {
+  const archivo = path.join(dir, nombre);
+  const info = lstatSync(archivo, { throwIfNoEntry: false });
+  if (info === undefined || !info.isFile()) return null;
+  const fd = openSync(archivo, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  try {
+    return JSON.parse(readFileSync(fd, 'utf8')) as unknown;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** Lee `recorrido.json` de un recorrido, sin seguir enlaces. `null` si no existe. */
+export function leerRecorrido(dir: string): unknown {
+  return leerJsonDelRecorrido(dir, 'recorrido.json');
+}
+
+/** Guarda en `claude.json` los hallazgos que la sesión de Claude aportó al recorrido (`0o600`, sin seguir enlaces). */
+export async function guardarHallazgosClaude(dir: string, hallazgos: unknown): Promise<void> {
+  const ruta = path.join(dir, 'claude.json');
+  if (lstatSync(ruta, { throwIfNoEntry: false })?.isSymbolicLink()) {
+    throw new ErrorFabrica('El rastro no sigue enlaces: claude.json es un enlace');
+  }
+  await escribirReemplazando(ruta, json(hallazgos));
+}
+
+/** Lee `claude.json`, sin seguir enlaces. `null` si no existe; lanza si no es JSON. */
+export function leerHallazgosClaude(dir: string): unknown {
+  return leerJsonDelRecorrido(dir, 'claude.json');
+}
+
 /** Guarda `consolidado.md` con `0o600`, con un temporal y `rename` para no seguir enlaces. Devuelve la ruta. */
 export async function guardarConsolidado(dir: string, texto: string): Promise<string> {
   const ruta = path.join(dir, 'consolidado.md');

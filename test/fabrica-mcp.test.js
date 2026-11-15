@@ -1,12 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir, devNull } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Client } from '@modelcontextprotocol/client';
+import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { crearServidorFabrica } from '../dist/fabrica/mcp.js';
 import { registrationCommand } from '../src/toolkit-setup.js';
 
 const ENTRADA = fileURLToPath(new URL('../bin/nexakit-fabrica-mcp.js', import.meta.url));
@@ -214,7 +215,7 @@ test('fabrica_lanzar rechaza una propuesta alterada a mano antes de aplicar camb
 });
 
 function readdirUnico(dir) {
-  const nombres = execFileSync('ls', [dir], { encoding: 'utf8' }).split('\n').filter(Boolean);
+  const nombres = readdirSync(dir);
   assert.equal(nombres.length, 1, nombres.join(','));
   return nombres[0];
 }
@@ -279,6 +280,20 @@ test('fabrica_resultado regenera el consolidado con los hallazgos de Claude y va
   const sin = datos(await llamar(cliente, 'fabrica_resultado', { id }));
   assert.equal(sin.consolidado, cuerpo.consolidado);
   assert.match(readFileSync(sin.consolidado, 'utf8'), /Constante A sin uso/u);
+
+  // Se guardan en el rastro con permisos privados y se reutilizan sin volver a pasarlos.
+  const guardados = path.join(path.dirname(cuerpo.consolidado), 'claude.json');
+  assert.deepEqual(JSON.parse(readFileSync(guardados, 'utf8')), [hallazgoClaude]);
+  if (process.platform !== 'win32') assert.equal(statSync(guardados).mode & 0o777, 0o600);
+  assert.equal(sin.hallazgos.length, 2);
+  assert.ok(sin.hallazgos.some((h) => h.estaciones.includes('codigo') && h.hallazgo === hallazgoClaude.hallazgo));
+
+  // Solo se aceptan hallazgos de las estaciones de Claude del recorrido: aquí «pruebas» es de Codex.
+  const ajeno = await llamar(cliente, 'fabrica_resultado', { id, hallazgosClaude: [{ ...hallazgoClaude, estacion: 'pruebas' }] });
+  assert.equal(ajeno.isError, true);
+  assert.match(ajeno.texto, /pruebas/u);
+  assert.match(ajeno.texto, /estaciones de Claude/u);
+  assert.deepEqual(JSON.parse(readFileSync(guardados, 'utf8')), [hallazgoClaude], 'un rechazo no toca lo guardado');
 
   const invalido = await llamar(cliente, 'fabrica_resultado', { id, hallazgosClaude: [{ ...hallazgoClaude, gravedad: 'enorme' }] });
   assert.equal(invalido.isError, true);
@@ -348,6 +363,7 @@ for (const cierre of ['SIGTERM', 'stdin']) {
     assert.ok(conectoresVivos(e.guiones).length > 0, 'hay un conector vivo mientras corre el recorrido');
 
     const salida = new Promise((resolver) => transporte.onclose = resolver);
+    const inicio = Date.now();
     if (cierre === 'SIGTERM') process.kill(pid, 'SIGTERM');
     else await cliente.close();
     await salida;
@@ -359,6 +375,8 @@ for (const cierre of ['SIGTERM', 'stdin']) {
         return true;
       }
     }, 'el servidor termina');
+    // El cliente MCP envía SIGTERM a los 2 s si el servidor sigue vivo: salir antes prueba que bastó cerrar stdin.
+    if (cierre === 'stdin') assert.ok(Date.now() - inicio < 2000, `el servidor tardó ${Date.now() - inicio} ms en salir al cerrar stdin`);
 
     const dir = path.join(e.home, '.nexakit', 'fabrica', readdirUnico(path.join(e.home, '.nexakit', 'fabrica')), id);
     const estado = JSON.parse(readFileSync(path.join(dir, 'estado.json'), 'utf8'));
@@ -395,4 +413,62 @@ test('el instalador registra nexakit-fabrica, no el MCP antiguo', () => {
   assert.ok(codex.includes('codex mcp add nexakit-fabrica'), codex);
   // Reparar quita la entrada que haya hoy, con el nombre que tenga, y añade la nueva.
   assert.match(registrationCommand('claude', { state: 'efimero', name: 'agent-toolkit-workflow' }, nodo, entrada), /^claude mcp remove agent-toolkit-workflow -s user && claude mcp add .* nexakit-fabrica /u);
+});
+
+test('solo hay un recorrido a la vez: dos fabrica_lanzar simultáneos no lanzan dos', async () => {
+  const e = escenario({ codex: guionCodexLento() });
+  const { cliente } = await conectar(e);
+  const propuesta = await proponer(cliente);
+  const [a, b] = await Promise.all([
+    llamar(cliente, 'fabrica_lanzar', { huella: propuesta.huella }),
+    llamar(cliente, 'fabrica_lanzar', { huella: propuesta.huella }),
+  ]);
+  const aceptadas = [a, b].filter((r) => !r.isError);
+  const rechazadas = [a, b].filter((r) => r.isError);
+  assert.equal(aceptadas.length, 1, `${a.texto} | ${b.texto}`);
+  assert.equal(rechazadas.length, 1);
+  assert.equal(rechazadas[0].texto, 'Ya hay un recorrido en curso; espera a que termine o cancélalo');
+  const { id } = datos(aceptadas[0]);
+  const base = path.join(e.home, '.nexakit', 'fabrica', readdirUnico(path.join(e.home, '.nexakit', 'fabrica')));
+  assert.equal(readdirSync(base).filter((n) => n.startsWith('fab-')).length, 1, 'solo se creó un rastro');
+
+  // Con uno en curso sigue rechazando, aunque pase tiempo; al cancelarlo se libera.
+  const otra = await llamar(cliente, 'fabrica_lanzar', { huella: propuesta.huella });
+  assert.equal(otra.isError, true);
+  assert.equal((await llamar(cliente, 'fabrica_cancelar', { id })).isError, undefined);
+  const nuevo = await hasta(async () => {
+    const r = await llamar(cliente, 'fabrica_lanzar', { huella: propuesta.huella });
+    return r.isError ? null : r;
+  }, 'tras terminar se puede lanzar otro');
+  assert.equal((await llamar(cliente, 'fabrica_cancelar', { id: datos(nuevo).id })).isError, undefined);
+});
+
+test('si el servidor se cierra mientras se lanza, el recorrido nuevo se cancela y no queda ningún conector', { skip: !posix }, async () => {
+  const e = escenario({ codex: guionCodexLento() });
+  const servidor = crearServidorFabrica({ homeDirectory: e.home, cwd: e.dir, environment: { ...process.env, ...GIT_ENTORNO, ...e.env }, avisar: () => {} });
+  const [extremoCliente, extremoServidor] = InMemoryTransport.createLinkedPair();
+  await servidor.server.connect(extremoServidor);
+  const cliente = new Client({ name: 'prueba', version: '0.0.0' }, { capabilities: {} });
+  clientes.push(cliente);
+  await cliente.connect(extremoCliente);
+
+  const propuesta = await proponer(cliente);
+  await hasta(() => conectoresVivos(e.guiones).length === 0, 'los conectores de la propuesta se cierran');
+  const pendiente = llamar(cliente, 'fabrica_lanzar', { huella: propuesta.huella });
+  // El conector ya existe: el lanzamiento está a medias cuando el servidor se cierra.
+  await hasta(() => conectoresVivos(e.guiones).length > 0, 'el lanzamiento crea sus conectores');
+  await servidor.detener();
+
+  const respuesta = await pendiente;
+  const base = path.join(e.home, '.nexakit', 'fabrica', readdirUnico(path.join(e.home, '.nexakit', 'fabrica')));
+  const rastros = readdirSync(base).filter((n) => n.startsWith('fab-'));
+  for (const id of rastros) {
+    const estado = JSON.parse(readFileSync(path.join(base, id, 'estado.json'), 'utf8'));
+    assert.equal(estado.fase, 'cancelado', `${id}: ${respuesta.texto}`);
+  }
+  if (rastros.length === 0) assert.equal(respuesta.isError, true);
+  await hasta(() => conectoresVivos(e.guiones).length === 0, 'no queda ningún conector');
+  const otra = await llamar(cliente, 'fabrica_lanzar', { huella: propuesta.huella });
+  assert.equal(otra.isError, true);
+  assert.match(otra.texto, /cerrando/u);
 });
