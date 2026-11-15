@@ -30,6 +30,7 @@ import {
 import { planStableCommand } from './stable-command.js';
 import { inspectMods } from './mods.js';
 import { inspectSuperpowers } from './superpowers.js';
+import { teamMarks } from './codex-team.js';
 import { compareVersions, readActualVersion } from './stable-install.js';
 import {
   TOOLKIT_ROOT,
@@ -263,6 +264,9 @@ export async function gatherSetupState({
   }
 
   const reviewInstructions = await planReviewInstructions({ homeDirectory, environment, codexHome });
+  // Migration of an older install: the old MCP per agent, and Codex profiles that still carry an old mark.
+  const mcpMigrations = setup.mcp.migrations;
+  const codexAgents = await teamMarks({ codexHome });
   const superpowers = await inspectSuperpowers({ agentsFound, runCommand, environment });
   const mods = await inspectMods({ agentsFound, runCommand, environment, toolkitRoot });
   return {
@@ -271,6 +275,8 @@ export async function gatherSetupState({
     generators:await loadGeneratorsCatalog(),
     cleanProject:await readCleanProjectAnswers(project.root),
     reviewInstructions,
+    mcpMigrations,
+    codexAgents,
     superpowers,
     mods,
     homeDirectory,

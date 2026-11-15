@@ -35,6 +35,18 @@ Si una tarea larga queda a medias —pausa, cambio de IA, bloqueo o cierre— es
 ${END}`;
 
 const hash = (text) => createHash('sha256').update(text).digest('hex');
+// SHA-256 of every block earlier versions of nexakit installed (from the history of this file), newest first. A block
+// that matches one of them was written by nexakit even without its record in review-instructions.json, so it is
+// replaced by the current one; any other text between the marks was edited by the person and is never touched.
+const PREVIOUS_BODY_HASHES = new Set([
+  'f1d67fb2be192ddcade136409ee59302e926c6bf41c883f6125ffb8075be41d5', // 3fa5d18: Antigravity en la orquesta
+  'b02861cef24be0e67afc1870d829f375ab752980babc30a98fa187736a5247a4', // f151a93: revisión bajo demanda e informes breves
+  '7f5be5b768fa60fcb785fae74492271772e4befcadf5e3d5dc60ba8203062391', // f3b8bca: subagentes de nivel
+  'd3dffb1989bb26476aca364fa3af4130d413c54062a91a50f9330cf0f9356b4a', // 043432b: Superpowers obligatorio
+  '014f1ccabde7d1c9f655b701dd8615ba129320d77be09a1af79ee4f0ad7c60c0', // c4761ab: traspaso y cierre
+  '5bd6bf93ee149f2b4157c612bef308f2e33c8b73b764cb1733c045d0408a250b', // d815d60: revisión certificada
+  'b9ed8e99a370f760c46574fa0e1854768d35498eb70fc619337851843d97c32a', // d73e44a: revisión por sesión
+]);
 const proofPath = (home) => path.join(home, '.nexakit', 'review-instructions.json');
 const NAMES = { claude: 'CLAUDE.md', codex: 'AGENTS.md', antigravity: 'GEMINI.md' };
 function targets({ homeDirectory, environment = {}, codexHome, agents = Object.keys(NAMES) }) {
@@ -114,19 +126,28 @@ export async function planReviewInstructions(options = {}) {
     }
     const block = blockOf(before),
       record = owned[item.target];
-    if ((before?.includes(START) && !block) || (block && record?.blockHash !== hash(block))) {
+    if (before?.includes(START) && !block) {
       items.push({ ...item, state: 'conflict' });
+      continue;
+    }
+    const blockHash = block && hash(block);
+    if (block && record?.blockHash !== blockHash && blockHash !== hash(BODY) && !PREVIOUS_BODY_HASHES.has(blockHash)) {
+      items.push({ ...item, state: 'conflict', reason: 'editado' });
       continue;
     }
     const prefix = before === null ? '' : before.endsWith('\n') ? before + '\n' : before + '\n\n';
     const after = block ? before.replace(block, BODY) : prefix + BODY + '\n';
+    // Without a record the block was recognized by its hash: what preceded it is unknown, so a later removal only
+    // takes the block out.
+    const known = record?.blockHash === blockHash || !block;
     items.push({
       ...item,
       before,
       after,
       state: after === before ? 'ready' : 'pending',
-      original: record ? record.original : before,
-      created: record ? record.created : before === null,
+      ...(block && after !== before && { update: true }),
+      original: !known ? null : record ? record.original : before,
+      created: !known ? false : record ? record.created : before === null,
     });
   }
   return { homeDirectory: options.homeDirectory, items };

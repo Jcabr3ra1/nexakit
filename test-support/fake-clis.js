@@ -114,7 +114,19 @@ export function createFakeClis(
         );
         return ok();
       }
-      if (verb === 'remove') return ok();
+      if (verb === 'remove') {
+        // Like the real CLI: the server's table goes away and the rest of config.toml stays.
+        if (codexSection(args[2]) === null) return ok();
+        const text = fs.readFileSync(codexFile, 'utf8');
+        const header = `[mcp_servers.${args[2]}]`;
+        const start = text.split('\n').findIndex((line) => line.trim() === header);
+        const lines = text.split('\n');
+        let end = start + 1;
+        while (end < lines.length && !lines[end].startsWith('[')) end++;
+        lines.splice(start, end - start);
+        fs.writeFileSync(codexFile, lines.join('\n'));
+        return ok();
+      }
     }
     if (cli === 'agy') {
       if (verb === 'list') return ok('No MCP servers configured.\n');

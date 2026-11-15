@@ -218,7 +218,11 @@ test('comprobar prints a readable Spanish report with obsolete and legacy warnin
 
   const warn = capture();
   assert.equal(await runToolkitCli(['comprobar'], { ...warn, options: w.options }), 1);
-  assert.match(warn.io.out, /! Ya no se usa; si quieres quitarlo: claude mcp remove agent-toolkit-workflow -s user/u);
+  // nexakit's old MCP is migrated by `npx nexakit`: comprobar says so instead of printing the command to remove it.
+  assert.match(warn.io.out, /^! Retirar el MCP antiguo agent-toolkit-workflow de Claude Code \(ejecuta npx nexakit\)$/mu);
+  assert.match(warn.io.out, /^! Registrar nexakit-fabrica en Claude Code \(ejecuta npx nexakit\)$/mu);
+  assert.doesNotMatch(warn.io.out, /Ya no se usa; si quieres quitarlo: claude mcp remove agent-toolkit-workflow/u);
+  assert.match(warn.io.out, /^! 3 enlaces rotos hacia ~[\\/]viejo-toolkit/mu);
   assert.match(warn.io.out, /! Ya no se usa; si quieres quitarlo: .*nivel-normal\.toml/u);
   assert.match(warn.io.out, /npx nexakit reparar --desde ~[\\/]viejo-toolkit/u);
 });

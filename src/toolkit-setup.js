@@ -23,7 +23,9 @@ import {
 } from './link-states.js';
 import { actualRoot, ensureStableInstall, nexakitDir } from './stable-install.js';
 import { inspectMods } from './mods.js';
-import { inspectSuperpowers } from './superpowers.js';
+import { defaultRunner, inspectSuperpowers } from './superpowers.js';
+import { planReviewInstructions } from './review-instructions.js';
+import { teamMarks } from './codex-team.js';
 
 import packageJson from '../package.json' with { type: 'json' };
 
@@ -46,11 +48,12 @@ const MCP_CLIENTS = ['codex', 'claude'];
 export const RETIRED_SKILLS = Object.freeze(['programar', 'estado', 'spec-driven-development', 'depurar', 'desarrollo-con-pruebas', 'revision-cruzada', 'revisar']);
 const MCP_NAME = 'nexakit-fabrica';
 const MCP_SUFFIX = 'bin/nexakit-fabrica-mcp.js';
-// The MCP this one replaces: still recognized so it can be reported as to be removed. Its retirement and the
-// migration of whoever still runs it are a later step.
+// The MCP this one replaces. An entry that runs its script is nexakit's and `npx nexakit` migrates it (see
+// applyMcpMigration); anything else under those names is only reported.
 const LEGACY_MCP_NAMES = ['agent-toolkit-workflow', 'agent-toolkit'];
 const LEGACY_MCP_SUFFIX = 'bin/agent-toolkit-mcp.js';
 const COMMANDS = { codex: 'codex', claude: 'claude', antigravity: 'agy' };
+const CLIENT_NAMES = { codex: 'Codex', claude: 'Claude Code', antigravity: 'Antigravity' };
 export const globalSkillTarget = (home, client, name) => path.join(home, ...SKILL_HOMES[client], name);
 // Registry key of an MCP entry: it has no path of its own in the home folder.
 export const mcpRegistryTarget = (client, name) => `mcp:${client}:${name}`;
@@ -136,6 +139,46 @@ export function registrationCommand(client, current, nodePath, entry) {
   // Moving or repairing an existing entry: remove it first under the name it has now.
   return `${client === 'codex' ? `codex mcp remove ${current.name}` : `claude mcp remove ${current.name} -s user`} && ${add}`;
 }
+// The same orders as registrationCommand, as arguments for the agent's CLI (no shell in between).
+const addArgs = (client, nodePath, entry) =>
+  client === 'codex'
+    ? ['mcp', 'add', MCP_NAME, '--', nodePath, entry]
+    : ['mcp', 'add', '--scope', 'user', '--transport', 'stdio', MCP_NAME, '--', nodePath, entry];
+const removeArgs = (client, name) => (client === 'codex' ? ['mcp', 'remove', name] : ['mcp', 'remove', name, '-s', 'user']);
+
+// Migrates one agent from the old MCP to nexakit-fabrica with its own CLI, never editing ~/.claude.json or
+// config.toml by hand. The new entry is registered first and the old one is removed only after that succeeded, so a
+// failure never leaves the agent without either and the next run retries. The state is read again right before.
+export async function applyMcpMigration(
+  client,
+  {
+    homeDirectory = os.homedir(),
+    toolkitRoot = TOOLKIT_ROOT,
+    environment = process.env,
+    codexHome = environment.CODEX_HOME ?? path.join(homeDirectory, '.codex'),
+    runCommand,
+  } = {},
+) {
+  if (!MCP_CLIENTS.includes(client)) throw new Error(`Agente sin MCP de la fábrica: ${client}`);
+  const setup = await setupToolkit({ agent: client, homeDirectory, toolkitRoot, environment, codexHome });
+  const migration = setup.mcp.migrations[client];
+  if (!migration) return false;
+  const run = runCommand ?? (await defaultRunner(COMMANDS[client], environment));
+  const step = async (args, what) => {
+    const result = await run(COMMANDS[client], args);
+    if (result?.status !== 0) {
+      const detail = String(result?.stderr || result?.stdout || result?.errorCode || '').trim();
+      throw new Error(`No se pudo ${what} en ${CLIENT_NAMES[client]}.${detail ? ` ${detail}` : ''}`);
+    }
+  };
+  if (migration.registrar) {
+    const entry = path.join(setup.activeRoot, MCP_SUFFIX);
+    if (!(await stat(entry))) throw new Error(`No se pudo registrar ${MCP_NAME}: falta ${entry}.`);
+    await step(addArgs(client, await resolveNodeExecutable(environment), entry), `registrar ${MCP_NAME}`);
+  }
+  await step(removeArgs(client, migration.retirar), `retirar el MCP antiguo ${migration.retirar}`);
+  return true;
+}
 
 // Classifies every global skill link and the coordination MCP, and with `apply` creates what is missing and
 // moves or repairs only what nexakit can prove is its own. Conflicts are skipped and reported, never replaced.
@@ -220,9 +263,12 @@ export async function setupToolkit({
   }
   for (const item of skills) item.source = path.join(activeRoot, 'skills', item.name);
 
-  const mcpStates = {};
+  const mcpStates = {},
+    mcpMigrations = {};
   for (const client of clients.filter((c) => MCP_CLIENTS.includes(c))) {
-    mcpStates[client] = await inspectMcp(client, home, codexHome, { activeRoots, isOwned });
+    const { migracion, ...state } = await inspectMcp(client, home, codexHome, { activeRoots, isOwned });
+    mcpStates[client] = state;
+    if (migracion) mcpMigrations[client] = migracion;
   }
   const mcpDeadRoot = Object.values(mcpStates).find((s) => s.state === 'roto-ajeno')?.root;
   const legacy = legacyGroups(skills, {
@@ -304,6 +350,8 @@ export async function setupToolkit({
       message: 'Ya no se usa; si quieres quitarlo:',
       command:
         client === 'codex' ? `codex mcp remove ${state.retirar}` : `claude mcp remove ${state.retirar} -s user`,
+      // `npx nexakit` migrates it when it is nexakit's: `comprobar` shows that instead of this command.
+      ...(mcpMigrations[client] && { migrated: client }),
     }));
   const agentsPath = path.join(codexHome, 'agents');
   for (const name of await fs.readdir(agentsPath).catch(() => [])) {
@@ -337,6 +385,8 @@ export async function setupToolkit({
       states: mcpStates,
       registrationCommands,
       ...(registrationPending.length && { registrationPending }),
+      // Per agent, the old MCP to remove and whether nexakit-fabrica is registered in its place.
+      migrations: mcpMigrations,
     },
     restartRequired: created > 0,
     ...(clients.includes('codex') && { codexSandbox: await codexSandbox(home, codexHome, codexProfile) }),
@@ -492,8 +542,10 @@ async function boundedConfig(file) {
 }
 // The entry is recognized by the script it runs (`…/bin/nexakit-fabrica-mcp.js` under `node`), then classified like
 // a link: installed only if that script exists in a root in use. The MCP it replaces (`agent-toolkit-workflow`,
-// `agent-toolkit`) is still found, but only to report it in `retirar`: it never counts as the installed one,
-// except when its root is dead, which `reparar` still needs to see.
+// `agent-toolkit`) is reported in `retirar`: it never counts as the installed one, except when its root is dead,
+// which `reparar` still needs to see. When it runs the old script it is nexakit's, and `migracion` says what
+// `npx nexakit` does with it: remove it and, unless the person had disabled it or already has an entry named
+// nexakit-fabrica, register the new one.
 async function inspectMcp(client, home, codexHome, { activeRoots, isOwned }) {
   let servers;
   try {
@@ -508,10 +560,7 @@ async function inspectMcp(client, home, codexHome, { activeRoots, isOwned }) {
   } catch {
     return { state: 'unreadable' };
   }
-  const classify = async (name, suffix) => {
-    const server = servers?.[name];
-    if (!server) return null;
-    if (server.enabled === false) return { state: 'disabled', name };
+  const scriptOf = (server, suffix) => {
     const entry = Array.isArray(server.args)
       ? server.args.find(
           (arg) => typeof arg === 'string' && arg.replaceAll('\\', '/').endsWith(`/${suffix}`),
@@ -519,7 +568,14 @@ async function inspectMcp(client, home, codexHome, { activeRoots, isOwned }) {
       : undefined;
     const runsNode =
       typeof server.command === 'string' && /^node(\.exe)?$/iu.test(path.basename(server.command));
-    if (!entry || !runsNode) return { state: 'conflicto', name };
+    return runsNode ? entry : undefined;
+  };
+  const classify = async (name, suffix) => {
+    const server = servers?.[name];
+    if (!server) return null;
+    if (server.enabled === false) return { state: 'disabled', name };
+    const entry = scriptOf(server, suffix);
+    if (!entry) return { state: 'conflicto', name };
     const { state, root } = await classifyReference({
       target: mcpRegistryTarget(client, name),
       literal: entry,
@@ -534,8 +590,15 @@ async function inspectMcp(client, home, codexHome, { activeRoots, isOwned }) {
     legacy = await classify(name, LEGACY_MCP_SUFFIX);
     if (legacy) break;
   }
-  const retirar = legacy ? { retirar: legacy.name } : {};
   const current = await classify(MCP_NAME, MCP_SUFFIX);
+  const retirar = legacy
+    ? {
+        retirar: legacy.name,
+        ...(scriptOf(servers[legacy.name], LEGACY_MCP_SUFFIX) && {
+          migracion: { retirar: legacy.name, registrar: !current && legacy.state !== 'disabled' },
+        }),
+      }
+    : {};
   if (current) return { ...current, ...retirar };
   if (legacy?.state === 'roto-ajeno') return { ...legacy, ...retirar };
   return { state: 'falta', ...retirar };
@@ -560,6 +623,20 @@ async function findExecutable(name, environment, accept = () => true) {
     }
   }
   return null;
+}
+// The state of each global instructions file, without the texts: what `comprobar` reports.
+async function reviewInstructionsReport(options) {
+  try {
+    return (await planReviewInstructions(options)).items.map(({ client, name, state, reason, update }) => ({
+      client,
+      name,
+      state,
+      ...(reason && { reason }),
+      ...(update && { update }),
+    }));
+  } catch {
+    return [];
+  }
 }
 export async function executable(name, environment) {
   return Boolean(await findExecutable(name, environment));
@@ -611,6 +688,10 @@ export async function doctorToolkit({
     retiredSkills: setup.retiredSkills,
     registrationCommands: setup.mcp.registrationCommands,
     ...(setup.mcp.registrationPending && { registrationPending: setup.mcp.registrationPending }),
+    // What `npx nexakit` would migrate or leaves alone; `comprobar` only reports it.
+    mcpMigrations: setup.mcp.migrations,
+    reviewInstructions: await reviewInstructionsReport({ homeDirectory, environment, codexHome, agents: setup.clients }),
+    ...(setup.clients.includes('codex') && { codexAgents: await teamMarks({ codexHome }) }),
     activeRoot: setup.activeRoot,
     legacy: setup.legacy,
     ...(setup.otherCopy && { otherCopy: setup.otherCopy }),

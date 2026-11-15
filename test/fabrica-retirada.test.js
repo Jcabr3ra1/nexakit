@@ -18,8 +18,9 @@ async function archivos(carpeta) {
 }
 
 const RETIRADO = /peer-review|agent-task|agent-toolkit-inbox|revision-process|\/revisar(?![-\w])/u;
-// La marca antigua de los agentes de Codex sigue reconociéndose: es lo único retirado que se nombra a propósito.
-const MARCA_ANTIGUA = 'src/skill-recommendations.js';
+// La marca antigua de los agentes de Codex sigue reconociéndose (quitar) y migrándose (npx nexakit): es lo único
+// retirado que se nombra a propósito.
+const MARCA_ANTIGUA = ['src/skill-recommendations.js', 'src/codex-team.js'];
 
 test('nada del código, las skills ni los plugins nombra lo retirado', async () => {
   const lista = (await Promise.all(['src', 'bin', 'skills', 'plugins'].map(archivos))).flat();
@@ -28,7 +29,7 @@ test('nada del código, las skills ni los plugins nombra lo retirado', async () 
   for (const archivo of lista) {
     if (!/\.(?:js|ts|mjs|json|md|toml|txt|yml|yaml)$/u.test(archivo)) continue;
     const texto = await fs.readFile(path.join(REPO, archivo), 'utf8');
-    const permitido = archivo === MARCA_ANTIGUA ? texto.replaceAll('agent-toolkit-inbox agentes', '') : texto;
+    const permitido = MARCA_ANTIGUA.includes(archivo) ? texto.replaceAll('agent-toolkit-inbox agentes', '') : texto;
     if (RETIRADO.test(permitido)) encontrados.push(archivo);
   }
   assert.deepEqual(encontrados, []);

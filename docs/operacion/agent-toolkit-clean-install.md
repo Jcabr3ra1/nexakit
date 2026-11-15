@@ -94,10 +94,14 @@ acotarse, detenerse; no cambiar permisos o usar credenciales como alternativa.
 
 Después de instalar:
 
-1. Ejecutar las ayudas de `project-memory`, `agent-task` y `agent-task verify`.
-2. Ejecutar el ejemplo ficticio de `agent-task prepare` de primeros pasos.
-3. Ejecutar la prueba integrada de R1.2 con sus fixtures ficticios.
-4. Ejecutar la regresión completa con concurrencia 1 y conservar sus resultados.
+1. Ejecutar las ayudas de `project-memory` y de `nexakit`.
+2. Ejecutar la prueba integrada de R1.2 con sus fixtures ficticios.
+3. Ejecutar la regresión completa con concurrencia 1 y conservar sus resultados.
+
+Nota histórica: en la versión original de este procedimiento también se
+ejecutaban las ayudas de `agent-task` y `agent-task verify` y el ejemplo de
+`agent-task prepare`. Ese binario se retiró en la 0.11.0 (lo sustituye la
+fábrica), así que esos pasos ya no aplican.
 
 Las comprobaciones usarán las dependencias de esa copia. La ejecución de pruebas
 puede crear fixtures y procesos Git locales propios; no se presenta como una

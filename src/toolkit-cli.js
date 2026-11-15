@@ -21,7 +21,7 @@ import {
 } from './skill-recommendations.js';
 import { formatRecommendationReport } from './recommend-report.js';
 import { applySetup } from './setup-apply.js';
-import { buildConfirmation, groupLines, joinNames, suggestedAnswers } from './setup-plan.js';
+import { AGENT_NAMES, buildConfirmation, groupLines, joinNames, suggestedAnswers } from './setup-plan.js';
 import { gatherSetupState } from './setup-state.js';
 import { runSetupTui } from './setup-tui.js';
 import { doctorToolkit, setupToolkit } from './toolkit-setup.js';
@@ -232,6 +232,7 @@ export async function runToolkitCli(
           projectRoot: report.projectRoot,
           includeGlobal: report.includeGlobal,
           items: report.items.map(({ catalogEntry, ...itemRest }) => itemRest),
+          oldData: report.applied ? report.oldDataRemoved : report.oldData.map((item) => item.label),
           ...(report.applied
             ? {
                 removedCount: report.removedCount,
@@ -401,7 +402,7 @@ function formatComprobarReport(result, { homeDirectory }) {
   }
   for (const group of result.legacy ?? []) {
     lines.push(
-      `! ${plural(group.count, 'enlace roto', 'enlaces rotos')} hacia ${short(group.root)} parecen de una instalación anterior. Si son de nexakit: npx nexakit reparar --desde ${short(group.root)}`,
+      `! ${plural(group.targets.length, 'enlace roto', 'enlaces rotos')} hacia ${short(group.root)} parecen de una instalación anterior. Si son de nexakit: npx nexakit reparar --desde ${short(group.root)}`,
     );
   }
   for (const item of (result.retiredSkills ?? []).filter((s) => !s.owned)) {
@@ -420,10 +421,33 @@ function formatComprobarReport(result, { homeDirectory }) {
     );
   }
   lines.push(...modsReport(result.mods));
-  for (const item of result.obsolete ?? []) {
+  lines.push(...migrationReport(result));
+  for (const item of (result.obsolete ?? []).filter((entry) => !entry.migrated)) {
     lines.push(`! ${item.message} ${item.command}`);
   }
   return lines.join('\n') + '\n';
+}
+
+// What `npx nexakit` would migrate from an older install, and what it leaves alone. Warnings only.
+function migrationReport(result) {
+  const lines = [];
+  for (const [client, migration] of Object.entries(result.mcpMigrations ?? {})) {
+    lines.push(`! Retirar el MCP antiguo ${migration.retirar} de ${AGENT_NAMES[client]} (ejecuta npx nexakit)`);
+    if (migration.registrar) lines.push(`! Registrar nexakit-fabrica en ${AGENT_NAMES[client]} (ejecuta npx nexakit)`);
+  }
+  for (const item of result.reviewInstructions ?? []) {
+    if (item.reason === 'editado') lines.push(`! ${item.name}: el bloque de nexakit está editado a mano; no lo toco`);
+    else if (item.update) lines.push(`! ${item.name}: hay reglas de trabajo nuevas (ejecuta npx nexakit)`);
+  }
+  const agents = result.codexAgents;
+  const count = (list, one, many) => `${list.length} ${list.length === 1 ? one : many}`;
+  if (agents?.migrable.length)
+    lines.push(`! ${count(agents.migrable, 'agente de Codex lleva', 'agentes de Codex llevan')} la marca antigua (ejecuta npx nexakit para actualizarla)`);
+  if (agents?.different.length)
+    lines.push(
+      `! ${count(agents.different, 'agente de Codex lleva', 'agentes de Codex llevan')} la marca antigua y otro contenido; no ${agents.different.length === 1 ? 'lo' : 'los'} toco (nexakit codex agentes --apply --actualizar)`,
+    );
+  return lines;
 }
 
 // Reads one line, and treats anything but "s" (including no answer at all) as no. The answer comes from the

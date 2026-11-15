@@ -193,6 +193,33 @@ export function buildConfirmation(state, answers) {
   }
   for (const agent of globalBlocks) block(`global-skills:${agent}`, `Skills base en ${AGENT_NAMES[agent]}`);
 
+  // An older install: the old MCP is replaced by nexakit-fabrica with the agent's own CLI.
+  for (const agent of agents) {
+    const migration = state.mcpMigrations?.[agent];
+    if (!migration) continue;
+    if (!state.agentsFound[agent]) {
+      add('!', `No encontré ${AGENT_NAMES[agent]}; no puedo retirar su MCP antiguo ${migration.retirar}`);
+      continue;
+    }
+    add('−', `Retirar el MCP antiguo ${migration.retirar} de ${AGENT_NAMES[agent]}`);
+    if (migration.registrar) add('+', `Registrar nexakit-fabrica en ${AGENT_NAMES[agent]}`);
+    block(`fabrica-mcp:${agent}`, `MCP de la fábrica en ${AGENT_NAMES[agent]}`);
+  }
+  // Codex profiles nexakit wrote with an old mark: the same content is brought up to date, other content is not.
+  const codexAgents = agents.includes('codex') ? state.codexAgents : null;
+  if (codexAgents?.migrable.length) {
+    const count = codexAgents.migrable.length;
+    add('↻', `Actualizar la marca de ${count} ${plural(count, 'agente', 'agentes')} de Codex`);
+    block('codex-agents', 'Marca de los agentes de Codex');
+  }
+  if (codexAgents?.different.length) {
+    const count = codexAgents.different.length;
+    add(
+      '!',
+      `${count} ${plural(count, 'agente de Codex lleva', 'agentes de Codex llevan')} la marca antigua y otro contenido; no ${plural(count, 'lo', 'los')} toco (nexakit codex agentes --apply --actualizar)`,
+    );
+  }
+
   // Superpowers is required: the work process (brainstorming, plans, debugging, TDD, verification) comes from it.
   const superpowers = state.superpowers ?? {};
   const activeIn = [];
@@ -284,7 +311,12 @@ export function buildConfirmation(state, answers) {
     instructionNames.has(item.name),
   );
   for (const item of instructionItems.filter((item) => item.state === 'conflict'))
-    add('!', `${item.name}: las instrucciones existentes no se pueden actualizar; no las toco`);
+    add(
+      '!',
+      item.reason === 'editado'
+        ? `${item.name}: el bloque de nexakit está editado a mano; no lo toco`
+        : `${item.name}: las instrucciones existentes no se pueden actualizar; no las toco`,
+    );
   const pendingInstructions = instructionItems.filter((item) => item.state === 'pending');
   if (pendingInstructions.length) {
     add(

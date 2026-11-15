@@ -1191,6 +1191,19 @@ export async function writeSetupAnswers(projectRoot, answers, lock) {
   if (!result.manifestWritten) throw new Error(`${PROJECT_TOOLKIT_DIR} no es una carpeta normal; no se guardaron las respuestas.`);
 }
 
+// Data of the retired task and review flows. Only a real folder or file inside a real ~/.agent-toolkit or ~/.nexakit
+// is offered, and links are never followed. ~/.agent-toolkit/gemini belongs to the Gemini tools and is never listed.
+const OLD_DATA = [['.agent-toolkit', 'workflows', 'directory'], ['.nexakit', 'revisores.json', 'file']];
+async function oldDataTarget(home, folder, name, kind) {
+  const parent = await lstatOrNull(path.join(home, folder));
+  if (!parent?.isDirectory() || parent.isSymbolicLink()) return null;
+  const target = path.join(home, folder, name);
+  const info = await lstatOrNull(target);
+  if (!info || info.isSymbolicLink() || (kind === 'directory' ? !info.isDirectory() : !info.isFile())) return null;
+  return { target, label: `~/${folder}/${name}`, kind, folder, name };
+}
+const joinLabels = labels => (labels.length <= 1 ? labels.join('') : `${labels.slice(0, -1).join(', ')} y ${labels.at(-1)}`);
+
 export async function planToolkitDetach({
   projectRoot,
   includeGlobal = false,
@@ -1422,6 +1435,8 @@ export async function planToolkitDetach({
     remainingManifestEntries,
     prevManifest: manifest,
     manualCommands,
+    // Removing project skills from `npx nexakit` (skillNames) never touches them.
+    oldData: skillNames ? [] : (await Promise.all(OLD_DATA.map(entry => oldDataTarget(homeReal, ...entry)))).filter(Boolean),
     conflicts: items.filter(i => i.action === 'conflict').length
   };
 }
@@ -1544,6 +1559,15 @@ export async function applyToolkitDetach(plan) {
     }
   }
 
+  // Checked again right before: only what is still a real folder or file is removed (a link is removed, never followed).
+  const oldDataRemoved = [];
+  for (const item of plan.oldData ?? []) {
+    const current = await oldDataTarget(plan.homeDirectory, item.folder, item.name, item.kind);
+    if (!current || current.target !== item.target) continue;
+    await fs.rm(current.target, { recursive: current.kind === 'directory', force: true });
+    oldDataRemoved.push(current.label);
+  }
+
   let gitIgnoreCleanedCount = 0;
   if (plan.projectRoot) {
     for (const upd of plan.gitIgnoreUpdates ?? []) {
@@ -1611,7 +1635,8 @@ export async function applyToolkitDetach(plan) {
     gitIgnoreCleanedCount,
     stateDirRemoved,
     conflicts,
-    manualCommands: plan.manualCommands ?? []
+    manualCommands: plan.manualCommands ?? [],
+    oldDataRemoved
   };
 }
 
@@ -1631,7 +1656,8 @@ export function formatDetachReport(report) {
       actionable.length === 0 &&
       !report.removeStateDir &&
       !report.removeLegacyLockfile &&
-      (report.gitIgnoreUpdates?.length ?? 0) === 0
+      (report.gitIgnoreUpdates?.length ?? 0) === 0 &&
+      !report.oldData?.length
     ) {
       lines.push('No se encontraron artefactos acoplados por Agent Toolkit para retirar.');
     } else {
@@ -1647,6 +1673,9 @@ export function formatDetachReport(report) {
       }
       for (const upd of report.gitIgnoreUpdates ?? []) {
         lines.push(`  - [git] Limpiar bloque gestionado en ${upd.relativePath}`);
+      }
+      if (report.oldData?.length) {
+        lines.push(`  - Borrar datos antiguos: ${joinLabels(report.oldData.map(item => item.label))}`);
       }
     }
     const conflictItems = report.items.filter(i => i.action === 'conflict');
@@ -1665,6 +1694,9 @@ export function formatDetachReport(report) {
     }
     if (report.conflicts > 0) {
       lines.push(`Conflictos respetados intactos: ${report.conflicts}`);
+    }
+    if (report.oldDataRemoved?.length) {
+      lines.push(`Datos antiguos borrados: ${joinLabels(report.oldDataRemoved)}`);
     }
   }
 
