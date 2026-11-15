@@ -436,6 +436,41 @@ test('si session/new trae la opción de modo sin valor, no empieza el turno', as
   }
 });
 
+test('un aviso de modo no default que llega antes de la respuesta de session/new impide el turno', async () => {
+  for (const update of [
+    { sessionUpdate: 'current_mode_update', currentModeId: 'accept-edits' },
+    { sessionUpdate: 'config_option_update', configOptions: [{ id: 'mode', name: 'Mode', type: 'select', currentValue: 'auto', options: [] }] },
+  ]) {
+    const guion = guionBase('revision');
+    // `ruido` se escribe tal cual antes de la respuesta.
+    guion.metodos['session/new'].ruido = [JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 'ses-1', update } })];
+    const p = preparar('revision', { metodos: guion.metodos });
+    try {
+      const resultado = await (await p.conector).ejecutar(encargo(p.raiz), AbortSignal.timeout(10_000));
+      assert.equal(resultado.estado, 'fallida', update.sessionUpdate);
+      assert.match(resultado.motivo, /modo «(accept-edits|auto)»/, update.sessionUpdate);
+      assert.equal(p.mensajes().some((m) => m.method === 'session/set_model' || m.method === 'session/prompt'), false, update.sessionUpdate);
+      await esperarMensaje(p.mensajes, 'session/close');
+    } finally {
+      await p.limpiar();
+    }
+  }
+});
+
+test('si session/new trae configOptions que no es una lista, no empieza el turno', async () => {
+  const guion = guionBase('revision');
+  guion.metodos['session/new'].resultado.configOptions = { mode: 'default' };
+  const p = preparar('revision', { metodos: guion.metodos });
+  try {
+    const resultado = await (await p.conector).ejecutar(encargo(p.raiz), AbortSignal.timeout(10_000));
+    assert.equal(resultado.estado, 'fallida');
+    assert.match(resultado.motivo, /modo «desconocido»/);
+    assert.equal(p.mensajes().some((m) => m.method === 'session/prompt'), false);
+  } finally {
+    await p.limpiar();
+  }
+});
+
 test('si el proceso de Antigravity muere a mitad del turno, da fallida', async () => {
   const guion = guionBase('cancelar');
   guion.metodos['session/prompt'] = { diferir: true, salir: 3 };

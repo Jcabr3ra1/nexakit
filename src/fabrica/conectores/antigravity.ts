@@ -53,6 +53,8 @@ const TIEMPO_CIERRE_SESION_MS = 5_000;
 const GRACIA_CIERRE_MS = 2_000;
 const MAX_SALIDA_ERROR = 64 * 1024;
 const MAX_DETALLE = 500;
+/** Tope de avisos de modo guardados para sesiones aún sin registrar. */
+const MAX_MODOS_SIN_SESION = 256;
 /** Argumentos de `agy acp`; detrás va `--gemini-dir <carpeta aislada>`. */
 const ARGUMENTOS_ACP = ['acp', '--sandbox', '--process-per-session', '--disable-telemetry'];
 /** Modo de Antigravity que pide permiso antes de editar y de ejecutar órdenes. */
@@ -212,6 +214,8 @@ async function leerImagenes(rutas: string[]): Promise<ContentBlock[]> {
 /** Modo con que abrió la sesión, según `modes` y la opción `mode`; null si no lo dice o se contradicen. */
 function modoDeSesion(sesion: Record<string, unknown>): string | null {
   const modo = esObjeto(sesion['modes']) ? texto(sesion['modes']['currentModeId']) : null;
+  // `configOptions` que existe pero no es una lista: no se entiende, no se da por buena.
+  if (sesion['configOptions'] !== undefined && sesion['configOptions'] !== null && !Array.isArray(sesion['configOptions'])) return null;
   const opciones = Array.isArray(sesion['configOptions']) ? sesion['configOptions'] : [];
   const opcion = opciones.find((o: unknown) => esObjeto(o) && o['id'] === 'mode');
   const valor = esObjeto(opcion) ? texto(opcion['currentValue']) : null;
@@ -311,6 +315,11 @@ class ConectorAntigravity implements Conector {
   private readonly opciones: OpcionesConectorAntigravity;
   private proceso: Proceso | undefined;
   private readonly sesiones = new Map<string, EnCurso>();
+  /**
+   * Último modo anunciado por sesiones que aún no están registradas (el aviso puede llegar antes de la respuesta de
+   * `session/new` o antes de que se reanude su `await`); se comprueba al registrar la sesión.
+   */
+  private readonly modosSinSesion = new Map<string, string | null>();
   private cerrado = false;
 
   constructor(opciones: OpcionesConectorAntigravity) {
@@ -324,7 +333,10 @@ class ConectorAntigravity implements Conector {
     mkdirSync(vacia, { recursive: true, mode: 0o700 });
     const sesion = await this.pedir(proceso, 'session/new', { cwd: vacia, mcpServers: [] } satisfies NewSessionRequest);
     const id = esObjeto(sesion) ? texto(sesion['sessionId']) : null;
-    if (id !== null) void this.cerrarSesion(proceso, id);
+    if (id !== null) {
+      this.modosSinSesion.delete(id);
+      void this.cerrarSesion(proceso, id);
+    }
     const modelos = esObjeto(sesion) && esObjeto(sesion['models']) ? sesion['models']['availableModels'] : undefined;
     if (!Array.isArray(modelos)) return [];
     return modelos
@@ -366,6 +378,9 @@ class ConectorAntigravity implements Conector {
       });
       const enCurso: EnCurso = { resultado, texto: '', alertarModo, modoInseguro };
       this.sesiones.set(id, enCurso);
+      const anunciado = this.modosSinSesion.get(id);
+      this.modosSinSesion.delete(id);
+      if (anunciado !== undefined && anunciado !== MODO_CON_PERMISOS) throw errorModo(anunciado);
       const modo = modoDeSesion(sesion);
       if (modo !== MODO_CON_PERMISOS) throw errorModo(modo);
 
@@ -627,10 +642,18 @@ class ConectorAntigravity implements Conector {
     const params: unknown = mensaje.params;
     if (!esObjeto(params)) return;
     const sessionId = texto(params['sessionId']);
-    const enCurso = sessionId === null ? undefined : this.sesiones.get(sessionId);
-    if (!enCurso) return;
+    if (sessionId === null) return;
     const modo = modoAnunciado(params['update']);
-    if (modo !== undefined && modo !== MODO_CON_PERMISOS) enCurso.alertarModo(modo ?? 'desconocido');
+    if (modo === undefined) return;
+    const enCurso = this.sesiones.get(sessionId);
+    if (!enCurso) {
+      // Se guarda el último y el peor: un aviso inseguro no lo borra uno `default` posterior.
+      const previo = this.modosSinSesion.get(sessionId);
+      if (previo === undefined || previo === MODO_CON_PERMISOS) this.modosSinSesion.set(sessionId, modo);
+      if (this.modosSinSesion.size > MAX_MODOS_SIN_SESION) this.modosSinSesion.delete(this.modosSinSesion.keys().next().value as string);
+      return;
+    }
+    if (modo !== MODO_CON_PERMISOS) enCurso.alertarModo(modo ?? 'desconocido');
   }
 
   /** Toda petición de permiso se rechaza: la opción de rechazo si la hay; si no, `cancelled`. */
