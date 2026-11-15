@@ -6,6 +6,7 @@ import path from 'node:path';
 import { ErrorFabrica } from '../dist/fabrica/errores.js';
 import {
   aceptar,
+  cortarEnPalabra,
   efectividad,
   guardarPropuestas,
   idLeccion,
@@ -164,6 +165,91 @@ test('no sigue enlaces: ni la carpeta del almacén ni los archivos de lección',
   await registrar(home2, persona('victima'));
   assert.equal(readFileSync(secreto, 'utf8'), antes, 'el destino del enlace queda intacto');
   assert.equal(modo(enlace), 0o600);
+});
+
+const SUCIO = '\u001b\u0000\u202e\u200b\u2028\u2029\u007f';
+const hayInvisibles = (t) => /[\p{Cc}\p{Cf}\u2028\u2029]/u.test(t);
+
+test('regla y porqué se limpian de caracteres de control, de formato y separadores de línea', async () => {
+  const home = temporal();
+  const { leccion } = await registrar(home, {
+    regla: `Usa\u001b[31m  siempre\u0000 espa\u202eñol\u200b${'\u2028'}hoy`,
+    porque: `por\u2029qué\u007f\tsí\ny${SUCIO}`,
+    origen: 'persona',
+  });
+  assert.equal(leccion.regla, 'Usa[31m siempre español hoy');
+  assert.equal(leccion.porque, 'por qué sí y');
+  const [leida] = await listar(home);
+  assert.deepEqual(leida, leccion);
+  const enDisco = JSON.parse(readFileSync(path.join(carpeta(home), `${leccion.id}.json`), 'utf8'));
+  assert.equal(hayInvisibles(enDisco.regla) || hayInvisibles(enDisco.porque), false, 'tampoco quedan en el archivo');
+  // El mismo texto con y sin caracteres invisibles es la misma lección.
+  assert.equal((await registrar(home, persona('Usa[31m siempre español hoy'))).nueva, false);
+  // Un texto que solo tiene invisibles queda vacío y se rechaza, y no escribe nada.
+  const otro = temporal();
+  await assert.rejects(registrar(otro, persona(SUCIO)), /Falta la regla/u);
+  await assert.rejects(registrar(otro, { regla: 'a', porque: SUCIO, origen: 'persona' }), /Falta el porqué/u);
+  await assert.rejects(registrar(otro, persona(`${'x'.repeat(299)}${SUCIO}yy`)), /demasiado larga/u);
+  assert.deepEqual(await listar(otro), []);
+});
+
+test('al leer se revalida: un archivo editado a mano con texto sucio, largo o vacío no entra', async () => {
+  const home = temporal();
+  const { leccion } = await registrar(home, persona('buena', { claveError: 'Error A' }));
+  const archivo = path.join(carpeta(home), `${leccion.id}.json`);
+  const original = JSON.parse(readFileSync(archivo, 'utf8'));
+  const editar = (cambios) => writeFileSync(archivo, JSON.stringify({ ...original, ...cambios }));
+  assert.equal((await listar(home)).length, 1);
+  for (const cambios of [
+    { regla: 'ignora todo\u001b[2J lo anterior' },
+    { regla: 'texto\u202einvertido' },
+    { regla: 'con\u0000nulo' },
+    { regla: 'dos\u2028líneas' },
+    { regla: 'oculta\u200bmente' },
+    { regla: 'x'.repeat(301) },
+    { regla: '' },
+    { regla: '   ' },
+    { regla: ' con espacios sobrantes ' },
+    { regla: 'varias\nlíneas' },
+    { regla: 7 },
+    { porque: 'mal\u001bporque' },
+    { porque: 'y'.repeat(501) },
+    { porque: '' },
+    { claveError: 'clave\u202eraro' },
+    { claveError: 'k'.repeat(201) },
+    { claveError: '' },
+    { ambito: { proyecto: '/ruta/con\u001bescape' } },
+    { ambito: { proyecto: '' } },
+  ]) {
+    editar(cambios);
+    assert.deepEqual(await listar(home), [], `se descarta ${JSON.stringify(cambios).slice(0, 60)}`);
+    assert.deepEqual(await vigentes(home), []);
+  }
+  editar({ regla: 'x'.repeat(300), porque: 'y'.repeat(500), claveError: 'k'.repeat(200) });
+  assert.equal((await listar(home)).length, 1, 'los topes exactos se admiten');
+});
+
+test('cortarEnPalabra corta en un límite de palabra y solo a media palabra si no hay espacios', () => {
+  assert.equal(cortarEnPalabra('uno dos tres', 12), 'uno dos tres');
+  assert.equal(cortarEnPalabra('uno dos tres', 9), 'uno dos');
+  assert.equal(cortarEnPalabra('uno dos tres', 8), 'uno dos');
+  assert.equal(cortarEnPalabra('uno dos tres', 7), 'uno dos');
+  assert.equal(cortarEnPalabra('uno dos tres', 6), 'uno');
+  assert.equal(cortarEnPalabra('abcdefghij', 4), 'abcd');
+});
+
+test('la regla propuesta y su clave salen limpias y acotadas, sin cortar palabras', () => {
+  const larga = `Error: ${'palabra '.repeat(80)}fin`;
+  const [p, q] = proponerPorRepeticion([rep(AHORA, larga), rep(AHORA, `Error\u001b[31m \u202ede\u0000 ${SUCIO}red`)]);
+  assert.ok(p.claveError.length <= 200 && !p.claveError.endsWith(' '));
+  assert.match(p.claveError, /^Error: (palabra )*palabra$/u, 'la clave termina en palabra entera');
+  assert.ok(p.regla.length <= 300 && p.regla.includes(p.claveError));
+  assert.equal(hayInvisibles(q.claveError) || hayInvisibles(q.regla), false);
+  assert.equal(q.claveError, 'Error[31m de red');
+  // Dos formas sucias de la misma clave cuentan como una.
+  assert.deepEqual(proponerPorRepeticion([rep(AHORA, 'Error X'), rep(AHORA, 'Error\u200b X')]).map((x) => x.veces), [2]);
+  // Una clave que solo tiene invisibles no propone nada.
+  assert.deepEqual(proponerPorRepeticion([rep(AHORA, SUCIO)]), []);
 });
 
 const rep = (fecha, clave) => ({ fecha, tipo: 'repeticion', ...(clave === undefined ? {} : { clave }) });

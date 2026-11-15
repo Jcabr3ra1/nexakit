@@ -10,10 +10,35 @@ import { carpetaPropia, codigoError, escribirReemplazando, lstatSiExiste } from 
 
 export const MAX_REGLA = 300;
 export const MAX_PORQUE = 500;
+const MAX_RUTA = 4096;
 
 const PATRON_ID = /^[0-9a-f]{8}$/u;
 const DIA_MS = 24 * 60 * 60 * 1000;
 const MARCA_OMITIDO = '(texto omitido';
+/** Tope de la clave de error que se guarda y se cita en una regla propuesta. */
+export const MAX_CLAVE = 200;
+// Caracteres de control (ESC, NUL, saltos), de formato (U+202E y otros bidireccionales, de ancho cero) y separadores
+// de línea y párrafo: no tienen sitio en un texto que acabará en las instrucciones de otras IA.
+const INVISIBLES = /[\p{Cc}\p{Cf}\u2028\u2029]/gu;
+
+/** Una sola línea, sin caracteres de control ni de formato y sin espacios sobrantes. */
+export function limpiarTexto(valor: string): string {
+  return valor.replace(/\s+/gu, ' ').replace(INVISIBLES, '').replace(/\s+/gu, ' ').trim();
+}
+
+/** Corta en el último límite de palabra que quepa en `maximo`; solo corta a media palabra si no hay ningún espacio. */
+export function cortarEnPalabra(texto: string, maximo: number): string {
+  if (texto.length <= maximo) return texto;
+  const corte = texto.slice(0, maximo);
+  const espacio = corte.lastIndexOf(' ');
+  return (espacio > 0 && texto[maximo] !== ' ' ? corte.slice(0, espacio) : corte).trimEnd();
+}
+
+/** Texto que ya está limpio y cabe en `maximo`; `null` si no (también si queda vacío). */
+function textoLimpio(valor: unknown, maximo: number): string | null {
+  if (typeof valor !== 'string') return null;
+  return valor !== '' && limpiarTexto(valor) === valor && valor.length <= maximo ? valor : null;
+}
 
 export type Ambito = 'global' | { proyecto: string } | { proyecto: string; estacion: NombreEstacion };
 export type EstadoLeccion = 'propuesta' | 'vigente' | 'retirada';
@@ -70,20 +95,26 @@ export function idLeccion(regla: string, ambito: Ambito): string {
 
 function ambitoValido(valor: unknown): Ambito | null {
   if (valor === 'global') return 'global';
-  if (!esObjeto(valor) || typeof valor['proyecto'] !== 'string' || valor['proyecto'] === '') return null;
-  if (valor['estacion'] === undefined) return { proyecto: valor['proyecto'] };
-  return esEstacion(valor['estacion']) ? { proyecto: valor['proyecto'], estacion: valor['estacion'] } : null;
+  if (!esObjeto(valor)) return null;
+  const proyecto = textoLimpio(valor['proyecto'], MAX_RUTA);
+  if (proyecto === null) return null;
+  if (valor['estacion'] === undefined) return { proyecto };
+  return esEstacion(valor['estacion']) ? { proyecto, estacion: valor['estacion'] } : null;
 }
 
 /** Devuelve la lección si el JSON tiene la forma esperada; `null` si no (un archivo ajeno o roto se ignora). */
 function aLeccion(valor: unknown, idEsperado: string): Leccion | null {
   if (!esObjeto(valor) || valor['id'] !== idEsperado) return null;
   const ambito = ambitoValido(valor['ambito']);
-  const { regla, porque, estado, origen, fecha, usos, claveError } = valor;
-  if (ambito === null || typeof regla !== 'string' || typeof porque !== 'string') return null;
+  const { estado, origen, fecha, usos } = valor;
+  // Lo que se lee pasa por la misma limpieza y los mismos topes que lo que se escribe: un archivo editado a mano
+  // con caracteres invisibles, texto de más o sin regla no entra.
+  const regla = textoLimpio(valor['regla'], MAX_REGLA);
+  const porque = textoLimpio(valor['porque'], MAX_PORQUE);
+  const claveError = valor['claveError'] === undefined ? undefined : textoLimpio(valor['claveError'], MAX_CLAVE);
+  if (ambito === null || regla === null || porque === null || claveError === null) return null;
   if (typeof estado !== 'string' || !ESTADOS.includes(estado) || typeof origen !== 'string' || !ORIGENES.includes(origen)) return null;
   if (typeof fecha !== 'number' || !Number.isFinite(fecha) || typeof usos !== 'number' || !Number.isFinite(usos)) return null;
-  if (claveError !== undefined && typeof claveError !== 'string') return null;
   const leccion: Leccion = {
     id: idEsperado,
     regla,
@@ -165,11 +196,12 @@ async function ambitoReal(ambito: Ambito | undefined): Promise<Ambito> {
   const valido = ambitoValido(ambito);
   if (valido === null || valido === 'global') throw new ErrorFabrica('Ámbito de la lección no válido');
   const proyecto = await rutaDeProyecto(valido.proyecto);
+  if (textoLimpio(proyecto, MAX_RUTA) === null) throw new ErrorFabrica('La ruta del proyecto tiene caracteres de control o es demasiado larga');
   return 'estacion' in valido ? { proyecto, estacion: valido.estacion } : { proyecto };
 }
 
 function textoDe(valor: unknown, nombre: string, maximo: number): string {
-  const texto = typeof valor === 'string' ? valor.replace(/\s+/gu, ' ').trim() : '';
+  const texto = typeof valor === 'string' ? limpiarTexto(valor) : '';
   if (texto === '') throw new ErrorFabrica(`Falta ${nombre} de la lección`);
   if (texto.length > maximo) throw new ErrorFabrica(`${nombre[0]?.toUpperCase() ?? ''}${nombre.slice(1)} de la lección es demasiado larga: ${texto.length} caracteres, el máximo es ${maximo}`);
   return texto;
@@ -193,7 +225,8 @@ export async function registrar(home: string, datos: DatosLeccion, ahora: number
     previa === null
       ? { id, regla, porque, ambito, estado: nuevoEstado, origen: datos.origen, fecha: ahora, usos: 0 }
       : { ...previa, fecha: ahora, estado: previa.estado === 'retirada' && datos.origen === 'persona' ? 'vigente' : previa.estado };
-  if (previa === null && datos.claveError !== undefined) leccion.claveError = datos.claveError;
+  const claveError = datos.claveError === undefined ? undefined : claveLimpia(datos.claveError);
+  if (previa === null && claveError !== undefined) leccion.claveError = claveError;
   await escribirLeccion(dir, leccion);
   return { leccion, nueva: previa === null };
 }
@@ -250,8 +283,16 @@ export interface Propuesta {
   veces: number;
 }
 
-const claveDe = (e: EventoRegistro): string | null =>
-  e.tipo === 'repeticion' && typeof e.clave === 'string' && e.clave !== '' && !e.clave.startsWith(MARCA_OMITIDO) ? e.clave : null;
+/** Clave de error limpia y acotada a `MAX_CLAVE`; `undefined` si queda vacía. */
+function claveLimpia(clave: string): string | undefined {
+  const limpia = cortarEnPalabra(limpiarTexto(clave), MAX_CLAVE);
+  return limpia === '' ? undefined : limpia;
+}
+
+const claveDe = (e: EventoRegistro): string | null => {
+  if (e.tipo !== 'repeticion' || typeof e.clave !== 'string' || e.clave.startsWith(MARCA_OMITIDO)) return null;
+  return claveLimpia(e.clave) ?? null;
+};
 
 /**
  * Propuestas que salen del registro de errores repetidos del mod: cada `repeticion` ya significa que el mismo tipo de
@@ -265,7 +306,7 @@ export function proponerPorRepeticion(eventos: readonly EventoRegistro[]): Propu
     if (clave !== null) cuenta.set(clave, (cuenta.get(clave) ?? 0) + 1);
   }
   return [...cuenta].map(([claveError, veces]) => ({
-    regla: `Si vuelve a salir el error «${claveError}», parar y explicar la causa raíz antes de reintentar.`.slice(0, MAX_REGLA),
+    regla: cortarEnPalabra(limpiarTexto(`Si vuelve a salir el error «${claveError}», parar y explicar la causa raíz antes de reintentar.`), MAX_REGLA),
     porque: veces === 1 ? 'El mismo error salió tres veces seguidas en una tarea.' : `El mismo error salió tres veces seguidas en ${veces} tareas.`,
     claveError,
     veces,
