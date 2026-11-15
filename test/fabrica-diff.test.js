@@ -103,18 +103,20 @@ test('leerDiff trata nombres con espacios y comillas, binarios, borrados y renom
   git(dir, 'checkout', '-q', '-b', 'trabajo');
   git(dir, 'mv', 'viejo nombre.txt', 'nuevo nombre.txt');
   git(dir, 'rm', '-q', 'sobra.txt');
-  escribir(dir, 'a "b" ñ.txt', 'comillas\n');
+  // Windows no admite comillas dobles en un nombre de archivo: allí se prueba con comillas simples.
+  const conComillas = process.platform === 'win32' ? "a 'b' ñ.txt" : 'a "b" ñ.txt';
+  escribir(dir, conComillas, 'comillas\n');
   writeFileSync(path.join(dir, 'imagen.bin'), Buffer.from([0, 1, 2, 3, 0]));
 
   const r = await leerDiff(dir, 'main');
   const tipos = Object.fromEntries(r.archivos.map((a) => [a.ruta, a.tipo]));
   assert.deepEqual(tipos, {
-    'a "b" ñ.txt': 'A',
+    [conComillas]: 'A',
     'imagen.bin': 'A',
     'nuevo nombre.txt': 'R',
     'sobra.txt': 'D',
   });
-  assert.match(r.texto, /Archivo nuevo: "a \\"b\\" ñ\.txt"/u);
+  assert.ok(r.texto.includes(`Archivo nuevo: ${JSON.stringify(conComillas)}`), r.texto);
   assert.match(r.texto, /Binario: sin diff textual/u);
   assert.match(r.texto, /rename from viejo nombre\.txt/u);
 });
