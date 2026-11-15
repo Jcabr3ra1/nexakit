@@ -139,6 +139,28 @@ export async function guardarEstado(dir: string, estado: unknown): Promise<void>
   await escribirReemplazando(path.join(dir, 'estado.json'), json(estado));
 }
 
+/** Lee `<estacion>.json` de un recorrido, sin seguir enlaces. `null` si no existe o no es un archivo normal. */
+export function leerEstacion(dir: string, estacion: NombreEstacion): { encargo?: EncargoRastro; resultado?: ResultadoEstacion } | null {
+  if (!(NOMBRES_ESTACION as readonly string[]).includes(estacion)) return null;
+  const archivo = path.join(dir, `${estacion}.json`);
+  const info = lstatSync(archivo, { throwIfNoEntry: false });
+  if (info === undefined || !info.isFile()) return null;
+  const fd = openSync(archivo, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  try {
+    const dato = JSON.parse(readFileSync(fd, 'utf8')) as unknown;
+    return typeof dato === 'object' && dato !== null ? (dato as { encargo?: EncargoRastro; resultado?: ResultadoEstacion }) : null;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** Guarda `consolidado.md` con `0o600`, con un temporal y `rename` para no seguir enlaces. Devuelve la ruta. */
+export async function guardarConsolidado(dir: string, texto: string): Promise<string> {
+  const ruta = path.join(dir, 'consolidado.md');
+  await escribirReemplazando(ruta, texto);
+  return ruta;
+}
+
 /**
  * Lee `estado.json` del recorrido `id` en cualquier repo del rastro, sin seguir enlaces.
  * Devuelve `null` si el id no tiene la forma esperada o no hay estado guardado.
