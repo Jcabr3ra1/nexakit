@@ -15,7 +15,7 @@ test('el bloque global orquesta por niveles, revisa solo bajo demanda y deja el 
     .match(/<!-- nexakit:review:start -->[\s\S]*?<!-- nexakit:review:end -->/u)[0];
   assert.doesNotMatch(block, /automáticamente UNA revisión/u);
   assert.doesNotMatch(block, /revision-cruzada/u);
-  assert.match(block, /solo con \/revisar/u);
+  assert.match(block, /solo con \/fabrica/u);
   assert.match(block, /Modo tutor[^.]*solo si (?:la persona )?lo pide/u);
   for (const nivel of ['ligero', 'normal', 'exigente', 'alto']) assert.match(block, new RegExp(nivel, 'u'));
   assert.match(block, /niveles:nivel-<nivel>/u);

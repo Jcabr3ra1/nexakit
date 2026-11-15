@@ -5,7 +5,7 @@ NexaKit prepara Claude Code, Codex y Antigravity para trabajar contigo: la sesi�
 | Para | Escribe | Dónde |
 | --- | --- | --- |
 | Programar | Pide la tarea con tus palabras | en tu IA, sin comando especial |
-| Pedir una revisión | `/revisar` o «que lo revise <IA>» | en Claude o Antigravity (`$revisar` en Codex) |
+| Pasarlo por la fábrica | `/fabrica` o «pásalo por la fábrica» | en Claude Code; tú apruebas cada recorrido |
 | Retomar una tarea larga | Pide el traspaso (`project-handoff`) | antes de abrir una sesión nueva |
 | Cerrar el PR | `/cerrar-memoria` | si el proyecto tiene memoria |
 
@@ -81,11 +81,11 @@ Enlaza las skills de esta carpeta en `~/.claude/skills` (Claude) y `~/.agents/sk
 ### 5. Conecta el servidor en Claude Code y en Codex
 
 ```sh
-claude mcp add --scope user --transport stdio agent-toolkit-workflow -- node "$PWD/bin/agent-toolkit-mcp.js"
-codex mcp add agent-toolkit-workflow -- node "$PWD/bin/agent-toolkit-mcp.js"
+claude mcp add --scope user --transport stdio nexakit-fabrica -- node "$PWD/bin/nexakit-fabrica-mcp.js"
+codex mcp add nexakit-fabrica -- node "$PWD/bin/nexakit-fabrica-mcp.js"
 ```
 
-Es el servidor que guarda las revisiones entre las dos terminales. `setup` imprime estos mismos comandos con tu ruta. Si ya existe uno con ese nombre, no lo repitas.
+Es el servidor `nexakit-fabrica`, que ejecuta los recorridos de la fábrica. `setup` imprime estos mismos comandos con tu ruta. Si ya existe uno con ese nombre, no lo repitas.
 
 ### 6. Deja que Codex guarde su registro de revisor
 
@@ -93,7 +93,7 @@ Es el servidor que guarda las revisiones entre las dos terminales. `setup` impri
 grep -q "^\[sandbox_workspace_write\]" ~/.codex/config.toml 2>/dev/null && echo "Ya tienes la sección: añade la ruta a writable_roots a mano" || printf "\n[sandbox_workspace_write]\nwritable_roots = [\"%s/.agent-toolkit\"]\n" "$HOME" >> ~/.codex/config.toml
 ```
 
-Codex ejecuta sus comandos en un sandbox que solo deja escribir en el proyecto, y `$revisar` guarda el id de su sesión en `~/.agent-toolkit`. `doctor` te dice si falta este permiso e imprime el comando con tus rutas.
+Codex ejecuta sus comandos en un sandbox que solo deja escribir en el proyecto, y la bandeja entre terminales guarda el id de su sesión en `~/.agent-toolkit`. `doctor` te dice si falta este permiso e imprime el comando con tus rutas.
 
 ### 7. Instala los plugins y mods (solo Claude Code)
 
@@ -147,7 +147,7 @@ Para actualizar más adelante: `git pull --ff-only` y `npm ci --ignore-scripts` 
 2. **La sesión principal:** Entiende la tarea, la planifica y decide qué hace ella y qué delega. Lo que se resuelve en uno o dos pasos lo hace ella misma.
 3. **Los subagentes de nivel:** Ejecutan lo delegado con su propio modelo y esfuerzo (tabla de abajo) y devuelven un informe breve. En Claude Code la barra de `nexakit-modelo` muestra cada uno con el modelo que usó y sus tokens (por ejemplo `48k nuevos · 97% caché (148k en total)`: los nuevos son los que informa el sistema y los que más pesan en la cuota).
 4. **La sesión principal:** Comprueba cada informe, integra el resultado y pasa las pruebas antes de darlo por terminado.
-5. **Tú, si quieres:** Escribe `/revisar` para que otra IA lo revise en solo lectura. La primera vez pregunta «¿A dónde mando la revisión?». Nunca se lanza sola.
+5. **Tú, si quieres:** Escribe `/fabrica` para pasarlo por la fábrica: propone un recorrido de estaciones con varias IA en solo lectura y espera tu aprobación. Nunca se lanza sola.
 6. **Tú:** Pides el commit y el PR, y decides el merge. Si el proyecto tiene memoria de Obsidian, `/cerrar-memoria` la pone al día.
 
 El modo tutor, en el que tú escribes el código y la IA te guía paso a paso, solo se activa si lo pides.
@@ -195,7 +195,7 @@ Conviene delegar solo cuando la tarea lee mucho o devuelve mucho ruido: lanzar u
 | `node bin/agent-toolkit-inbox.js rendimiento` | Qué modelo y nivel rinden mejor (hallazgos que se sostienen). |
 | `node bin/agent-toolkit-inbox.js consumo --project-root /ruta` | Tokens, caché y tiempo de las llamadas registradas. |
 | `node bin/agent-toolkit-inbox.js agentes [--escribir [--forzar]]` | Crea los agentes de nivel de Codex. Sin `--escribir` es vista previa. |
-| `node bin/agent-toolkit-inbox.js registrar --agent codex --project-root /ruta` | Guarda la sesión de Codex como revisora. Lo ejecuta `$revisar`; añade `--thread <id>` si no la encuentra. |
+| `node bin/agent-toolkit-inbox.js registrar --agent codex --project-root /ruta` | Guarda la sesión de Codex como revisora. Lo ejecuta la bandeja antigua; añade `--thread <id>` si no la encuentra. |
 | `node bin/agent-toolkit-inbox.js avisar --project-root /ruta --task <id> --review <id>` | Avisa a Codex de un encargo ya aprobado. Lo ejecuta la skill, no tú. |
 | `node bin/agent-toolkit-inbox.js cierre --project-root /ruta --task <id> --salida /ruta/traspaso.md` | Cierra una colaboración y deja un borrador de traspaso. Exige que no haya encargos activos. |
 
@@ -233,7 +233,7 @@ Conviene delegar solo cuando la tarea lee mucho o devuelve mucho ruido: lanzar u
 
 | Skill | Para qué |
 | --- | --- |
-| `revisar` | Pide una revisión de tus cambios a otra IA. Solo cuando escribes `/revisar` (`$revisar` en Codex) o pides «que lo revise <IA>». |
+| `fabrica` | Pasa tus cambios por la fábrica: un recorrido de estaciones con Claude, Codex y Antigravity que tú apruebas antes de lanzar. Solo cuando escribes `/fabrica` o pides «pásalo por la fábrica». |
 | `project-handoff` | Escribe la nota de seguimiento para retomar una tarea larga en otra sesión o con otra IA. |
 | `gemini <lo que necesitas>` | Usa Gemini para explicar, investigar, analizar archivos o generar una imagen. `investigar` e `imagen` son atajos. Requiere `agy`. |
 | `cerrar-memoria` | Tras fusionar un PR, pone al día la memoria de Obsidian del proyecto. Solo si el proyecto tiene `project-memory.json`. |
@@ -256,8 +256,8 @@ La memoria de Obsidian no se actualiza sola: se hace con `/cerrar-memoria` despu
 | `setup` indica un conflicto | Ya tienes una skill con ese nombre. No la reemplaza: revisa la ruta que muestra y decide cuál conservas. |
 | Abro Codex con `--profile <nombre>` | Revisa con `doctor --agent codex --perfil-codex <nombre>`: así evalúa el permiso de ese perfil. |
 | Moví o volví a clonar la carpeta | Repite `setup --apply` y el registro del servidor desde la nueva carpeta. |
-| `$revisar` dice «No se pudo escribir en el registro de Agent Toolkit» | Es el sandbox de Codex. Haz el paso «Deja que Codex guarde su registro de revisor». |
-| `avisar` dice que Codex no se registró | En Codex escribe `$revisar`. |
+| La bandeja dice «No se pudo escribir en el registro de Agent Toolkit» | Es el sandbox de Codex. Haz el paso «Deja que Codex guarde su registro de revisor». |
+| `avisar` dice que Codex no se registró | Ejecuta `registrar` desde la sesión de Codex. |
 | `registrar` no encuentra la sesión | En Codex, `/status` da el id. Luego `registrar … --thread <id>`. |
 | Codex tarda en reaccionar al aviso | Si está en mitad de un turno, el aviso espera a que termine. |
 | Codex no reclama el encargo | Su modelo no coincide con el recomendado. Cámbialo con `/model`. |
@@ -281,7 +281,7 @@ Límites que conviene recordar:
 - El esfuerzo de un agente lo fija su archivo, pero una variable como `CLAUDE_CODE_EFFORT_LEVEL` puede imponerse. El modelo sí se comprobó.
 - El aviso directo a Codex se probó contra una sesión inactiva, no con un encargo real de principio a fin.
 - Los agentes de solo lectura de Codex lo son por instrucción, no por sandbox.
-- La skill gemini no sustituye la revisión por otra IA (`/revisar`), que hacen Claude, Codex o Antigravity; no genera vídeo ni audio; el audio no se analiza.
+- La skill gemini no sustituye la revisión con varias IA (`/fabrica`); no genera vídeo ni audio; el audio no se analiza.
 - Probado en macOS con Node 24, clonando en carpetas distintas. No se ha comprobado en Linux ni en Windows.
 - `nexakit ahorro` estima los tokens recortados (caracteres / 4); hay una [medición sin conexión del mod](consolidacion.md#medición-sin-conexión-de-nexakit-ahorro-2026-11-11) (21,8 % menos salida de Bash), pero no una comparación en vivo del ahorro total.
 - La recomendación de modelo lee frases en español; con mensajes en otro idioma muestra el valor por defecto.
