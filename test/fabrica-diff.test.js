@@ -1,8 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir, devNull } from 'node:os';
 import path from 'node:path';
 import { leerDiff, clasificar, LIMITE_DIFF_BYTES } from '../dist/fabrica/diff.js';
@@ -73,7 +72,7 @@ test('leerDiff incluye índice, árbol de trabajo y archivos no seguidos', async
   assert.equal(r.base, git(dir, 'rev-parse', 'main'));
   assert.match(r.texto, /\+cambiado/u);
   assert.match(r.texto, /sin seguir/u);
-  assert.equal(r.sha256, createHash('sha256').update(r.texto, 'utf8').digest('hex'));
+  assert.match(r.sha256, /^[0-9a-f]{64}$/u);
   assert.deepEqual(await leerDiff(dir, 'main'), r, 'es determinista');
 });
 
@@ -117,6 +116,67 @@ test('leerDiff trata nombres con espacios y comillas, binarios, borrados y renom
   assert.match(r.texto, /Archivo nuevo: "a \\"b\\" ñ\.txt"/u);
   assert.match(r.texto, /Binario: sin diff textual/u);
   assert.match(r.texto, /rename from viejo nombre\.txt/u);
+});
+
+test('sha256 cambia al modificar un archivo no seguido de texto, binario o no UTF-8', async () => {
+  const dir = crearRepo();
+  const huella = async () => (await leerDiff(dir, 'main')).sha256;
+  const casos = [
+    ['texto.txt', 'uno\n', 'dos\n'],
+    ['dato.bin', Buffer.from([0, 1, 2]), Buffer.from([0, 1, 3])],
+    ['latin.txt', Buffer.from('caf\xe9', 'latin1'), Buffer.from('caf\xe1', 'latin1')],
+  ];
+  for (const [nombre, a, b] of casos) {
+    writeFileSync(path.join(dir, nombre), a);
+    const antes = await huella();
+    assert.equal(await huella(), antes, `${nombre}: estable`);
+    writeFileSync(path.join(dir, nombre), b);
+    assert.notEqual(await huella(), antes, nombre);
+  }
+});
+
+test('sha256 cambia al modificar el contenido de un binario seguido', async () => {
+  const dir = crearRepo();
+  writeFileSync(path.join(dir, 'seguido.bin'), Buffer.from([0, 1, 2]));
+  git(dir, 'add', '-A');
+  git(dir, 'commit', '-q', '-m', 'binario');
+  writeFileSync(path.join(dir, 'seguido.bin'), Buffer.from([0, 1, 3]));
+  const a = await leerDiff(dir, 'main');
+  writeFileSync(path.join(dir, 'seguido.bin'), Buffer.from([0, 1, 4]));
+  const b = await leerDiff(dir, 'main');
+  assert.match(a.texto, /Binary files/u);
+  assert.notEqual(a.sha256, b.sha256);
+});
+
+test('sha256 cambia al cambiar el bit ejecutable y al borrar o preparar un archivo', async (t) => {
+  const dir = crearRepo();
+  escribir(dir, 'run.sh', 'echo\n');
+  const sinPreparar = (await leerDiff(dir, 'main')).sha256;
+  git(dir, 'add', 'run.sh');
+  assert.notEqual((await leerDiff(dir, 'main')).sha256, sinPreparar, 'el índice cuenta');
+  if (process.platform === 'win32') {
+    t.diagnostic('bit ejecutable no comprobado en Windows');
+  } else {
+    const antes = (await leerDiff(dir, 'main')).sha256;
+    chmodSync(path.join(dir, 'run.sh'), 0o755);
+    assert.notEqual((await leerDiff(dir, 'main')).sha256, antes, 'el bit ejecutable cuenta');
+  }
+  escribir(dir, 'README.txt', 'otro\n');
+  const conCambio = (await leerDiff(dir, 'main')).sha256;
+  unlinkSync(path.join(dir, 'README.txt'));
+  assert.notEqual((await leerDiff(dir, 'main')).sha256, conCambio, 'el borrado cuenta');
+});
+
+test('sha256 no colisiona cuando un contenido imita la cabecera de otro archivo', async () => {
+  const dir = crearRepo();
+  escribir(dir, 'a.txt', 'x');
+  escribir(dir, 'b.txt', 'y');
+  const dos = await leerDiff(dir, 'main');
+  unlinkSync(path.join(dir, 'b.txt'));
+  escribir(dir, 'a.txt', 'x\n\nArchivo nuevo: "b.txt"\ny');
+  const uno = await leerDiff(dir, 'main');
+  assert.equal(uno.texto, dos.texto, 'precondición: el texto de presentación es idéntico');
+  assert.notEqual(uno.sha256, dos.sha256);
 });
 
 test('leerDiff describe enlaces simbólicos sin seguirlos', async (t) => {
@@ -224,6 +284,18 @@ test('clasificar: interfaz, pruebas y hooks', () => {
   }
   assert.ok(!clasificar([{ ruta: 'src/latest.js', tipo: 'M' }], {}).has('pruebas'));
   assert.ok(!clasificar([{ ruta: 'src/a.js', tipo: 'M' }], {}).has('interfaz'));
+});
+
+test('clasificar: los patrones coinciden también con segmentos que empiezan por punto', () => {
+  const critica = (ruta, ...patrones) => clasificar([{ ruta, tipo: 'M' }], { rutasCriticas: patrones }).has('critica');
+  assert.ok(critica('schemas/.x/a.json', 'schemas/**'));
+  assert.ok(critica('.github/a.yml', '**/*.yml'));
+  assert.ok(critica('.github/workflows/ci.yml', '.github/**'));
+  assert.ok(critica('.env', '*'));
+  assert.ok(critica('.husky/pre-commit', '{src,.husky}/**'));
+  assert.ok(critica('src/.cache/x.js', 'src/*/x.js'));
+  assert.ok(!critica('.github/a.yml', 'otro/**'));
+  assert.ok(!critica('x.github/a.yml', '.github/**'));
 });
 
 test('clasificar acepta rutas con separador de Windows', () => {

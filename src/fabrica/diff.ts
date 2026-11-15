@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import { lstat, readFile, readlink } from 'node:fs/promises';
 import path from 'node:path';
 import type { ConfigFabrica } from './esquemas.js';
@@ -131,6 +132,59 @@ async function textoArchivoNuevo(raiz: string, nombre: string): Promise<string> 
   return `${cabecera}${contenido.toString('utf8')}\n`;
 }
 
+interface EntradaHuella {
+  ruta: string;
+  tipo: TipoCambio;
+  /** `borrado` si ya no existe en el árbol de trabajo; si no, `archivo`, `enlace` o `especial`. */
+  estado: 'borrado' | 'archivo' | 'enlace' | 'especial';
+  /** Modo del árbol de trabajo (octal) o null si no existe. */
+  modo: string | null;
+  /** SHA-256 de los bytes reales (o del destino del enlace), sin pasar por UTF-8. */
+  digest: string | null;
+}
+
+async function digestContenido(archivo: string): Promise<string> {
+  const hash = createHash('sha256');
+  for await (const trozo of createReadStream(archivo)) hash.update(trozo as Buffer);
+  return hash.digest('hex');
+}
+
+async function entradaHuella(raiz: string, { ruta, tipo }: ArchivoCambiado): Promise<EntradaHuella> {
+  const archivo = path.join(raiz, ruta);
+  let info;
+  try {
+    info = await lstat(archivo);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { ruta, tipo, estado: 'borrado', modo: null, digest: null };
+    }
+    throw error;
+  }
+  const modo = (info.mode & 0o177777).toString(8);
+  if (info.isSymbolicLink()) {
+    const destino = Buffer.from(await readlink(archivo), 'utf8');
+    return { ruta, tipo, estado: 'enlace', modo, digest: createHash('sha256').update(destino).digest('hex') };
+  }
+  if (!info.isFile()) return { ruta, tipo, estado: 'especial', modo, digest: null };
+  return { ruta, tipo, estado: 'archivo', modo, digest: await digestContenido(archivo) };
+}
+
+/**
+ * Huella del estado revisado: JSON con campos en orden fijo (las cadenas van escapadas, así que
+ * ningún contenido puede imitar la estructura). Cubre HEAD, el ancestro, el índice y, por cada
+ * archivo cambiado, su ruta, tipo, modo y el digest de sus bytes reales. No depende de `texto`.
+ */
+function calcularHuella(head: string, ancestro: string, indice: string, entradas: EntradaHuella[]): string {
+  const estructura = {
+    version: 1,
+    head,
+    base: ancestro,
+    indice,
+    archivos: entradas.map((e) => [e.ruta, e.tipo, e.estado, e.modo, e.digest]),
+  };
+  return createHash('sha256').update(JSON.stringify(estructura), 'utf8').digest('hex');
+}
+
 /**
  * Calcula el diff de la rama de trabajo contra el ancestro común con `base`, incluyendo
  * el índice, el árbol de trabajo y los archivos no seguidos.
@@ -182,13 +236,18 @@ export async function leerDiff(raiz: string, base: string): Promise<ResultadoDif
     comprobarLimite(texto);
   }
 
-  return {
-    head,
-    base: ancestro,
-    archivos,
-    texto,
-    sha256: createHash('sha256').update(texto, 'utf8').digest('hex'),
-  };
+  let indice: string;
+  let entradas: EntradaHuella[];
+  try {
+    const { stdout } = await git(['ls-files', '--stage', '-z'], cwd);
+    indice = createHash('sha256').update(stdout, 'utf8').digest('hex');
+    entradas = [];
+    for (const archivo of archivos) entradas.push(await entradaHuella(cwd, archivo));
+  } catch (error) {
+    throw new ErrorFabrica(`No se pudo calcular la huella del diff: ${(error as Error).message}`, { cause: error });
+  }
+
+  return { head, base: ancestro, archivos, texto, sha256: calcularHuella(head, ancestro, indice, entradas) };
 }
 
 const RE_INTERFAZ = /\.(html|css|scss|jsx|tsx|vue|svelte|astro)$/iu;
@@ -196,8 +255,22 @@ const RE_PRUEBAS = /(^|\/)(test|tests|__tests__)\/|\.(test|spec)\.[^/]+$/iu;
 const RE_HOOKS = /hook|pre-tool/iu;
 const RE_DOCS = /^docs\/|\.md$/iu;
 
+// `matchesGlob` no hace coincidir segmentos que empiezan por punto con `*` ni `**`. Se sustituye
+// el punto inicial de cada segmento (en ruta y patrón) por un carácter de control antes de comparar.
+const PUNTO = '\u0001';
+
+function ocultarPuntos(ruta: string): string {
+  return ruta.replace(/(^|\/)\./gu, (_, previo: string) => previo + PUNTO);
+}
+
+function ocultarPuntosPatron(patron: string): string {
+  const inicio = patron.includes('{') ? /(^|\/|\{|,)\./gu : /(^|\/)\./gu;
+  return patron.replace(inicio, (_, previo: string) => previo + PUNTO);
+}
+
 function coincide(ruta: string, patrones: readonly string[] | undefined): boolean {
-  return (patrones ?? []).some((patron) => path.posix.matchesGlob(ruta, patron));
+  const normalizada = ocultarPuntos(ruta);
+  return (patrones ?? []).some((patron) => path.posix.matchesGlob(normalizada, ocultarPuntosPatron(patron)));
 }
 
 /** Etiqueta el conjunto de archivos con las categorías que usa el enrutador. */
