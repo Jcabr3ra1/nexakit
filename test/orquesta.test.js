@@ -15,7 +15,7 @@ test('el bloque global orquesta por niveles, revisa solo bajo demanda y deja el 
     .match(/<!-- nexakit:review:start -->[\s\S]*?<!-- nexakit:review:end -->/u)[0];
   assert.doesNotMatch(block, /automáticamente UNA revisión/u);
   assert.doesNotMatch(block, /revision-cruzada/u);
-  assert.match(block, /solo con \/revisar/u);
+  assert.match(block, /solo con \/fabrica/u);
   assert.match(block, /Modo tutor[^.]*solo si (?:la persona )?lo pide/u);
   for (const nivel of ['ligero', 'normal', 'exigente', 'alto']) assert.match(block, new RegExp(nivel, 'u'));
   assert.match(block, /niveles:nivel-<nivel>/u);
@@ -37,14 +37,14 @@ test('los subagentes de nivel se ofrecen para cualquier tarea, no solo para la r
   assert.match(await leer('src/level-agents.js'), /menos de 200 palabras/u);
 });
 
-test('revisar es la única skill de revisión y revision-cruzada queda retirada', async () => {
+test('fabrica es la única skill de revisión y revision-cruzada y revisar quedan retiradas', async () => {
   await assert.rejects(fs.access(new URL('../skills/revision-cruzada/SKILL.md', import.meta.url)));
-  const revisar = await leer('skills/revisar/SKILL.md');
-  assert.doesNotMatch(revisar, /revision-cruzada|automátic/u);
-  assert.match(revisar, /--disponibles/u);
-  assert.match(revisar, /¿A dónde mando la revisión\?/u);
+  await assert.rejects(fs.access(new URL('../skills/revisar/SKILL.md', import.meta.url)));
+  const fabrica = await leer('skills/fabrica/SKILL.md');
+  assert.doesNotMatch(fabrica, /revision-cruzada|automátic/u);
   const { RETIRED_SKILLS } = await import('../src/toolkit-setup.js');
   assert.ok(RETIRED_SKILLS.includes('revision-cruzada'));
-  for (const rel of ['skills/quality-gate/SKILL.md', 'README.md', 'docs/guias/guia-de-comandos.md', 'docs/guias/guia-de-comandos.html', 'docs/skills/superpowers-integration.md', 'docs/agentes/coordinacion/peer-review-workflow.md'])
+  assert.ok(RETIRED_SKILLS.includes('revisar'));
+  for (const rel of ['skills/quality-gate/SKILL.md', 'README.md', 'docs/guias/guia-de-comandos.md', 'docs/guias/guia-de-comandos.html', 'docs/skills/superpowers-integration.md', 'docs/agentes/coordinacion/fabrica.md'])
     assert.doesNotMatch(await leer(rel), /revision-cruzada|[Rr]evisión automática/u, rel);
 });

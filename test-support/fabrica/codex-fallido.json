@@ -1,0 +1,122 @@
+{
+  "metodos": {
+    "initialize": {
+      "resultado": {
+        "userAgent": "codex-falso/0.0.0",
+        "codexHome": "/tmp/codex-falso",
+        "platformFamily": "unix",
+        "platformOs": "macos"
+      }
+    },
+    "config/read": {
+      "resultado": {
+        "config": {
+          "mcp_servers": {
+            "memoria": {
+              "command": "memoria-mcp",
+              "enabled": true
+            },
+            "railway": {
+              "url": "https://example.com/mcp",
+              "enabled": true
+            }
+          }
+        },
+        "origins": {},
+        "layers": null
+      }
+    },
+    "mcpServerStatus/list": {
+      "resultado": {
+        "data": [
+          {
+            "name": "memoria",
+            "runtimeStatus": "disabled",
+            "pluginId": null,
+            "httpOrigin": null,
+            "serverInfo": null,
+            "serverCapabilities": null,
+            "toolListMeta": null,
+            "tools": {},
+            "resources": [],
+            "resourceTemplates": [],
+            "authStatus": "unsupported"
+          },
+          {
+            "name": "railway",
+            "runtimeStatus": "disabled",
+            "pluginId": null,
+            "httpOrigin": null,
+            "serverInfo": null,
+            "serverCapabilities": null,
+            "toolListMeta": null,
+            "tools": {},
+            "resources": [],
+            "resourceTemplates": [],
+            "authStatus": "unsupported"
+          }
+        ],
+        "nextCursor": null
+      }
+    },
+    "thread/start": {
+      "resultado": {
+        "thread": {
+          "id": "hilo-1"
+        },
+        "model": "gpt-5.5",
+        "modelProvider": "openai",
+        "serviceTier": null,
+        "disabledPluginIds": [],
+        "cwd": "/tmp",
+        "instructionSources": [],
+        "approvalPolicy": "untrusted",
+        "approvalsReviewer": "user",
+        "sandbox": {
+          "type": "readOnly",
+          "networkAccess": false
+        },
+        "reasoningEffort": "high"
+      }
+    },
+    "turn/start": {
+      "resultado": {
+        "turn": {
+          "id": "turno-1",
+          "rootTurnId": null,
+          "items": [],
+          "itemsView": "full",
+          "status": "inProgress",
+          "error": null,
+          "startedAt": null,
+          "completedAt": null,
+          "durationMs": null
+        }
+      },
+      "notificaciones": [
+        {
+          "metodo": "turn/completed",
+          "params": {
+            "threadId": "hilo-1",
+            "turn": {
+              "id": "turno-1",
+              "rootTurnId": null,
+              "items": [],
+              "itemsView": "notLoaded",
+              "status": "failed",
+              "error": {
+                "message": "Límite de uso alcanzado",
+                "codexErrorInfo": null,
+                "additionalDetails": null,
+                "misalignment": null
+              },
+              "startedAt": null,
+              "completedAt": null,
+              "durationMs": null
+            }
+          }
+        }
+      ]
+    }
+  }
+}

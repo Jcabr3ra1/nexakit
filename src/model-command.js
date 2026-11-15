@@ -3,8 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { getStaticTOMLValue, parseTOML } from 'toml-eslint-parser';
 import { agentModels, familyOfModel } from './agent-models.js';
-import { resolveCliInvocation } from './cli-executable.js';
-import { runRevisionProcess } from './revision-process.js';
+import { listAntigravityModels } from './antigravity-models.js';
 import pkg from '../package.json' with { type: 'json' };
 
 const ANTIGRAVITY_FAMILIES_BY_LEVEL = {
@@ -68,29 +67,7 @@ export async function inspectModels({
   }
   let antigravity = [],
     error = null;
-  if (includeAntigravity) {
-    try {
-      let result;
-      if (runCommand) result = await runCommand('agy', ['models']);
-      else {
-        const cli = await resolveCliInvocation({ name: 'agy', environment });
-        result = await runRevisionProcess(
-          { executable: cli.executable, args: [...cli.argsPrefix, 'models'], env: environment },
-          { prompt: '', timeoutMs: 20000 },
-        );
-      }
-      if (result.status !== 0 || result.timedOut) throw new Error('No se pudo consultar agy models.');
-      antigravity = result.stdout.split('\n').flatMap((line) => {
-        const [model, label] = line.split('\t');
-        const effort = model?.match(/-(low|medium|high|xhigh|max)$/u)?.[1];
-        return model && label && effort
-          ? [{ model, description: label, efforts: [effort], defaultEffort: effort }]
-          : [];
-      });
-    } catch (e) {
-      error = e.message;
-    }
-  }
+  if (includeAntigravity) ({ models: antigravity, error } = await listAntigravityModels({ environment, runCommand }));
   const codex = old.codex.models.map((item) => ({
     ...item,
     defaultEffort: cache.models?.find((m) => m.slug === item.model)?.default_reasoning_level ?? null,

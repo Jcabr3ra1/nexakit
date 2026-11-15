@@ -1,4 +1,4 @@
-import { createPeerReviewStore } from "./peer-review-store.js";
+import { createGeminiUsageStore } from "./gemini-usage-store.js";
 import { GeminiError, estado, imagen, investigar, consultar, analizar, historial, recuperar } from './gemini-tools.js';
 const HELP = `Uso: agent-toolkit-gemini investigar --prompt <pregunta> [--modelo <id>] [--copiar-a <carpeta>]
      agent-toolkit-gemini consultar --prompt <consulta> [--modelo <id>] [--copiar-a <carpeta>]
@@ -11,11 +11,12 @@ const HELP = `Uso: agent-toolkit-gemini investigar --prompt <pregunta> [--modelo
 Solo Antigravity CLI (agy), sin API ni cambio de proveedor. analizar copia únicamente
 los archivos elegidos (texto, imagen, PDF o vídeo); audio bloqueado por validación fallida. Su lectura depende de las
 herramientas del cliente. No genera audio ni vídeo. historial/recuperar no llaman IA.
-Añade --task <id> --project-root <ruta> a una consulta para registrar su consumo.
-Cada consulta se guarda en ~/.agent-toolkit/gemini. --copiar-a nunca sobrescribe.
+Cada consulta se guarda en ~/.agent-toolkit/gemini y su consumo declarado, en consumo.jsonl. --copiar-a nunca sobrescribe.
 Exit: 0 completado, 1 error, 2 uso incorrecto, 3 análisis parcial/no compatible.
 `;
-const NAMES = { '--prompt': 'prompt', '--modelo': 'model', '--copiar-a': 'copyTo', '--espera-seg': 'wait', '--archivo': 'files', '--directorio': 'directory', '--limite': 'limit', '--task': 'taskId', '--project-root': 'projectRoot' };
+const COUNTERS = ['inputTokens', 'cacheReadTokens', 'outputTokens', 'totalTokens', 'durationMs'];
+const MEASURED = ['investigar', 'imagen', 'consultar', 'analizar'];
+const NAMES = { '--prompt': 'prompt', '--modelo': 'model', '--copiar-a': 'copyTo', '--espera-seg': 'wait', '--archivo': 'files', '--directorio': 'directory', '--limite': 'limit' };
 const ALLOWED = {
   investigar: ['prompt','model','copyTo'], consultar: ['prompt','model','copyTo'], analizar: ['prompt','model','copyTo','files'],
   imagen: ['prompt','model','copyTo','wait'], recuperar: ['directory','copyTo','wait'], historial: ['limit'], estado: []
@@ -26,20 +27,18 @@ export async function runGeminiCli(argv, { out, err, tools = { investigar, image
   if (!Object.hasOwn(ALLOWED, command ?? '')) { await err(HELP); return 2; }
   const options = {};
   for (let i=0; i<rest.length; i+=2) {
+    if (['--task', '--project-root'].includes(rest[i])) { await err('--task y --project-root se retiraron; el consumo se guarda en ~/.agent-toolkit/gemini/consumo.jsonl\n'); return 2; }
     const key = NAMES[rest[i]], value = rest[i+1];
-    if (!key || !(ALLOWED[command].includes(key) || ['investigar','imagen','consultar','analizar'].includes(command) && ['taskId','projectRoot'].includes(key)) || value === undefined || !value || (key !== 'files' && Object.hasOwn(options,key))) { await err(HELP); return 2; }
+    if (!key || !(ALLOWED[command].includes(key)) || value === undefined || !value || (key !== 'files' && Object.hasOwn(options,key))) { await err(HELP); return 2; }
     if (key === 'files') (options.files ??= []).push(value); else options[key] = value;
   }
   if ((['investigar','consultar','analizar','imagen'].includes(command) && !options.prompt) ||
     (command === 'analizar' && !options.files?.length) || (command === 'recuperar' && !options.directory)) { await err(HELP); return 2; }
   if (options.wait !== undefined && (!/^\d+$/u.test(options.wait) || Number(options.wait)<1 || Number(options.wait)>600) ||
       options.limit !== undefined && (!/^\d+$/u.test(options.limit) || Number(options.limit)<1 || Number(options.limit)>100)) { await err(HELP); return 2; }
-  if (Boolean(options.taskId) !== Boolean(options.projectRoot) || options.taskId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(options.taskId)) { await err(HELP); return 2; }
   let usageRecord = null;
   try {
-    const store = options.taskId ? usageStore ?? createPeerReviewStore() : null;
-    const bound = { taskId: options.taskId, projectRoot: options.projectRoot };
-    if (store) await store.getCollaboration(bound);
+    const store = MEASURED.includes(command) ? usageStore ?? createGeminiUsageStore() : null;
     let input;
     if (command === 'estado') input = undefined;
     else if (command === 'historial') input = options.limit === undefined ? {} : { limit: Number(options.limit) };
@@ -50,15 +49,19 @@ export async function runGeminiCli(argv, { out, err, tools = { investigar, image
       if (usageRecord) return usageRecord;
       try {
         const u = result.usage;
-        usageRecord = await store.recordUsage({ ...bound, measurement: {
+        const measurement = {
           id: 'gemini:' + result.conversationId, agent: 'gemini', model: result.model, source: 'client-reported',
           phase: { investigar: 'research', imagen: 'image', analizar: 'analysis', consultar: 'other' }[command],
           inputTokens: u.input_tokens ?? null, cacheReadTokens: u.cache_read_tokens ?? null,
           outputTokens: u.output_tokens ?? null, totalTokens: u.total_tokens ?? null,
           durationMs: result.durationMs ?? null, costUsd: null
-        }});
+        };
+        // Sin ningún contador no hay nada que medir: una consulta correcta no debe fallar por eso.
+        usageRecord = COUNTERS.every(key => measurement[key] === null)
+          ? { recorded: false, reason: 'sin-contadores' }
+          : await store.recordUsage(measurement);
       } catch {
-        usageRecord = { recorded: false, error: 'No se guardó la medición; conserva estos resultados y regístrala con medir, sin repetir la consulta.' };
+        usageRecord = { recorded: false, error: 'No se guardó la medición de consumo; conserva estos resultados y no repitas la consulta.' };
       }
       return usageRecord;
     };

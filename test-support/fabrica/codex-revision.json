@@ -1,0 +1,499 @@
+{
+  "metodos": {
+    "initialize": {
+      "resultado": {
+        "userAgent": "codex-falso/0.0.0",
+        "codexHome": "/tmp/codex-falso",
+        "platformFamily": "unix",
+        "platformOs": "macos"
+      }
+    },
+    "config/read": {
+      "resultado": {
+        "config": {
+          "mcp_servers": {
+            "memoria": {
+              "command": "memoria-mcp",
+              "enabled": true
+            },
+            "railway": {
+              "url": "https://example.com/mcp",
+              "enabled": true
+            }
+          }
+        },
+        "origins": {},
+        "layers": null
+      }
+    },
+    "mcpServerStatus/list": {
+      "resultado": {
+        "data": [
+          {
+            "name": "memoria",
+            "runtimeStatus": "disabled",
+            "pluginId": null,
+            "httpOrigin": null,
+            "serverInfo": null,
+            "serverCapabilities": null,
+            "toolListMeta": null,
+            "tools": {},
+            "resources": [],
+            "resourceTemplates": [],
+            "authStatus": "unsupported"
+          },
+          {
+            "name": "railway",
+            "runtimeStatus": "disabled",
+            "pluginId": null,
+            "httpOrigin": null,
+            "serverInfo": null,
+            "serverCapabilities": null,
+            "toolListMeta": null,
+            "tools": {},
+            "resources": [],
+            "resourceTemplates": [],
+            "authStatus": "unsupported"
+          }
+        ],
+        "nextCursor": null
+      }
+    },
+    "thread/start": {
+      "resultado": {
+        "thread": {
+          "id": "hilo-1"
+        },
+        "model": "gpt-5.5",
+        "modelProvider": "openai",
+        "serviceTier": null,
+        "disabledPluginIds": [],
+        "cwd": "/tmp",
+        "instructionSources": [],
+        "approvalPolicy": "untrusted",
+        "approvalsReviewer": "user",
+        "sandbox": {
+          "type": "readOnly",
+          "networkAccess": false
+        },
+        "reasoningEffort": "high"
+      }
+    },
+    "turn/start": {
+      "resultado": {
+        "turn": {
+          "id": "turno-1",
+          "rootTurnId": null,
+          "items": [],
+          "itemsView": "full",
+          "status": "inProgress",
+          "error": null,
+          "startedAt": null,
+          "completedAt": null,
+          "durationMs": null
+        }
+      },
+      "peticiones": [
+        {
+          "metodo": "item/fileChange/requestApproval",
+          "params": {
+            "threadId": "hilo-1",
+            "turnId": "turno-1",
+            "itemId": "item-1",
+            "startedAtMs": 0,
+            "reason": "Quiero editar",
+            "grantRoot": null
+          },
+          "id": "srv-1"
+        }
+      ]
+    }
+  },
+  "alResponder": {
+    "srv-1": {
+      "peticiones": [
+        {
+          "metodo": "applyPatchApproval",
+          "params": {
+            "conversationId": "hilo-1",
+            "callId": "c-1",
+            "fileChanges": {},
+            "reason": null,
+            "grantRoot": null
+          },
+          "id": "srv-2"
+        }
+      ]
+    },
+    "srv-2": {
+      "peticiones": [
+        {
+          "metodo": "item/permissions/requestApproval",
+          "params": {
+            "threadId": "hilo-1",
+            "turnId": "turno-1",
+            "itemId": "item-1",
+            "startedAtMs": 0,
+            "environmentId": null,
+            "cwd": "/tmp",
+            "reason": "Necesito escribir",
+            "permissions": {}
+          },
+          "id": "srv-3"
+        }
+      ]
+    },
+    "srv-3": {
+      "peticiones": [
+        {
+          "metodo": "item/commandExecution/requestApproval",
+          "params": {
+            "threadId": "hilo-1",
+            "turnId": "turno-1",
+            "itemId": "item-1",
+            "startedAtMs": 0,
+            "kind": "command",
+            "environmentId": null,
+            "command": "npm test"
+          },
+          "id": "srv-4"
+        }
+      ]
+    },
+    "srv-4": {
+      "peticiones": [
+        {
+          "metodo": "item/commandExecution/requestApproval",
+          "params": {
+            "threadId": "hilo-1",
+            "turnId": "turno-1",
+            "itemId": "item-1",
+            "startedAtMs": 0,
+            "kind": "command",
+            "environmentId": null,
+            "command": "rm -rf x"
+          },
+          "id": "srv-5"
+        }
+      ]
+    },
+    "srv-5": {
+      "peticiones": [
+        {
+          "metodo": "item/commandExecution/requestApproval",
+          "params": {
+            "threadId": "hilo-1",
+            "turnId": "turno-1",
+            "itemId": "item-1",
+            "startedAtMs": 0,
+            "kind": "command",
+            "environmentId": null,
+            "command": "npm test && rm -rf x"
+          },
+          "id": "srv-6"
+        }
+      ]
+    },
+    "srv-6": {
+      "peticiones": [
+        {
+          "metodo": "item/commandExecution/requestApproval",
+          "params": {
+            "threadId": "hilo-1",
+            "turnId": "turno-1",
+            "itemId": "item-1",
+            "startedAtMs": 0,
+            "kind": "command",
+            "environmentId": null,
+            "command": "zsh -lc 'npm test'"
+          },
+          "id": "srv-7"
+        }
+      ]
+    },
+    "srv-7": {
+      "peticiones": [
+        {
+          "metodo": "item/commandExecution/requestApproval",
+          "params": {
+            "threadId": "hilo-1",
+            "turnId": "turno-1",
+            "itemId": "item-1",
+            "startedAtMs": 0,
+            "kind": "command",
+            "environmentId": null,
+            "command": "zsh -lc 'npm test; rm -rf x'"
+          },
+          "id": "srv-8"
+        }
+      ]
+    },
+    "srv-8": {
+      "peticiones": [
+        {
+          "metodo": "item/commandExecution/requestApproval",
+          "params": {
+            "threadId": "hilo-1",
+            "turnId": "turno-1",
+            "itemId": "item-1",
+            "startedAtMs": 0,
+            "kind": "writeStdin",
+            "environmentId": null,
+            "command": "npm test"
+          },
+          "id": "srv-9"
+        }
+      ]
+    },
+    "srv-9": {
+      "peticiones": [
+        {
+          "metodo": "item/commandExecution/requestApproval",
+          "params": {
+            "threadId": "hilo-1",
+            "turnId": "turno-1",
+            "itemId": "item-1",
+            "startedAtMs": 0,
+            "kind": "command",
+            "environmentId": null,
+            "command": "npm test",
+            "cwd": "/"
+          },
+          "id": "srv-10"
+        }
+      ]
+    },
+    "srv-10": {
+      "peticiones": [
+        {
+          "metodo": "execCommandApproval",
+          "params": {
+            "conversationId": "hilo-1",
+            "callId": "c-2",
+            "approvalId": null,
+            "command": [
+              "npm",
+              "test"
+            ],
+            "cwd": ".",
+            "reason": null,
+            "parsedCmd": []
+          },
+          "id": "srv-11"
+        }
+      ]
+    },
+    "srv-11": {
+      "peticiones": [
+        {
+          "metodo": "execCommandApproval",
+          "params": {
+            "conversationId": "hilo-1",
+            "callId": "c-3",
+            "approvalId": null,
+            "command": [
+              "npm test"
+            ],
+            "cwd": ".",
+            "reason": null,
+            "parsedCmd": []
+          },
+          "id": "srv-12"
+        }
+      ]
+    },
+    "srv-12": {
+      "peticiones": [
+        {
+          "metodo": "item/tool/requestUserInput",
+          "params": {
+            "threadId": "hilo-1",
+            "turnId": "turno-1",
+            "itemId": "item-1",
+            "startedAtMs": 0,
+            "questions": [],
+            "isBlocking": true,
+            "autoResolutionMs": null
+          },
+          "id": "srv-13"
+        }
+      ]
+    },
+    "srv-13": {
+      "peticiones": [
+        {
+          "metodo": "mcpServer/elicitation/request",
+          "params": {
+            "threadId": "hilo-1",
+            "turnId": "turno-1",
+            "serverName": "x",
+            "mode": "url",
+            "message": "Abre",
+            "url": "https://example.com",
+            "elicitationId": "e-1",
+            "_meta": null
+          },
+          "id": "srv-14"
+        }
+      ]
+    },
+    "srv-14": {
+      "peticiones": [
+        {
+          "metodo": "item/commandExecution/requestApproval",
+          "params": {
+            "threadId": "hilo-1",
+            "turnId": "turno-1",
+            "itemId": "item-1",
+            "startedAtMs": 0,
+            "kind": "command",
+            "environmentId": null,
+            "command": "zsh -lc 'npm\ntest'"
+          },
+          "id": "srv-15"
+        }
+      ]
+    },
+    "srv-15": {
+      "peticiones": [
+        {
+          "metodo": "execCommandApproval",
+          "params": {
+            "conversationId": "hilo-1",
+            "callId": "c-4",
+            "approvalId": null,
+            "command": [
+              "bash",
+              "-lc",
+              "npm\ntest"
+            ],
+            "cwd": ".",
+            "reason": null,
+            "parsedCmd": []
+          },
+          "id": "srv-16"
+        }
+      ]
+    },
+    "srv-16": {
+      "peticiones": [
+        {
+          "metodo": "execCommandApproval",
+          "params": {
+            "conversationId": "hilo-1",
+            "callId": "c-5",
+            "approvalId": null,
+            "command": [
+              "./tools/bash",
+              "-lc",
+              "npm test"
+            ],
+            "cwd": ".",
+            "reason": null,
+            "parsedCmd": []
+          },
+          "id": "srv-17"
+        }
+      ]
+    },
+    "srv-17": {
+      "peticiones": [
+        {
+          "metodo": "item/tool/call",
+          "params": {
+            "threadId": "hilo-1",
+            "turnId": "turno-1",
+            "itemId": "item-1",
+            "startedAtMs": 0,
+            "callId": "c-6",
+            "namespace": null,
+            "tool": "escribir",
+            "arguments": {}
+          },
+          "id": "srv-18"
+        }
+      ]
+    },
+    "srv-18": {
+      "notificaciones": [
+        {
+          "metodo": "thread/tokenUsage/updated",
+          "params": {
+            "threadId": "hilo-1",
+            "turnId": "turno-1",
+            "tokenUsage": {
+              "total": {
+                "totalTokens": 1500,
+                "inputTokens": 1200,
+                "cachedInputTokens": 0,
+                "cacheWriteInputTokens": 0,
+                "outputTokens": 300,
+                "reasoningOutputTokens": 100
+              },
+              "last": {
+                "totalTokens": 1500,
+                "inputTokens": 1200,
+                "cachedInputTokens": 0,
+                "cacheWriteInputTokens": 0,
+                "outputTokens": 300,
+                "reasoningOutputTokens": 100
+              },
+              "modelContextWindow": null
+            }
+          }
+        },
+        {
+          "metodo": "item/completed",
+          "params": {
+            "threadId": "hilo-1",
+            "turnId": "turno-1",
+            "completedAtMs": 0,
+            "item": {
+              "type": "agentMessage",
+              "id": "msg-1",
+              "text": "{\"hallazgos\": [{\"estacion\": \"pruebas\", \"gravedad\": \"media\", \"archivo\": \"src/a.js\", \"linea\": 3, \"categoria\": \"cobertura\", \"hallazgo\": \"Falta una prueba\", \"evidencia\": \"src/a.js:3\", \"propuesta\": \"Añadir la prueba\", \"confianza\": \"alta\"}], \"resumen\": \"Un hallazgo.\"}",
+              "phase": null,
+              "memoryCitation": null,
+              "delivery": null,
+              "questions": null
+            }
+          }
+        },
+        {
+          "metodo": "item/completed",
+          "params": {
+            "threadId": "hilo-1",
+            "turnId": "turno-1",
+            "completedAtMs": 0,
+            "item": {
+              "type": "agentMessage",
+              "id": "msg-2",
+              "text": "Termino de revisar.",
+              "phase": "commentary",
+              "memoryCitation": null,
+              "delivery": null,
+              "questions": null
+            }
+          }
+        },
+        {
+          "metodo": "turn/completed",
+          "params": {
+            "threadId": "hilo-1",
+            "turn": {
+              "id": "turno-1",
+              "rootTurnId": null,
+              "items": [],
+              "itemsView": "notLoaded",
+              "status": "completed",
+              "error": null,
+              "startedAt": null,
+              "completedAt": null,
+              "durationMs": null
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -79,3 +79,54 @@ test('Antigravity recommends a model and effort actually offered for the request
   assert.match(withCarbon, /^  gemini-4-hydrogen-xhigh · xhigh$/mu);
   assert.match(await recommend('alto', []), /sin recomendación disponible/u);
 });
+
+test('models are listed without depending on the retired revision process', async () => {
+  const source = await fs.readFile(new URL('../src/model-command.js', import.meta.url), 'utf8');
+  assert.match(source, /from '\.\/antigravity-models\.js'/u);
+  assert.doesNotMatch(source, /revision|peer-review|task-prepare/u);
+  const models = await fs.readFile(new URL('../src/antigravity-models.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(models, /revision|peer-review|task-prepare/u);
+});
+
+test('antigravity-models parses `agy models` and reports failures in Spanish', async () => {
+  const { listAntigravityModels, parseAntigravityModels } = await import('../src/antigravity-models.js');
+  assert.deepEqual(parseAntigravityModels('gemini-3.8-flash-low\tFlash (Low)\nsin-esfuerzo\tX\n\nmalformada'),
+    [{ model: 'gemini-3.8-flash-low', description: 'Flash (Low)', efforts: ['low'], defaultEffort: 'low' }]);
+  const ok = await listAntigravityModels({ runCommand: async (name, args) => { assert.deepEqual([name, args], ['agy', ['models']]); return { status: 0, stdout: 'gemini-4-argon-high\tArgon (High)\n' }; } });
+  assert.deepEqual([ok.models.length, ok.error], [1, null]);
+  for (const result of [{ status: 1, stdout: '' }, { status: 0, stdout: '', timedOut: true }]) {
+    const failed = await listAntigravityModels({ runCommand: async () => result });
+    assert.deepEqual([failed.models, failed.error], [[], 'No se pudo consultar agy models.']);
+  }
+  const thrown = await listAntigravityModels({ runCommand: async () => { throw new Error('agy no está disponible'); } });
+  assert.equal(thrown.error, 'agy no está disponible');
+});
+
+test('antigravity-models runs a real agy found on PATH once, with no shell', { skip: process.platform === 'win32' }, async () => {
+  const { listAntigravityModels } = await import('../src/antigravity-models.js');
+  const bin = await fs.mkdtemp(path.join(os.tmpdir(), 'agy-models-'));
+  try {
+    await fs.writeFile(path.join(bin, 'agy'), '#!/bin/sh\nif [ "$1" = "models" ]; then printf "gemini-4-argon-high\\tArgon (High)\\n"; else exit 3; fi\n', { mode: 0o755 });
+    const found = await listAntigravityModels({ environment: { PATH: bin } });
+    assert.equal(found.error, null);
+    assert.deepEqual(found.models.map((m) => m.model), ['gemini-4-argon-high']);
+    await fs.writeFile(path.join(bin, 'agy'), '#!/bin/sh\nexit 4\n', { mode: 0o755 });
+    assert.equal((await listAntigravityModels({ environment: { PATH: bin } })).error, 'No se pudo consultar agy models.');
+    assert.ok((await listAntigravityModels({ environment: { PATH: path.join(bin, 'nada') } })).error);
+  } finally { await fs.rm(bin, { recursive: true, force: true }); }
+});
+
+test('antigravity-models corta un agy que no responde y no deja pasar una salida enorme', { skip: process.platform === 'win32' }, async () => {
+  const { listAntigravityModels } = await import('../src/antigravity-models.js');
+  const bin = await fs.mkdtemp(path.join(os.tmpdir(), 'agy-tope-'));
+  try {
+    await fs.writeFile(path.join(bin, 'agy'), '#!/bin/sh\nexec sleep 30\n', { mode: 0o755 });
+    const inicio = Date.now();
+    const colgado = await listAntigravityModels({ environment: { PATH: `${bin}:/bin:/usr/bin` }, timeoutMs: 300 });
+    assert.deepEqual([colgado.models, colgado.error], [[], 'No se pudo consultar agy models.']);
+    assert.ok(Date.now() - inicio < 10000, 'el tope de tiempo mata al proceso');
+    await fs.writeFile(path.join(bin, 'agy'), '#!/bin/sh\nhead -c 5000000 /dev/zero | tr "\\0" "x"\n', { mode: 0o755 });
+    const enorme = await listAntigravityModels({ environment: { PATH: `${bin}:/bin:/usr/bin` } });
+    assert.deepEqual([enorme.models, enorme.error], [[], 'La salida de agy models supera el límite.']);
+  } finally { await fs.rm(bin, { recursive: true, force: true }); }
+});

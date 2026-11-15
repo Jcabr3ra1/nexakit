@@ -16,7 +16,7 @@ export class LevelAgentsError extends Error {
 
 function content(slug, level, { model, effort }) {
   const task = `nivel ${level} (${model}, ${effort})`;
-  return [`# Generado por \`agent-toolkit-inbox agentes\`. Ese comando nunca sobrescribe ni borra: lo anterior queda como .anterior-*.`,
+  return [`# Generado por \`nexakit codex agentes\`. Ese comando nunca sobrescribe ni borra: lo anterior queda como .anterior-*.`,
     `name = ${JSON.stringify(`nivel_${slug}`)}`,
     `description = ${JSON.stringify(`Ejecuta una tarea delegada de ${task}. Úsalo para ${USES[slug]}.`)}`,
     `model = ${JSON.stringify(model)}`, `model_reasoning_effort = ${JSON.stringify(effort)}`,
@@ -103,8 +103,8 @@ export function levelAgentsTable({ catalog, files }) {
   lines.push("");
   if (!catalog) lines.push("No se pudo leer el catálogo de Codex (`models_cache.json`); no se escribe nada hasta que se lea bien.");
   const pending = files.filter(file => file.state === "nuevo").length, different = files.filter(file => file.state === "distinto").length;
-  if (pending) lines.push(`Vista previa: no se escribió nada. Ejecuta \`agent-toolkit-inbox agentes --escribir\` para crear ${pending}.`);
-  if (different) lines.push(`Hay ${different} ${different === 1 ? "archivo" : "archivos"} con otro contenido que no se ${different === 1 ? "toca" : "tocan"}. Con \`--escribir --forzar\` se actualizan y el anterior queda como \`.anterior-*\` junto al archivo.`);
+  if (pending) lines.push(`Vista previa: no se escribió nada. Ejecuta \`nexakit codex agentes --apply\` para crear ${pending}.`);
+  if (different) lines.push(`Hay ${different} ${different === 1 ? "archivo" : "archivos"} con otro contenido que no se ${different === 1 ? "toca" : "tocan"}. Con \`nexakit codex agentes --apply --actualizar\` se actualizan y el anterior queda como \`.anterior-*\` junto al archivo.`);
   for (const file of files.filter(item => item.anterior)) lines.push(`Anterior conservado: \`${file.anterior}\`.`);
   if (!pending && !different && catalog) lines.push("Los agentes están al día.");
   lines.push("");

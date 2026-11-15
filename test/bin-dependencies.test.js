@@ -26,9 +26,7 @@ test('all checkout executables that import external packages explain how to inst
     ['nexakit.js', 'comprobar'],
     ['agent-toolkit.js', '--help'],
     ['project-memory.js', '--help'],
-    ['project-memory-mcp.js', '--manifest', path.join(root, 'project-memory.json')],
-    ['agent-toolkit-mcp.js'],
-    ['agent-task.js', '--help']
+    ['project-memory-mcp.js', '--manifest', path.join(root, 'project-memory.json')]
   ];
   for (const [bin, ...args] of invocations) {
     const label = `${bin} ${args.join(' ')}`;
@@ -47,8 +45,6 @@ test('with its dependencies installed the commands still work and every bin entr
   }
   assert.equal(run(ROOT, 'project-memory.js', '--help').status, 0);
   assert.equal(run(ROOT, 'project-memory-mcp.js', '--help').status, 0);
-  assert.equal(run(ROOT, 'agent-task.js', '--help').status, 0);
-  assert.equal(run(ROOT, 'agent-toolkit-inbox.js', '--help').status, 2);
   assert.equal(run(ROOT, 'agent-toolkit-gemini.js', '--help').status, 0);
 
   for (const file of await fs.readdir(path.join(ROOT, 'bin'))) {
@@ -85,4 +81,19 @@ test('only a missing package gets the explanation; any other failure is raised u
   } finally {
     process.exitCode = before;
   }
+});
+
+test('sin dist/fabrica el servidor MCP y la orden fabrica explican cómo compilar, sin traza', async t => {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'bin-dist-')));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  for (const entry of ['bin', 'src', 'catalogs', 'plugins', 'schemas', 'package.json']) await fs.cp(path.join(ROOT, entry), path.join(root, entry), { recursive: true });
+  await fs.symlink(path.join(ROOT, 'node_modules'), path.join(root, 'node_modules'), 'junction');
+  const mensaje = 'Falta la compilación de la fábrica (dist/fabrica). Ejecuta npm run build o reinstala nexakit.\n';
+  const mcp = run(root, 'nexakit-fabrica-mcp.js');
+  assert.equal(mcp.status, 1);
+  assert.equal(mcp.stderr, mensaje);
+  const cli = run(root, 'nexakit.js', 'fabrica', '--help');
+  assert.equal(cli.status, 1);
+  assert.equal(cli.stderr, mensaje);
+  assert.equal(cli.stdout, '');
 });

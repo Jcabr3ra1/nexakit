@@ -23,7 +23,9 @@ import {
 } from './link-states.js';
 import { actualRoot, ensureStableInstall, nexakitDir } from './stable-install.js';
 import { inspectMods } from './mods.js';
-import { inspectSuperpowers } from './superpowers.js';
+import { defaultRunner, inspectSuperpowers } from './superpowers.js';
+import { planReviewInstructions } from './review-instructions.js';
+import { teamMarks } from './codex-team.js';
 
 import packageJson from '../package.json' with { type: 'json' };
 
@@ -42,10 +44,16 @@ const SKILL_HOMES = {
 const MCP_CLIENTS = ['codex', 'claude'];
 // Skills nexakit no longer ships. Links it created are removed; anything else with the name is reported, never
 // touched. The last three are now covered by Superpowers (brainstorming/writing-plans, systematic-debugging and
-// test-driven-development), which is required. revision-cruzada merged into revisar when review became on demand.
-export const RETIRED_SKILLS = Object.freeze(['programar', 'estado', 'spec-driven-development', 'depurar', 'desarrollo-con-pruebas', 'revision-cruzada']);
-const MCP_SUFFIX = 'bin/agent-toolkit-mcp.js';
+// test-driven-development), which is required. revision-cruzada merged into revisar, which `fabrica` replaced.
+export const RETIRED_SKILLS = Object.freeze(['programar', 'estado', 'spec-driven-development', 'depurar', 'desarrollo-con-pruebas', 'revision-cruzada', 'revisar']);
+const MCP_NAME = 'nexakit-fabrica';
+const MCP_SUFFIX = 'bin/nexakit-fabrica-mcp.js';
+// The MCP this one replaces. An entry that runs its script is nexakit's and `npx nexakit` migrates it (see
+// applyMcpMigration); anything else under those names is only reported.
+const LEGACY_MCP_NAMES = ['agent-toolkit-workflow', 'agent-toolkit'];
+const LEGACY_MCP_SUFFIX = 'bin/agent-toolkit-mcp.js';
 const COMMANDS = { codex: 'codex', claude: 'claude', antigravity: 'agy' };
+const CLIENT_NAMES = { codex: 'Codex', claude: 'Claude Code', antigravity: 'Antigravity' };
 export const globalSkillTarget = (home, client, name) => path.join(home, ...SKILL_HOMES[client], name);
 // Registry key of an MCP entry: it has no path of its own in the home folder.
 export const mcpRegistryTarget = (client, name) => `mcp:${client}:${name}`;
@@ -125,11 +133,83 @@ async function parents(home, target, create = false) {
 export function registrationCommand(client, current, nodePath, entry) {
   const add =
     client === 'codex'
-      ? `codex mcp add agent-toolkit-workflow -- ${quote(nodePath)} ${quote(entry)}`
-      : `claude mcp add --scope user --transport stdio agent-toolkit-workflow -- ${quote(nodePath)} ${quote(entry)}`;
+      ? `codex mcp add ${MCP_NAME} -- ${quote(nodePath)} ${quote(entry)}`
+      : `claude mcp add --scope user --transport stdio ${MCP_NAME} -- ${quote(nodePath)} ${quote(entry)}`;
   if (current.state === 'falta') return add;
   // Moving or repairing an existing entry: remove it first under the name it has now.
   return `${client === 'codex' ? `codex mcp remove ${current.name}` : `claude mcp remove ${current.name} -s user`} && ${add}`;
+}
+// The same orders as registrationCommand, as arguments for the agent's CLI (no shell in between).
+const addArgs = (client, nodePath, entry) =>
+  client === 'codex'
+    ? ['mcp', 'add', MCP_NAME, '--', nodePath, entry]
+    : ['mcp', 'add', '--scope', 'user', '--transport', 'stdio', MCP_NAME, '--', nodePath, entry];
+const removeArgs = (client, name) => (client === 'codex' ? ['mcp', 'remove', name] : ['mcp', 'remove', name, '-s', 'user']);
+
+// Runs what `fabrica` planned for one agent with its own CLI, never editing ~/.claude.json or config.toml by hand:
+// register nexakit-fabrica (or repair a broken entry: remove it and add it again), and only after that succeeded
+// remove the old MCP. A failure never leaves the agent without a working MCP, and the next run resumes from the real
+// state, which is read again right before.
+export async function applyFabricaMcp(
+  client,
+  {
+    homeDirectory = os.homedir(),
+    toolkitRoot = TOOLKIT_ROOT,
+    environment = process.env,
+    codexHome = environment.CODEX_HOME ?? path.join(homeDirectory, '.codex'),
+    runCommand,
+  } = {},
+) {
+  if (!MCP_CLIENTS.includes(client)) throw new Error(`Agente sin MCP de la fábrica: ${client}`);
+  const setup = await setupToolkit({ agent: client, homeDirectory, toolkitRoot, environment, codexHome });
+  const action = setup.mcp.fabrica[client];
+  if (!action || action.bloqueado) return false;
+  const run = runCommand ?? (await defaultRunner(COMMANDS[client], environment));
+  const step = async (args, what) => {
+    const result = await run(COMMANDS[client], args);
+    if (result?.status !== 0) {
+      const detail = String(result?.stderr || result?.stdout || result?.errorCode || '').trim();
+      throw new Error(`No se pudo ${what} en ${CLIENT_NAMES[client]}.${detail ? ` ${detail}` : ''}`);
+    }
+  };
+  if (action.registrar || action.reparar) {
+    const entry = path.join(setup.activeRoot, MCP_SUFFIX);
+    if (!(await stat(entry))) throw new Error(`No se pudo registrar ${MCP_NAME}: falta ${entry}.`);
+    if (action.reparar) await step(removeArgs(client, MCP_NAME), `quitar el registro roto de ${MCP_NAME}`);
+    await step(addArgs(client, await resolveNodeExecutable(environment), entry), `registrar ${MCP_NAME}`);
+  }
+  if (action.retirar) await step(removeArgs(client, action.retirar), `retirar el MCP antiguo ${action.retirar}`);
+  return true;
+}
+
+// The MCP entries of nexakit in one agent: nexakit-fabrica and the old one, only when they run nexakit's script.
+// `quitar --global` removes exactly these.
+export async function nexakitMcpEntries(client, { homeDirectory = os.homedir(), codexHome } = {}) {
+  let servers;
+  try {
+    servers = await readServers(client, homeDirectory, codexHome ?? path.join(homeDirectory, '.codex'));
+  } catch {
+    return [];
+  }
+  const names = [];
+  if (servers?.[MCP_NAME] && scriptOf(servers[MCP_NAME], MCP_SUFFIX)) names.push(MCP_NAME);
+  for (const name of LEGACY_MCP_NAMES)
+    if (servers?.[name] && scriptOf(servers[name], LEGACY_MCP_SUFFIX)) names.push(name);
+  return names;
+}
+// Removes one MCP entry with the agent's own CLI; returns null when it worked, or what failed.
+export async function removeMcpEntry(client, name, { environment = process.env, runCommand } = {}) {
+  if (!MCP_CLIENTS.includes(client)) throw new Error(`Agente sin MCP: ${client}`);
+  const run = runCommand ?? (await defaultRunner(COMMANDS[client], environment));
+  let result;
+  try {
+    result = await run(COMMANDS[client], removeArgs(client, name));
+  } catch (error) {
+    result = { status: null, stderr: error instanceof Error ? error.message : String(error) };
+  }
+  if (result?.status === 0) return null;
+  const detail = result?.errorCode === 'ENOENT' ? `no encontré ${COMMANDS[client]}` : String(result?.stderr || result?.stdout || result?.errorCode || '').trim();
+  return `No se pudo retirar ${name} de ${CLIENT_NAMES[client]}${detail ? `: ${detail}` : ''}`;
 }
 
 // Classifies every global skill link and the coordination MCP, and with `apply` creates what is missing and
@@ -215,9 +295,12 @@ export async function setupToolkit({
   }
   for (const item of skills) item.source = path.join(activeRoot, 'skills', item.name);
 
-  const mcpStates = {};
+  const mcpStates = {},
+    fabrica = {};
   for (const client of clients.filter((c) => MCP_CLIENTS.includes(c))) {
-    mcpStates[client] = await inspectMcp(client, home, codexHome, { activeRoots, isOwned });
+    const { fabrica: action, ...state } = await inspectMcp(client, home, codexHome, { activeRoots, isOwned });
+    mcpStates[client] = state;
+    if (action) fabrica[client] = action;
   }
   const mcpDeadRoot = Object.values(mcpStates).find((s) => s.state === 'roto-ajeno')?.root;
   const legacy = legacyGroups(skills, {
@@ -294,11 +377,13 @@ export async function setupToolkit({
   }
 
   const obsolete = Object.entries(mcpStates)
-    .filter(([, state]) => state.name)
+    .filter(([, state]) => state.retirar)
     .map(([client, state]) => ({
       message: 'Ya no se usa; si quieres quitarlo:',
       command:
-        client === 'codex' ? `codex mcp remove ${state.name}` : `claude mcp remove ${state.name} -s user`,
+        client === 'codex' ? `codex mcp remove ${state.retirar}` : `claude mcp remove ${state.retirar} -s user`,
+      // `npx nexakit` migrates it when it is nexakit's: `comprobar` shows that instead of this command.
+      ...(fabrica[client]?.retirar && { migrated: client }),
     }));
   const agentsPath = path.join(codexHome, 'agents');
   for (const name of await fs.readdir(agentsPath).catch(() => [])) {
@@ -332,6 +417,10 @@ export async function setupToolkit({
       states: mcpStates,
       registrationCommands,
       ...(registrationPending.length && { registrationPending }),
+      // Per agent, what `npx nexakit` does with nexakit-fabrica and the old MCP (see fabricaAction), and whether the
+      // script to register exists already.
+      fabrica,
+      entryExists,
     },
     restartRequired: created > 0,
     ...(clients.includes('codex') && { codexSandbox: await codexSandbox(home, codexHome, codexProfile) }),
@@ -391,7 +480,7 @@ async function codexSandbox(home, codexHome, codexProfile) {
   const unknown = (reason) => ({
     state: 'unknown',
     writableRoot: state,
-    hint: `${reason}: no se puede saber si Codex deja escribir en ${state}. Si $revisar no consigue registrarse, permite esa carpeta.`,
+    hint: `${reason}: no se puede saber si Codex deja escribir en ${state}. Si Gemini no consigue guardar su historial o su consumo, permite esa carpeta.`,
   });
   let config = {},
     profileFiles = [];
@@ -444,7 +533,7 @@ async function sandboxState(effective, home, state, file, command, unknown) {
       return {
         state: 'read-only',
         writableRoot: state,
-        hint: `El perfil de permisos :read-only no deja escribir: $revisar no puede registrarse. Usa sandbox_mode = "workspace-write" con ${state} en writable_roots.`,
+        hint: `El perfil de permisos :read-only no deja escribir: Gemini no puede guardar su historial. Usa sandbox_mode = "workspace-write" con ${state} en writable_roots.`,
       };
     return unknown('Codex usa un perfil de permisos propio');
   }
@@ -455,7 +544,7 @@ async function sandboxState(effective, home, state, file, command, unknown) {
     return {
       state: 'read-only',
       writableRoot: state,
-      hint: `Codex está en solo lectura: $revisar no puede registrarse. Usa sandbox_mode = "workspace-write" con ${state} en writable_roots.`,
+      hint: `Codex está en solo lectura: Gemini no puede guardar su historial. Usa sandbox_mode = "workspace-write" con ${state} en writable_roots.`,
     };
   if (mode !== undefined && mode !== 'workspace-write')
     return unknown(`sandbox_mode = ${JSON.stringify(mode)} no es conocido`);
@@ -485,44 +574,75 @@ async function boundedConfig(file) {
   if (!info.isFile() || info.isSymbolicLink() || info.size > 1_048_576) throw new Error('config');
   return fs.readFile(file);
 }
-// The entry is recognized by the script it runs (`…/bin/agent-toolkit-mcp.js` under `node`), then classified like
-// a link: installed only if that script exists in a root in use.
+// The script a server entry runs when it is `node …/<suffix>`; anything else is not nexakit's.
+function scriptOf(server, suffix) {
+  const entry = Array.isArray(server?.args)
+    ? server.args.find((arg) => typeof arg === 'string' && arg.replaceAll('\\', '/').endsWith(`/${suffix}`))
+    : undefined;
+  const runsNode = typeof server?.command === 'string' && /^node(\.exe)?$/iu.test(path.basename(server.command));
+  return runsNode ? entry : undefined;
+}
+// null when the agent has no configuration file yet.
+async function readServers(client, home, codexHome) {
+  const bytes = await boundedConfig(
+    client === 'codex' ? path.join(codexHome, 'config.toml') : path.join(home, '.claude.json'),
+  );
+  if (!bytes) return null;
+  return client === 'codex'
+    ? getStaticTOMLValue(parseTOML(bytes.toString('utf8'), { tomlVersion: '1.0.0' })).mcp_servers ?? {}
+    : JSON.parse(bytes.toString('utf8')).mcpServers ?? {};
+}
+const REPAIRABLE_MCP_STATES = ['efimero', 'roto-propio', 'roto-ajeno'];
+// What `npx nexakit` does in one agent: register nexakit-fabrica when it is missing, repair it when its entry points
+// at a copy that is gone, and remove the old MCP (`oldName`, only when it runs nexakit's old script) only if
+// nexakit-fabrica is healthy or is being registered or repaired in the same step. An entry the person disabled, or
+// a server of someone else under that name, is left alone, and then the old MCP stays too. null: nothing to do.
+function fabricaAction(current, oldName) {
+  const old = oldName ? { retirar: oldName } : {};
+  if (!current) return { registrar: true, ...old };
+  if (REPAIRABLE_MCP_STATES.includes(current.state)) return { reparar: true, ...old };
+  if (READY_LINK_STATES.includes(current.state)) return oldName ? old : null;
+  return oldName ? { bloqueado: current.state, antiguo: oldName } : null;
+}
+// The entry is recognized by the script it runs (`…/bin/nexakit-fabrica-mcp.js` under `node`), then classified like
+// a link: installed only if that script exists in a root in use. The MCP it replaces (`agent-toolkit-workflow`,
+// `agent-toolkit`) is reported in `retirar`: it never counts as the installed one, except when its root is dead,
+// which `reparar` still needs to see. `fabrica` is the plan for both (fabricaAction).
 async function inspectMcp(client, home, codexHome, { activeRoots, isOwned }) {
   let servers;
   try {
-    const bytes = await boundedConfig(
-      client === 'codex' ? path.join(codexHome, 'config.toml') : path.join(home, '.claude.json'),
-    );
-    if (!bytes) return { state: 'falta' };
-    servers =
-      client === 'codex'
-        ? getStaticTOMLValue(parseTOML(bytes.toString('utf8'), { tomlVersion: '1.0.0' })).mcp_servers
-        : JSON.parse(bytes.toString('utf8')).mcpServers;
+    servers = await readServers(client, home, codexHome);
   } catch {
     return { state: 'unreadable' };
   }
-  for (const name of ['agent-toolkit-workflow', 'agent-toolkit']) {
-    const server = servers?.[name];
-    if (!server) continue;
+  if (!servers) return { state: 'falta', fabrica: fabricaAction(null, null) };
+  const classify = async (name, suffix) => {
+    const server = servers[name];
+    if (!server) return null;
     if (server.enabled === false) return { state: 'disabled', name };
-    const entry = Array.isArray(server.args)
-      ? server.args.find(
-          (arg) => typeof arg === 'string' && arg.replaceAll('\\', '/').endsWith(`/${MCP_SUFFIX}`),
-        )
-      : undefined;
-    const runsNode =
-      typeof server.command === 'string' && /^node(\.exe)?$/iu.test(path.basename(server.command));
-    if (!entry || !runsNode) return { state: 'conflicto', name };
+    const entry = scriptOf(server, suffix);
+    if (!entry) return { state: 'conflicto', name };
     const { state, root } = await classifyReference({
       target: mcpRegistryTarget(client, name),
       literal: entry,
-      suffix: MCP_SUFFIX,
+      suffix,
       activeRoots,
       isOwned,
     });
     return { state, name, literal: entry, ...(root && { root }) };
+  };
+  let legacy = null;
+  for (const name of LEGACY_MCP_NAMES) {
+    legacy = await classify(name, LEGACY_MCP_SUFFIX);
+    if (legacy) break;
   }
-  return { state: 'falta' };
+  const current = await classify(MCP_NAME, MCP_SUFFIX);
+  const oldName = legacy && scriptOf(servers[legacy.name], LEGACY_MCP_SUFFIX) ? legacy.name : null;
+  const action = fabricaAction(current, oldName);
+  const extra = { ...(legacy && { retirar: legacy.name }), ...(action && { fabrica: action }) };
+  if (current) return { ...current, ...extra };
+  if (legacy?.state === 'roto-ajeno') return { ...legacy, ...extra };
+  return { state: 'falta', ...extra };
 }
 async function findExecutable(name, environment, accept = () => true) {
   const extensions = IS_WINDOWS
@@ -544,6 +664,20 @@ async function findExecutable(name, environment, accept = () => true) {
     }
   }
   return null;
+}
+// The state of each global instructions file, without the texts: what `comprobar` reports.
+async function reviewInstructionsReport(options) {
+  try {
+    return (await planReviewInstructions(options)).items.map(({ client, name, state, reason, update }) => ({
+      client,
+      name,
+      state,
+      ...(reason && { reason }),
+      ...(update && { update }),
+    }));
+  } catch {
+    return [];
+  }
 }
 export async function executable(name, environment) {
   return Boolean(await findExecutable(name, environment));
@@ -595,6 +729,12 @@ export async function doctorToolkit({
     retiredSkills: setup.retiredSkills,
     registrationCommands: setup.mcp.registrationCommands,
     ...(setup.mcp.registrationPending && { registrationPending: setup.mcp.registrationPending }),
+    // What `npx nexakit` would migrate or leaves alone; `comprobar` only reports it.
+    fabricaMcp: setup.mcp.entryExists
+      ? setup.mcp.fabrica
+      : Object.fromEntries(Object.entries(setup.mcp.fabrica).filter(([, action]) => !action.registrar && !action.reparar)),
+    reviewInstructions: await reviewInstructionsReport({ homeDirectory, environment, codexHome, agents: setup.clients }),
+    ...(setup.clients.includes('codex') && { codexAgents: await teamMarks({ codexHome }) }),
     activeRoot: setup.activeRoot,
     legacy: setup.legacy,
     ...(setup.otherCopy && { otherCopy: setup.otherCopy }),

@@ -89,8 +89,8 @@ test('doctor recognizes complete MCP tables with extra fields without exposing t
   await fs.mkdir(path.join(f.homeDirectory,'.codex'));
   // The entry only counts as installed when the script it runs exists.
   await fs.mkdir(path.join(f.toolkitRoot, 'bin'));
-  await fs.writeFile(path.join(f.toolkitRoot, 'bin/agent-toolkit-mcp.js'), '');
-  const config = `[mcp_servers.agent-toolkit-workflow]\ncommand = "node"\nargs = [${JSON.stringify(path.join(f.toolkitRoot,'bin/agent-toolkit-mcp.js'))}]\nstartup_timeout_sec = 20\n[mcp_servers.agent-toolkit-workflow.env]\nPRIVATE_VALUE = "must-not-leak"\n`;
+  await fs.writeFile(path.join(f.toolkitRoot, 'bin/nexakit-fabrica-mcp.js'), '');
+  const config = `[mcp_servers.nexakit-fabrica]\ncommand = "node"\nargs = [${JSON.stringify(path.join(f.toolkitRoot,'bin/nexakit-fabrica-mcp.js'))}]\nstartup_timeout_sec = 20\n[mcp_servers.nexakit-fabrica.env]\nPRIVATE_VALUE = "must-not-leak"\n`;
   await fs.writeFile(path.join(f.homeDirectory,'.codex/config.toml'), config);
   const result = await doctorToolkit({ ...f, agent: 'codex', environment: { PATH: '' } });
   assert.equal(result.mcp.codex.state, 'instalado');
@@ -325,35 +325,65 @@ test('Antigravity is included when agy is installed or its folder exists, and on
 test('MCP states and registration commands only for what needs them, with the node on the PATH', async t => {
   const f = await fixture(t), { setupToolkit } = await import(moduleUrl);
   await fs.mkdir(path.join(f.toolkitRoot, 'bin'));
-  await fs.writeFile(path.join(f.toolkitRoot, 'bin/agent-toolkit-mcp.js'), '');
+  await fs.writeFile(path.join(f.toolkitRoot, 'bin/nexakit-fabrica-mcp.js'), '');
   const dev = await writeFakeInstall(path.join(f.root, 'dev'));
   const bin = path.join(f.root, 'bin');
   await fs.mkdir(bin);
   await fs.writeFile(path.join(bin, 'node'), '', { mode: 0o755 });
   const config = path.join(f.homeDirectory, '.claude.json');
-  const write = server => fs.writeFile(config, JSON.stringify({ mcpServers: { 'agent-toolkit-workflow': server } }));
+  const write = server => fs.writeFile(config, JSON.stringify({ mcpServers: { 'nexakit-fabrica': server } }));
   const check = async () => {
     const result = await setupToolkit({ ...f, agent: 'claude', environment: { PATH: bin } });
     return { state: result.mcp.states.claude.state, command: result.mcp.registrationCommands.claude };
   };
   const runs = file => ({ command: 'node', args: [file] });
-  const add = `claude mcp add --scope user --transport stdio agent-toolkit-workflow -- '${path.join(bin, 'node')}' '${path.join(f.toolkitRoot, 'bin/agent-toolkit-mcp.js')}'`;
+  const add = `claude mcp add --scope user --transport stdio nexakit-fabrica -- '${path.join(bin, 'node')}' '${path.join(f.toolkitRoot, 'bin/nexakit-fabrica-mcp.js')}'`;
 
-  await write(runs(path.join(f.toolkitRoot, 'bin/agent-toolkit-mcp.js')));
+  await write(runs(path.join(f.toolkitRoot, 'bin/nexakit-fabrica-mcp.js')));
   assert.deepEqual(await check(), { state: 'instalado', command: undefined });
-  await write(runs(path.join(dev, 'bin/agent-toolkit-mcp.js')));
+  await write(runs(path.join(dev, 'bin/nexakit-fabrica-mcp.js')));
   assert.deepEqual(await check(), { state: 'otra-copia', command: undefined });
   await write({ command: 'python', args: ['server.py'] });
   assert.deepEqual(await check(), { state: 'conflicto', command: undefined });
-  await write(runs(path.join(f.root, '.npm/_npx/zz/node_modules/nexakit/bin/agent-toolkit-mcp.js')));
-  assert.deepEqual(await check(), { state: 'efimero', command: `claude mcp remove agent-toolkit-workflow -s user && ${add}` });
-  const dead = path.join(f.root, 'dead/bin/agent-toolkit-mcp.js');
+  await write(runs(path.join(f.root, '.npm/_npx/zz/node_modules/nexakit/bin/nexakit-fabrica-mcp.js')));
+  assert.deepEqual(await check(), { state: 'efimero', command: `claude mcp remove nexakit-fabrica -s user && ${add}` });
+  const dead = path.join(f.root, 'dead/bin/nexakit-fabrica-mcp.js');
   await write(runs(dead));
   assert.deepEqual(await check(), { state: 'roto-ajeno', command: undefined });
-  await register(f.homeDirectory, [{ destino: 'mcp:claude:agent-toolkit-workflow', apunta: dead, raiz: path.join(f.root, 'dead') }]);
-  assert.deepEqual(await check(), { state: 'roto-propio', command: `claude mcp remove agent-toolkit-workflow -s user && ${add}` });
+  await register(f.homeDirectory, [{ destino: 'mcp:claude:nexakit-fabrica', apunta: dead, raiz: path.join(f.root, 'dead') }]);
+  assert.deepEqual(await check(), { state: 'roto-propio', command: `claude mcp remove nexakit-fabrica -s user && ${add}` });
   await fs.rm(config);
   assert.deepEqual(await check(), { state: 'falta', command: add });
+});
+
+test('the previous workflow MCP is not the installed one: the new one is registered and the old one is reported to remove', async t => {
+  const f = await fixture(t), { setupToolkit } = await import(moduleUrl);
+  await fs.mkdir(path.join(f.toolkitRoot, 'bin'));
+  await fs.writeFile(path.join(f.toolkitRoot, 'bin/nexakit-fabrica-mcp.js'), '');
+  await fs.writeFile(path.join(f.toolkitRoot, 'bin/agent-toolkit-mcp.js'), '');
+  const bin = path.join(f.root, 'bin');
+  await fs.mkdir(bin);
+  await fs.writeFile(path.join(bin, 'node'), '', { mode: 0o755 });
+  const config = path.join(f.homeDirectory, '.claude.json');
+  const old = { command: 'node', args: [path.join(f.toolkitRoot, 'bin/agent-toolkit-mcp.js')] };
+  const run = async servers => {
+    await fs.writeFile(config, JSON.stringify({ mcpServers: servers }));
+    const result = await setupToolkit({ ...f, agent: 'claude', environment: { PATH: bin } });
+    return { state: result.mcp.states.claude.state, command: result.mcp.registrationCommands.claude, obsolete: result.obsolete.map(o => o.command) };
+  };
+  const add = `claude mcp add --scope user --transport stdio nexakit-fabrica -- '${path.join(bin, 'node')}' '${path.join(f.toolkitRoot, 'bin/nexakit-fabrica-mcp.js')}'`;
+  const quitar = name => `claude mcp remove ${name} -s user`;
+
+  assert.deepEqual(await run({ 'agent-toolkit-workflow': old }), { state: 'falta', command: add, obsolete: [quitar('agent-toolkit-workflow')] });
+  assert.deepEqual(await run({ 'agent-toolkit': old }), { state: 'falta', command: add, obsolete: [quitar('agent-toolkit')] });
+  const nuevo = { command: 'node', args: [path.join(f.toolkitRoot, 'bin/nexakit-fabrica-mcp.js')] };
+  assert.deepEqual(await run({ 'nexakit-fabrica': nuevo, 'agent-toolkit-workflow': old }),
+    { state: 'instalado', command: undefined, obsolete: [quitar('agent-toolkit-workflow')] });
+  assert.deepEqual(await run({ 'nexakit-fabrica': nuevo }), { state: 'instalado', command: undefined, obsolete: [] });
+  // A previous entry whose copy is gone stays visible as such, for `reparar`.
+  const dead = { command: 'node', args: [path.join(f.root, 'dead/bin/agent-toolkit-mcp.js')] };
+  assert.deepEqual(await run({ 'agent-toolkit-workflow': dead }),
+    { state: 'roto-ajeno', command: undefined, obsolete: [quitar('agent-toolkit-workflow')] });
 });
 
 test('a registration command is never suggested for a stable copy that does not exist yet', async t => {
@@ -362,7 +392,7 @@ test('a registration command is never suggested for a stable copy that does not 
   const preview = await setupToolkit(options);
   assert.deepEqual([preview.mcp.registrationCommands, preview.mcp.registrationPending], [{}, ['claude']]);
   const applied = await setupToolkit({ ...options, apply: true });
-  assert.match(applied.mcp.registrationCommands.claude, /\.nexakit[\\/]actual[\\/]bin[\\/]agent-toolkit-mcp\.js/u);
+  assert.match(applied.mcp.registrationCommands.claude, /\.nexakit[\\/]actual[\\/]bin[\\/]nexakit-fabrica-mcp\.js/u);
   assert.equal(applied.mcp.registrationPending, undefined);
 });
 
@@ -434,7 +464,7 @@ test('doctor reads Superpowers from each agent found, through the given runner',
 });
 test('the skills now covered by Superpowers are retired like the old commands', async t => {
   const f = await fixture(t); const { setupToolkit, RETIRED_SKILLS } = await import(moduleUrl);
-  assert.deepEqual(RETIRED_SKILLS.slice(2), ['spec-driven-development', 'depurar', 'desarrollo-con-pruebas', 'revision-cruzada']);
+  assert.deepEqual(RETIRED_SKILLS.slice(2), ['spec-driven-development', 'depurar', 'desarrollo-con-pruebas', 'revision-cruzada', 'revisar']);
   const target = path.join(f.homeDirectory, '.claude', 'skills', 'depurar'); await fs.mkdir(path.dirname(target), { recursive: true });
   await fs.symlink(path.join(f.toolkitRoot, 'skills', 'depurar'), target, directoryLinkType);
   const { acquireLock } = await import(lockUrl); const { recordEntries } = await import(registryUrl);

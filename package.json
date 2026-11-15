@@ -1,31 +1,34 @@
 {
   "name": "nexakit",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Asistente por pasos de skills verificadas por SHA-256, coordinación entre agentes y memoria por proyecto para Claude Code y Codex.",
   "type": "module",
   "bin": {
     "nexakit": "bin/nexakit.js",
     "agent-toolkit": "bin/agent-toolkit.js",
     "project-memory": "bin/project-memory.js",
-    "agent-task": "bin/agent-task.js",
-    "agent-toolkit-mcp": "bin/agent-toolkit-mcp.js",
-    "agent-toolkit-inbox": "bin/agent-toolkit-inbox.js",
+    "nexakit-fabrica-mcp": "bin/nexakit-fabrica-mcp.js",
     "project-memory-mcp": "bin/project-memory-mcp.js",
     "agent-toolkit-gemini": "bin/agent-toolkit-gemini.js"
   },
   "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pretest": "npm run build",
     "test": "node --test --import ./test-support/git-quiet.js \"test/*.test.js\"",
     "catalog:validate": "node scripts/validate-skill-catalog.js",
     "catalog:files": "node scripts/validate-skill-catalog.js --files",
     "catalog:add": "node scripts/add-catalog-skill.js",
-    "prepack": "node scripts/prepare-package.js",
+    "prepack": "npm run build && node scripts/prepare-package.js",
     "test:mod": "claude plugin test plugins/nexakit-modelo",
-    "plugins:huellas": "node scripts/plugin-huellas.js"
+    "plugins:huellas": "node scripts/plugin-huellas.js",
+    "tipos:codex": "node scripts/generar-tipos-codex.mjs"
   },
   "engines": {
     "node": ">=24"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "^2.7.0",
     "@modelcontextprotocol/client": "^2.4.0",
     "@modelcontextprotocol/server": "^2.4.0",
     "@modelcontextprotocol/server-filesystem": "2.3.0",
@@ -54,6 +57,7 @@
   "files": [
     "bin/",
     "src/",
+    "dist/",
     "skills/",
     "catalogs/",
     "agents/",
@@ -68,5 +72,9 @@
     "assets/runtime/",
     "scripts/prepare-package.js",
     "scripts/validate-skill-catalog.js"
-  ]
+  ],
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "typescript": "^7.0.2"
+  }
 }

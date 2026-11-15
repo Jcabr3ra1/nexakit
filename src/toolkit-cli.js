@@ -1,11 +1,11 @@
 import os from 'node:os';
 import { runCli } from './cli.js';
+import { loadWithDependencyCheck } from './missing-dependencies.js';
 import { runModelCommand } from './model-command.js';
 import { runAhorroCommand } from './ahorro-command.js';
 import { runCodexCommand } from './codex-command.js';
 import { runAntigravityCommand } from './antigravity-command.js';
 import { runLeccionesCommand } from './lecciones-command.js';
-import { runRevisionCommand } from './revision.js';
 import path from 'node:path';
 import readline from 'node:readline';
 import { pathToFileURL } from 'node:url';
@@ -22,7 +22,7 @@ import {
 } from './skill-recommendations.js';
 import { formatRecommendationReport } from './recommend-report.js';
 import { applySetup } from './setup-apply.js';
-import { buildConfirmation, groupLines, joinNames, suggestedAnswers } from './setup-plan.js';
+import { AGENT_NAMES, buildConfirmation, groupLines, joinNames, suggestedAnswers } from './setup-plan.js';
 import { gatherSetupState } from './setup-state.js';
 import { runSetupTui } from './setup-tui.js';
 import { doctorToolkit, setupToolkit } from './toolkit-setup.js';
@@ -38,11 +38,10 @@ const HELP = `Uso: npx nexakit [--project <ruta>] [--si]
      npx nexakit quitar [--project <ruta>] [--global] [--agent codex|claude|antigravity|all] [--si|--apply] [--json]
      npx nexakit reparar --desde <ruta> [--agent codex|claude|antigravity|all]
      npx nexakit memoria <subcomando> [opciones]
-     nexakit revision --disponibles [--principal claude|codex|antigravity]
-     nexakit revision --con <ia> --modelo <m> --esfuerzo <e> --encargo <archivo> [--base <rama>]
      nexakit modelo [--nivel <nivel>] [--ia claude|codex|antigravity] [--perfil-codex <nombre>]
      nexakit codex auditar|preparar|agentes|actividad|consumo|recomendar|hook|ejecutar|comparar [opciones]
      nexakit antigravity barra|preparar|agentes|recomendar|hook|ejecutar [opciones]
+     nexakit fabrica proponer|lanzar|estado|resultado|cancelar [opciones]
      nexakit ahorro [--json]
      nexakit lecciones [--json | --descartar]
      npx nexakit recommend [--project <ruta>] [--profile frontend|backend|mcp|security] [--client codex|claude] [--dry-run] [--json]
@@ -61,7 +60,8 @@ scan revisa el contenido de una skill sin ejecutarla (1 si encuentra un bloqueo)
 reparar re-apunta enlaces rotos de una instalación anterior (--desde es la carpeta
 que ya no existe); lista lo que encontró y siempre pregunta.
 memoria ejecuta los subcomandos de project-memory (init, connect, doctor, status, sync).
-revision y modelo piden una revisión a otra IA o consultan los modelos disponibles.
+modelo consulta los modelos disponibles.
+fabrica propone, lanza y consulta un recorrido de revisión con varias IA en paralelo, solo lectura (ver nexakit fabrica --help).
 ahorro resume cuánta salida de comandos recortó el mod nexakit-ahorro (caracteres y tokens estimados).
 lecciones resume las correcciones y lecciones que registra el mod nexakit-lecciones y las que siguen pendientes.
 recommend inspecciona el proyecto en solo lectura; setup prepara las skills base globales y respeta las que quitaste
@@ -103,9 +103,18 @@ export async function runToolkitCli(
   if (command === 'modelo') return runModelCommand(rest, { out, err }, options);
   if (command === 'codex') return runCodexCommand(rest, { out, err, input, output }, options);
   if (command === 'antigravity') return runAntigravityCommand(rest, { out, err, input, output }, options);
+  if (command === 'fabrica') {
+    let aviso = '';
+    const cli = await loadWithDependencyCheck(() => import('../dist/fabrica/cli.js'), { write: text => { aviso += text; } });
+    if (!cli) { await err(aviso); return 1; }
+    return cli.ejecutarCli(rest, { out, err }, options);
+  }
   if (command === 'ahorro') return runAhorroCommand(rest, { out, err }, options);
   if (command === 'lecciones') return runLeccionesCommand(rest, { out, err }, options);
-  if (command === 'revision') return runRevisionCommand(rest, { out, err }, { options });
+  if (command === 'revision') {
+    await err('Orden retirada: usa /fabrica o `nexakit fabrica`.\n');
+    return 2;
+  }
   if (command === 'memoria') {
     return runCli(
       rest,
@@ -220,6 +229,7 @@ export async function runToolkitCli(
         ...(options.toolkitRoot && { toolkitRoot: options.toolkitRoot }),
         ...(options.homeDirectory && { homeDirectory: options.homeDirectory }),
         ...(options.codexHome && { codexHome: options.codexHome }),
+        ...(options.runCommand && { runCommand: options.runCommand }),
       });
       const report = parsed.apply ? await applyToolkitDetach(plan) : plan;
       if (parsed.json) {
@@ -229,6 +239,8 @@ export async function runToolkitCli(
           projectRoot: report.projectRoot,
           includeGlobal: report.includeGlobal,
           items: report.items.map(({ catalogEntry, ...itemRest }) => itemRest),
+          oldData: report.applied ? report.oldDataRemoved : report.oldData.map((item) => item.label),
+          mcp: report.applied ? { removed: report.mcpRemoved, failed: report.mcpFailed } : report.mcpRemovals,
           ...(report.applied
             ? {
                 removedCount: report.removedCount,
@@ -398,7 +410,7 @@ function formatComprobarReport(result, { homeDirectory }) {
   }
   for (const group of result.legacy ?? []) {
     lines.push(
-      `! ${plural(group.count, 'enlace roto', 'enlaces rotos')} hacia ${short(group.root)} parecen de una instalación anterior. Si son de nexakit: npx nexakit reparar --desde ${short(group.root)}`,
+      `! ${plural(group.targets.length, 'enlace roto', 'enlaces rotos')} hacia ${short(group.root)} parecen de una instalación anterior. Si son de nexakit: npx nexakit reparar --desde ${short(group.root)}`,
     );
   }
   for (const item of (result.retiredSkills ?? []).filter((s) => !s.owned)) {
@@ -417,10 +429,42 @@ function formatComprobarReport(result, { homeDirectory }) {
     );
   }
   lines.push(...modsReport(result.mods));
-  for (const item of result.obsolete ?? []) {
+  lines.push(...migrationReport(result));
+  for (const item of (result.obsolete ?? []).filter((entry) => !entry.migrated)) {
     lines.push(`! ${item.message} ${item.command}`);
   }
   return lines.join('\n') + '\n';
+}
+
+// What `npx nexakit` would migrate from an older install, and what it leaves alone. Warnings only.
+function migrationReport(result) {
+  const lines = [];
+  for (const [client, action] of Object.entries(result.fabricaMcp ?? {})) {
+    const name = AGENT_NAMES[client];
+    if (action.bloqueado) {
+      const why = action.bloqueado === 'disabled' ? 'está desactivado' : 'es otro servidor';
+      lines.push(`! nexakit-fabrica ${why} en ${name}; no lo toco ni retiro el MCP antiguo ${action.antiguo}`);
+      continue;
+    }
+    // Without that agent's CLI there is nothing to register; an old MCP is still worth reporting.
+    if (!result.clients?.[client]?.available && !action.retirar) continue;
+    if (action.retirar) lines.push(`! Retirar el MCP antiguo ${action.retirar} de ${name} (ejecuta npx nexakit)`);
+    if (action.registrar) lines.push(`! Registrar nexakit-fabrica en ${name} (ejecuta npx nexakit)`);
+    if (action.reparar) lines.push(`! Reparar nexakit-fabrica en ${name} (ejecuta npx nexakit)`);
+  }
+  for (const item of result.reviewInstructions ?? []) {
+    if (item.reason === 'editado') lines.push(`! ${item.name}: el bloque de nexakit está editado a mano; no lo toco`);
+    else if (item.update) lines.push(`! ${item.name}: hay reglas de trabajo nuevas (ejecuta npx nexakit)`);
+  }
+  const agents = result.codexAgents;
+  const count = (list, one, many) => `${list.length} ${list.length === 1 ? one : many}`;
+  if (agents?.migrable.length)
+    lines.push(`! ${count(agents.migrable, 'agente de Codex lleva', 'agentes de Codex llevan')} la marca antigua (ejecuta npx nexakit para actualizarla)`);
+  if (agents?.different.length)
+    lines.push(
+      `! ${count(agents.different, 'agente de Codex lleva', 'agentes de Codex llevan')} la marca antigua y otro contenido; no ${agents.different.length === 1 ? 'lo' : 'los'} toco (nexakit codex agentes --apply --actualizar)`,
+    );
+  return lines;
 }
 
 // Reads one line, and treats anything but "s" (including no answer at all) as no. The answer comes from the

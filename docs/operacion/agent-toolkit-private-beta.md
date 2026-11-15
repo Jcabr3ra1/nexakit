@@ -49,10 +49,8 @@ pendientes; no se consultó el remoto y ese número no acredita su estado actual
 
 - [project-memory](../guias/uso.md) crea y diagnostica memorias, prepara conexiones y
   contiene operaciones de revisión/aplicación con límites explícitos.
-- [agent-task prepare](../agentes/coordinacion/agent-task-prepare.md) produce un borrador por destinatario
-  a partir de datos declarados; no guarda, envía o ejecuta el encargo.
-- [agent-task verify](../agentes/coordinacion/agent-task-verify.md) compara archivos listados bajo un
-  contrato fijado; no aprueba calidad, Git, permisos, modelos o consumo.
+- La [fábrica de revisión](../agentes/coordinacion/fabrica.md) propone un recorrido,
+  lo lanza solo con la huella aprobada y deja su rastro; las IA externas leen sin escribir.
 - La [guía del equipo](../../templates/agent-team/README.md) conserva traspaso manual,
   autoría tutor y autorización separada por rol.
 - AD-3 y la inferencia automática de clientes reales permanecen sin admisión.

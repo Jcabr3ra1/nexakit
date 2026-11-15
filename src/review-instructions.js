@@ -10,7 +10,8 @@ Para programar sigue el proceso de Superpowers (obligatorio): contexto y
 memoria, diseño y plan proporcionales, rama, pruebas, implementación,
 verificación y cierre con memoria. No hace falta un comando para empezar.
 Sobre sus skills mandan: no borrar código existente sin acuerdo aunque el TDD
-lo pida; commit, push, PR y memoria solo con autorización. Reutiliza un diseño
+lo pida; commits locales en ramas de trabajo sin pedir permiso; push, PR,
+fusión y memoria solo con autorización. Reutiliza un diseño
 o plan ya aprobado. Antes de un PR, quality-gate. Modo tutor (la persona
 escribe el código, un paso verificable cada vez) solo si lo pide.
 
@@ -26,14 +27,26 @@ por bueno. Si el encargo necesita el mismo contexto que ya llevas, bifurca la
 sesión (fork) en vez de crear un subagente nuevo. Usa elegir-modelo para nombres reales; nunca cambies el modelo de
 la sesión por tu cuenta. Sin subagentes de nivel, trabaja tú.
 
-La revisión por otra IA es opcional: solo con /revisar o si la persona lo pide
-(«que lo revise <IA>»); sigue la skill revisar. Usa la orden estable
+La revisión con varias IA es opcional: solo con /fabrica o si la persona pide
+pasarlo por la fábrica; sigue la skill fabrica. Usa la orden estable
 ~/.nexakit/nexakit (Windows: nexakit.cmd en esa carpeta).
 
 Si una tarea larga queda a medias —pausa, cambio de IA, bloqueo o cierre— escribe o actualiza la nota de seguimiento con project-handoff; recomienda sesión nueva en los casos de project-handoff, y cierra el seguimiento al integrar con cerrar-memoria.
 ${END}`;
 
 const hash = (text) => createHash('sha256').update(text).digest('hex');
+// SHA-256 of every block earlier versions of nexakit installed (from the history of this file), newest first. A block
+// that matches one of them was written by nexakit even without its record in review-instructions.json, so it is
+// replaced by the current one; any other text between the marks was edited by the person and is never touched.
+const PREVIOUS_BODY_HASHES = new Set([
+  'f1d67fb2be192ddcade136409ee59302e926c6bf41c883f6125ffb8075be41d5', // 3fa5d18: Antigravity en la orquesta
+  'b02861cef24be0e67afc1870d829f375ab752980babc30a98fa187736a5247a4', // f151a93: revisión bajo demanda e informes breves
+  '7f5be5b768fa60fcb785fae74492271772e4befcadf5e3d5dc60ba8203062391', // f3b8bca: subagentes de nivel
+  'f564df4f5f8bf8163a916261ed6fae969b66f58104cc8a03140027b1eb1da0fa', // 043432b: Superpowers obligatorio
+  '4841d522765b5630d1c8c079fb5bc0c3d6e687e937bae7654a4a020b3e684a2e', // c4761ab: traspaso y cierre
+  'a59f9d7f20e328a0e990566dee78e9fe90623598bc8bd85eb593808217aae123', // d815d60: revisión certificada
+  'b9ed8e99a370f760c46574fa0e1854768d35498eb70fc619337851843d97c32a', // d73e44a: revisión por sesión
+]);
 const proofPath = (home) => path.join(home, '.nexakit', 'review-instructions.json');
 const NAMES = { claude: 'CLAUDE.md', codex: 'AGENTS.md', antigravity: 'GEMINI.md' };
 function targets({ homeDirectory, environment = {}, codexHome, agents = Object.keys(NAMES) }) {
@@ -113,19 +126,28 @@ export async function planReviewInstructions(options = {}) {
     }
     const block = blockOf(before),
       record = owned[item.target];
-    if ((before?.includes(START) && !block) || (block && record?.blockHash !== hash(block))) {
+    if (before?.includes(START) && !block) {
       items.push({ ...item, state: 'conflict' });
+      continue;
+    }
+    const blockHash = block && hash(block);
+    if (block && record?.blockHash !== blockHash && blockHash !== hash(BODY) && !PREVIOUS_BODY_HASHES.has(blockHash)) {
+      items.push({ ...item, state: 'conflict', reason: 'editado' });
       continue;
     }
     const prefix = before === null ? '' : before.endsWith('\n') ? before + '\n' : before + '\n\n';
     const after = block ? before.replace(block, BODY) : prefix + BODY + '\n';
+    // Without a record the block was recognized by its hash: what preceded it is unknown, so a later removal only
+    // takes the block out.
+    const known = record?.blockHash === blockHash || !block;
     items.push({
       ...item,
       before,
       after,
       state: after === before ? 'ready' : 'pending',
-      original: record ? record.original : before,
-      created: record ? record.created : before === null,
+      ...(block && after !== before && { update: true }),
+      original: !known ? null : record ? record.original : before,
+      created: !known ? false : record ? record.created : before === null,
     });
   }
   return { homeDirectory: options.homeDirectory, items };

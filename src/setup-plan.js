@@ -193,6 +193,41 @@ export function buildConfirmation(state, answers) {
   }
   for (const agent of globalBlocks) block(`global-skills:${agent}`, `Skills base en ${AGENT_NAMES[agent]}`);
 
+  // The MCP of the fábrica, with the agent's own CLI: registered or repaired, and the old MCP of an older install
+  // removed once nexakit-fabrica works.
+  for (const agent of agents) {
+    const action = state.fabricaMcp?.[agent];
+    if (!action) continue;
+    const name = AGENT_NAMES[agent];
+    if (action.bloqueado) {
+      const why = action.bloqueado === 'disabled' ? 'está desactivado' : 'es otro servidor';
+      add('!', `nexakit-fabrica ${why} en ${name}; no lo toco ni retiro el MCP antiguo ${action.antiguo}`);
+      continue;
+    }
+    if (!state.agentsFound[agent]) {
+      if (action.retirar || action.reparar) add('!', `No encontré ${name}; no puedo preparar nexakit-fabrica en esa IA`);
+      continue;
+    }
+    if (action.retirar) add('−', `Retirar el MCP antiguo ${action.retirar} de ${name}`);
+    if (action.registrar) add('+', `Registrar nexakit-fabrica en ${name}`);
+    if (action.reparar) add('↻', `Reparar nexakit-fabrica en ${name}`);
+    block(`fabrica-mcp:${agent}`, `MCP de la fábrica en ${name}`);
+  }
+  // Codex profiles nexakit wrote with an old mark: the same content is brought up to date, other content is not.
+  const codexAgents = agents.includes('codex') ? state.codexAgents : null;
+  if (codexAgents?.migrable.length) {
+    const count = codexAgents.migrable.length;
+    add('↻', `Actualizar la marca de ${count} ${plural(count, 'agente', 'agentes')} de Codex`);
+    block('codex-agents', 'Marca de los agentes de Codex');
+  }
+  if (codexAgents?.different.length) {
+    const count = codexAgents.different.length;
+    add(
+      '!',
+      `${count} ${plural(count, 'agente de Codex lleva', 'agentes de Codex llevan')} la marca antigua y otro contenido; no ${plural(count, 'lo', 'los')} toco (nexakit codex agentes --apply --actualizar)`,
+    );
+  }
+
   // Superpowers is required: the work process (brainstorming, plans, debugging, TDD, verification) comes from it.
   const superpowers = state.superpowers ?? {};
   const activeIn = [];
@@ -284,7 +319,12 @@ export function buildConfirmation(state, answers) {
     instructionNames.has(item.name),
   );
   for (const item of instructionItems.filter((item) => item.state === 'conflict'))
-    add('!', `${item.name}: las instrucciones existentes no se pueden actualizar; no las toco`);
+    add(
+      '!',
+      item.reason === 'editado'
+        ? `${item.name}: el bloque de nexakit está editado a mano; no lo toco`
+        : `${item.name}: las instrucciones existentes no se pueden actualizar; no las toco`,
+    );
   const pendingInstructions = instructionItems.filter((item) => item.state === 'pending');
   if (pendingInstructions.length) {
     add(

@@ -31,9 +31,8 @@ Elige el comando según el resultado necesario:
 - `estado`: disponibilidad, modelos y límites. Los modelos cambian; usa `--modelo`
   solo con un identificador disponible. No sustituyas silenciosamente un modelo.
 
-Ejecuta con `node <toolkit>/bin/agent-toolkit-gemini.js <comando> ...`. Cuando
-haya una colaboración explícita, añade `--task <id> --project-root <raíz>` a la
-consulta para registrar consumo. Si no la hay, no crees una solo para métricas.
+Ejecuta con `node <toolkit>/bin/agent-toolkit-gemini.js <comando> ...`. El consumo
+de cada consulta se registra solo en `~/.agent-toolkit/gemini/consumo.jsonl`.
 `--copiar-a` preserva los archivos existentes. Si no hay destino elegido, conserva
 el resultado en su carpeta propia e informa esa ruta.
 

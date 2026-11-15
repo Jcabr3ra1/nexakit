@@ -5,7 +5,6 @@ import path from "node:path";
 import { after, test } from "node:test";
 import { getStaticTOMLValue, parseTOML } from "toml-eslint-parser";
 import { levelAgentPlan, levelAgentsTable, writeLevelAgents } from "../src/level-agents.js";
-import { runPeerInboxCli } from "../src/peer-inbox-cli.js";
 import { fileSymlinkSkipReason } from "../testing/symlink-capability.js";
 
 const root = await fs.mkdtemp(path.join(os.tmpdir(), "level-agents-"));
@@ -34,6 +33,16 @@ test("the plan covers four Codex levels from the live catalog and writes nothing
   assert.match(plan.files[2].content, /^name = "nivel_exigente"\ndescription = ".*"\nmodel = "diario"\nmodel_reasoning_effort = "high"\ndeveloper_instructions = """\n/mu);
   await assert.rejects(fs.access(path.join(codexHome, "agents")));
   assert.match(levelAgentsTable(plan), /Vista previa: no se escribió nada.*crear 4/u);
+});
+
+test("generated files carry the nexakit mark, not the retired inbox one", async () => {
+  const plan = await levelAgentPlan({ codexHome: await home() });
+  for (const file of plan.files) {
+    assert.ok(file.content.startsWith("# Generado por `nexakit codex agentes`. "));
+    assert.doesNotMatch(file.content, /agent-toolkit-inbox/u);
+  }
+  assert.match(levelAgentsTable(plan), /nexakit codex agentes --apply/u);
+  assert.doesNotMatch(levelAgentsTable(plan), /agent-toolkit-inbox/u);
 });
 
 test("generated files are valid TOML with every field Codex requires", async () => {
@@ -154,27 +163,27 @@ test("an unreadable catalog or a level without model writes nothing", async () =
   assert.equal((await fs.readdir(path.join(codexHome, "agents"))).filter(name => name === "nivel_alto.toml").length, 1);
 });
 
-test("the inbox CLI previews, writes, forces and rejects bad flags", async () => {
+test("`nexakit codex agentes` previews and writes the four levels with the single nexakit mark", async () => {
   const codexHome = await home();
+  const { runCodexCommand } = await import("../src/codex-command.js");
   const run = async argv => {
-    const out = [], errors = [];
-    const code = await runPeerInboxCli(argv, { codexHome, out: t => out.push(t), err: t => errors.push(t) });
-    return { code, out: out.join(""), errors: errors.join("") };
+    let stdout = "", stderr = "";
+    const code = await runCodexCommand(argv, { out: text => { stdout += text; }, err: text => { stderr += text; } }, { codexHome, homeDirectory: codexHome });
+    return { code, stdout, stderr };
   };
   const preview = await run(["agentes", "--json"]);
-  assert.equal(preview.code, 0);
-  assert.equal(JSON.parse(preview.out).files.some(file => "content" in file), false);
+  assert.equal(preview.code, 0, preview.stderr);
+  assert.equal(JSON.parse(preview.stdout).files.some(file => "content" in file), false);
   await assert.rejects(fs.access(path.join(codexHome, "agents")));
-  assert.match((await run(["agentes", "--escribir"])).out, /creado/u);
-  assert.equal((await fs.readdir(path.join(codexHome, "agents"))).length, 4);
-  assert.match((await run(["agentes"])).out, /Los agentes están al día/u);
-  await fs.writeFile(agent(codexHome, "normal"), "otro\n");
-  assert.match((await run(["agentes", "--escribir"])).out, /ya existe y es distinto/u);
-  assert.equal(await fs.readFile(agent(codexHome, "normal"), "utf8"), "otro\n");
-  assert.match((await run(["agentes", "--escribir", "--forzar"])).out, /actualizado/u);
-  for (const argv of [["agentes", "--otro"], ["agentes", "--json", "--json"], ["agentes", "--forzar"]]) {
-    const result = await run(argv);
-    assert.equal(result.code, 2);
-    assert.match(result.errors, /agent-toolkit-inbox agentes/u);
+  assert.equal((await run(["agentes", "--apply", "--json"])).code, 0);
+  for (const slug of ["ligero", "normal", "exigente", "alto"]) {
+    const content = await fs.readFile(agent(codexHome, slug), "utf8");
+    assert.ok(content.startsWith("# Generado por `nexakit codex agentes`."), slug);
+    assert.doesNotMatch(content, /agent-toolkit-inbox/u);
   }
+  const specialist = await fs.readFile(path.join(codexHome, "agents", "investigador.toml"), "utf8");
+  assert.ok(specialist.startsWith("# Generado por `nexakit codex agentes`."));
+  const again = JSON.parse((await run(["agentes", "--json"])).stdout);
+  assert.equal(again.files.every(file => file.state === "igual"), true);
+  assert.equal((await run(["agentes", "--actualizar"])).code, 2);
 });

@@ -20,7 +20,8 @@ import {
 } from './skill-recommendations.js';
 import { planStableCommand, writeStableCommand } from './stable-command.js';
 import { ensureStableInstall, nexakitDir } from './stable-install.js';
-import { packageVersion, setupToolkit } from './toolkit-setup.js';
+import { applyFabricaMcp, packageVersion, setupToolkit } from './toolkit-setup.js';
+import { staleTeamMarks, teamPlan, writeTeam } from './codex-team.js';
 import { applyMod } from './mods.js';
 import { applySuperpowers } from './superpowers.js';
 
@@ -144,6 +145,12 @@ export async function applySetup(
         });
         await applyReviewInstructions(plan, lock);
       }),
+    // Only the profiles proven again right now (old mark, same content) are rewritten; writeTeam keeps the old file.
+    'codex-agents': async () => {
+      const plan = await teamPlan({ codexHome });
+      const { migrable } = await staleTeamMarks(plan);
+      if (migrable.length) await writeTeam(plan, { update: true, names: migrable });
+    },
     'memory-init': async () => {
       const report = initializeMemory({
         destination: memoryPath,
@@ -197,6 +204,9 @@ export async function applySetup(
         acquire,
       });
     }
+    if (kind === 'fabrica-mcp') {
+      return applyFabricaMcp(agent, { homeDirectory, toolkitRoot, environment, codexHome, ...(runCommand && { runCommand }) });
+    }
     if (kind === 'superpowers') {
       return applySuperpowers(agent, state.superpowers?.[agent], { environment, ...(runCommand && { runCommand }) });
     }
@@ -234,7 +244,8 @@ export async function applySetup(
       // Superpowers comes from each agent's own marketplace: when that fails, the memory, the rules and the other
       // agents are still worth leaving ready. The run ends as not ready and the final check lists it as pending.
       // The mods come from the same kind of plugin marketplace: one that fails does not stop the rest either.
-      if (id.startsWith('superpowers:') || id.startsWith('mod:')) {
+      // The same for the MCP of the fábrica: the agent keeps its old MCP and the final check lists it as pending.
+      if (id.startsWith('superpowers:') || id.startsWith('mod:') || id.startsWith('fabrica-mcp:')) {
         skipped.push({ id, message });
         continue;
       }

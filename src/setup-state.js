@@ -30,6 +30,7 @@ import {
 import { planStableCommand } from './stable-command.js';
 import { inspectMods } from './mods.js';
 import { inspectSuperpowers } from './superpowers.js';
+import { teamMarks } from './codex-team.js';
 import { compareVersions, readActualVersion } from './stable-install.js';
 import {
   TOOLKIT_ROOT,
@@ -263,6 +264,14 @@ export async function gatherSetupState({
   }
 
   const reviewInstructions = await planReviewInstructions({ homeDirectory, environment, codexHome });
+  // nexakit-fabrica per agent (register, repair, retire the old MCP). Registering needs the script: it exists, or
+  // the stable copy installed first in the same confirmation brings it.
+  const canRegister = setup.mcp.entryExists || stableCopy.needed;
+  const fabricaMcp = Object.fromEntries(
+    Object.entries(setup.mcp.fabrica).filter(([, action]) => canRegister || (!action.registrar && !action.reparar)),
+  );
+  // Codex profiles that still carry an old mark.
+  const codexAgents = await teamMarks({ codexHome });
   const superpowers = await inspectSuperpowers({ agentsFound, runCommand, environment });
   const mods = await inspectMods({ agentsFound, runCommand, environment, toolkitRoot });
   return {
@@ -271,6 +280,8 @@ export async function gatherSetupState({
     generators:await loadGeneratorsCatalog(),
     cleanProject:await readCleanProjectAnswers(project.root),
     reviewInstructions,
+    fabricaMcp,
+    codexAgents,
     superpowers,
     mods,
     homeDirectory,

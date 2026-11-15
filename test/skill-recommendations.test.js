@@ -53,7 +53,7 @@ test('Node-only and Node+MCP fixtures do not invent frontend, HTTP frameworks or
 
   // Inspecting Agent Toolkit itself detects Node.js and MCP SDK without inventing React/Next/Hono
   const toolkitInspection = await inspectSkillProject(TOOLKIT_ROOT, { toolkitRoot: TOOLKIT_ROOT });
-  assert.deepEqual(toolkitInspection.signals.map(s => s.id).sort(), ['mcp-sdk', 'nodejs']);
+  assert.deepEqual(toolkitInspection.signals.map(s => s.id).sort(), ['mcp-sdk', 'nodejs', 'typescript']);
   const toolkitRec = recommendSkills({ catalog, inspection: toolkitInspection });
   assert.equal(toolkitRec.recommended.length, 0);
   assert.deepEqual(toolkitRec.candidates.map(c => c.name), ['mcp-builder']);
@@ -365,6 +365,9 @@ test('git ignore management (.gitignore & .git/info/exclude) and safe decoupling
   const fakeHome = await tempProject(t, {
     '.claude/skills/user-global-skill/SKILL.md': '# keep',
     '.codex/agents/nivel_ligero.toml': '# Generado por `agent-toolkit-inbox agentes`. Ese comando nunca sobrescribe...\nname = "nivel_ligero"\n',
+    '.codex/agents/nivel_normal.toml': '# Generado por `nexakit codex agentes`. Ese comando nunca sobrescribe...\nname = "nivel_normal"\n',
+    '.codex/agents/nivel_exigente.toml': '# Generado por nexakit codex agentes\nname = "nivel_exigente"\n',
+    '.codex/agents/nivel_alto.toml': '# mío, no es de nexakit: Generado por nexakit codex agentes\nname = "nivel_alto"\n',
     '.codex/agents/custom_agent.toml': 'name = "custom"\n'
   });
   await fs.mkdir(path.join(fakeHome, '.agents/skills'), { recursive: true });
@@ -383,7 +386,14 @@ test('git ignore management (.gitignore & .git/info/exclude) and safe decoupling
     codexHome: path.join(fakeHome, '.codex')
   });
   const globalDetached = await applyToolkitDetach(globalDetachPlan);
-  assert.equal(globalDetached.removedCount, 2); // mcp-builder symlink + nivel_ligero.toml
+  // mcp-builder symlink + los tres agentes con marca (antigua, nueva y la que escribe `codex agentes`)
+  assert.equal(globalDetached.removedCount, 4);
+  for (const kept of ['nivel_alto.toml', 'custom_agent.toml']) {
+    assert.equal(await fs.access(path.join(fakeHome, '.codex/agents', kept)).then(() => true, () => false), true);
+  }
+  for (const gone of ['nivel_normal.toml', 'nivel_exigente.toml']) {
+    assert.equal(await fs.access(path.join(fakeHome, '.codex/agents', gone)).then(() => true, () => false), false);
+  }
   assert.equal(await fs.access(path.join(fakeHome, '.agents/skills/mcp-builder')).then(() => true, () => false), false);
   assert.equal(await fs.access(path.join(fakeHome, '.codex/agents/nivel_ligero.toml')).then(() => true, () => false), false);
   assert.equal(await fs.readFile(path.join(fakeHome, '.claude/skills/user-global-skill/SKILL.md'), 'utf8'), '# keep');
@@ -422,7 +432,7 @@ async function toolkitCopy(dir, { tamper = false } = {}) {
   const pkg = JSON.parse(await fs.readFile(path.join(TOOLKIT_ROOT, 'package.json'), 'utf8'));
   await fs.mkdir(path.join(dir, 'bin'), { recursive: true });
   await fs.writeFile(path.join(dir, 'package.json'), JSON.stringify({ name: 'nexakit', version: pkg.version }));
-  await fs.writeFile(path.join(dir, 'bin/agent-toolkit-mcp.js'), '');
+  await fs.writeFile(path.join(dir, 'bin/nexakit-fabrica-mcp.js'), '');
   await fs.cp(path.join(TOOLKIT_ROOT, 'skills/frontend-design'), path.join(dir, 'skills/frontend-design'), { recursive: true });
   await fs.cp(path.join(TOOLKIT_ROOT, 'catalogs/skills/vercel-react-best-practices'), path.join(dir, 'catalogs/skills/vercel-react-best-practices'), { recursive: true });
   if (tamper) await fs.appendFile(path.join(dir, 'skills/frontend-design/SKILL.md'), '\nmodificado\n');

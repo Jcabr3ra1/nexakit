@@ -12,7 +12,7 @@ import { detectSignals, SIGNAL_LABELS } from './project-signals.js';
 import { resolveProjectRoot } from './project-root.js';
 import { loadSkillCatalog } from './skill-catalog.js';
 import { actualRoot, ensureStableInstall, nexakitDir } from './stable-install.js';
-import { TOOLKIT_ROOT, globalSkillTarget, resolveRoots } from './toolkit-setup.js';
+import { TOOLKIT_ROOT, globalSkillTarget, nexakitMcpEntries, removeMcpEntry, resolveRoots } from './toolkit-setup.js';
 
 const MAX_MANIFEST_BYTES = 512 * 1024;
 const MAX_SKILL_FILES = 256;
@@ -35,7 +35,10 @@ const PROJECT_MANIFEST_FILE = 'manifest.json';
 const PROJECT_LOCKFILE_NAME = 'skills-lock.json';
 const IGNORE_BLOCK_START = '# >>> agent-toolkit (managed) >>>';
 const IGNORE_BLOCK_END = '# <<< agent-toolkit (managed) <<<';
-const LEVEL_AGENT_HEADER = '# Generado por `agent-toolkit-inbox agentes`.';
+// `nexakit codex agentes` escribe hoy una sola marca: «# Generado por `nexakit codex agentes`». Las dos antiguas
+// (sin comillas, y la de la bandeja retirada) siguen reconociéndose: esos archivos ya escritos son de nexakit.
+const LEVEL_AGENT_HEADERS = ['# Generado por nexakit codex agentes', '# Generado por `nexakit codex agentes`.', '# Generado por `agent-toolkit-inbox agentes`.'];
+const isLevelAgentContent = text => LEVEL_AGENT_HEADERS.some(header => text.startsWith(header));
 const LEVEL_AGENT_NAMES = ['nivel_ligero.toml', 'nivel_normal.toml', 'nivel_exigente.toml', 'nivel_alto.toml'];
 
 export { SIGNAL_LABELS };
@@ -1188,6 +1191,20 @@ export async function writeSetupAnswers(projectRoot, answers, lock) {
   if (!result.manifestWritten) throw new Error(`${PROJECT_TOOLKIT_DIR} no es una carpeta normal; no se guardaron las respuestas.`);
 }
 
+// Data of the retired task and review flows. Only a real folder or file inside a real ~/.agent-toolkit or ~/.nexakit
+// is offered, and links are never followed. ~/.agent-toolkit/gemini belongs to the Gemini tools and is never listed.
+const OLD_DATA = [['.agent-toolkit', 'workflows', 'directory'], ['.nexakit', 'revisores.json', 'file']];
+async function oldDataTarget(home, folder, name, kind) {
+  const parent = await lstatOrNull(path.join(home, folder));
+  if (!parent?.isDirectory() || parent.isSymbolicLink()) return null;
+  const target = path.join(home, folder, name);
+  const info = await lstatOrNull(target);
+  if (!info || info.isSymbolicLink() || (kind === 'directory' ? !info.isDirectory() : !info.isFile())) return null;
+  return { target, label: `~/${folder}/${name}`, kind, folder, name };
+}
+const MCP_CLIENT_NAMES = { claude: 'Claude Code', codex: 'Codex' };
+const joinLabels = labels => (labels.length <= 1 ? labels.join('') : `${labels.slice(0, -1).join(', ')} y ${labels.at(-1)}`);
+
 export async function planToolkitDetach({
   projectRoot,
   includeGlobal = false,
@@ -1197,7 +1214,8 @@ export async function planToolkitDetach({
   homeDirectory = os.homedir(),
   codexHome,
   environment = {},
-  skillNames
+  skillNames,
+  runCommand
 } = {}) {
   if (!['codex', 'claude', 'antigravity', 'all'].includes(agent)) {
     throw new Error('El agente debe ser codex, claude, antigravity o all.');
@@ -1338,6 +1356,8 @@ export async function planToolkitDetach({
   }
 
   const manualCommands = [];
+  // nexakit's MCP entries (nexakit-fabrica and the old one), removed with each agent's own CLI.
+  const mcpRemovals = [];
   if (includeGlobal) {
     const home = await fs.realpath(homeDirectory);
     const resolvedCodexHome = codexHome ?? environment.CODEX_HOME ?? path.join(home, '.codex');
@@ -1377,7 +1397,7 @@ export async function planToolkitDetach({
         const info = await lstatOrNull(target);
         if (!info?.isFile() || info.isSymbolicLink() || info.size > 65536) continue;
         const content = await fs.readFile(target, 'utf8').catch(() => '');
-        if (content.startsWith(LEVEL_AGENT_HEADER)) {
+        if (isLevelAgentContent(content)) {
           items.push({
             scope: 'global',
             client: 'codex',
@@ -1389,11 +1409,10 @@ export async function planToolkitDetach({
           });
         }
       }
-      manualCommands.push('codex mcp remove agent-toolkit-workflow');
     }
-    if (clients.includes('claude')) {
-      manualCommands.push('claude mcp remove --scope user agent-toolkit-workflow');
-    }
+    for (const client of ['claude', 'codex'].filter(c => clients.includes(c)))
+      for (const name of await nexakitMcpEntries(client, { homeDirectory: home, codexHome: resolvedCodexHome }))
+        mcpRemovals.push({ client, name });
   }
 
   return {
@@ -1419,6 +1438,13 @@ export async function planToolkitDetach({
     remainingManifestEntries,
     prevManifest: manifest,
     manualCommands,
+    mcpRemovals,
+    environment,
+    runCommand,
+    // Global data, so only with --global; removing project skills from `npx nexakit` (skillNames) never touches it.
+    oldData: includeGlobal && !skillNames
+      ? (await Promise.all(OLD_DATA.map(entry => oldDataTarget(homeReal, ...entry)))).filter(Boolean)
+      : [],
     conflicts: items.filter(i => i.action === 'conflict').length
   };
 }
@@ -1530,7 +1556,7 @@ export async function applyToolkitDetach(plan) {
         continue;
       }
       const text = await fs.readFile(item.target, 'utf8').catch(() => '');
-      if (!text.startsWith(LEVEL_AGENT_HEADER)) {
+      if (!isLevelAgentContent(text)) {
         conflicts++;
         updatedItems.push({ ...item, action: 'conflict' });
         continue;
@@ -1540,6 +1566,26 @@ export async function applyToolkitDetach(plan) {
       updatedItems.push({ ...item, action: 'removed' });
     }
   }
+
+  // Checked again right before: only what is still a real folder or file is removed (a link is removed, never followed).
+  const oldDataRemoved = [];
+  for (const item of plan.oldData ?? []) {
+    const current = await oldDataTarget(plan.homeDirectory, item.folder, item.name, item.kind);
+    if (!current || current.target !== item.target) continue;
+    await fs.rm(current.target, { recursive: current.kind === 'directory', force: true });
+    oldDataRemoved.push(current.label);
+  }
+
+  const mcpRemoved = [], mcpFailed = [];
+  for (const { client, name } of plan.mcpRemovals ?? []) {
+    const failure = await removeMcpEntry(client, name, {
+      environment: plan.environment,
+      ...(plan.runCommand && { runCommand: plan.runCommand })
+    });
+    if (failure) mcpFailed.push(failure);
+    else mcpRemoved.push({ client, name });
+  }
+  conflicts += mcpFailed.length;
 
   let gitIgnoreCleanedCount = 0;
   if (plan.projectRoot) {
@@ -1608,7 +1654,10 @@ export async function applyToolkitDetach(plan) {
     gitIgnoreCleanedCount,
     stateDirRemoved,
     conflicts,
-    manualCommands: plan.manualCommands ?? []
+    manualCommands: plan.manualCommands ?? [],
+    oldDataRemoved,
+    mcpRemoved,
+    mcpFailed
   };
 }
 
@@ -1628,7 +1677,9 @@ export function formatDetachReport(report) {
       actionable.length === 0 &&
       !report.removeStateDir &&
       !report.removeLegacyLockfile &&
-      (report.gitIgnoreUpdates?.length ?? 0) === 0
+      (report.gitIgnoreUpdates?.length ?? 0) === 0 &&
+      !report.oldData?.length &&
+      !report.mcpRemovals?.length
     ) {
       lines.push('No se encontraron artefactos acoplados por Agent Toolkit para retirar.');
     } else {
@@ -1644,6 +1695,12 @@ export function formatDetachReport(report) {
       }
       for (const upd of report.gitIgnoreUpdates ?? []) {
         lines.push(`  - [git] Limpiar bloque gestionado en ${upd.relativePath}`);
+      }
+      for (const { client, name } of report.mcpRemovals ?? []) {
+        lines.push(`  - [global ${client}] Retirar el MCP ${name} de ${MCP_CLIENT_NAMES[client]}`);
+      }
+      if (report.oldData?.length) {
+        lines.push(`  - Borrar datos antiguos: ${joinLabels(report.oldData.map(item => item.label))}`);
       }
     }
     const conflictItems = report.items.filter(i => i.action === 'conflict');
@@ -1662,6 +1719,13 @@ export function formatDetachReport(report) {
     }
     if (report.conflicts > 0) {
       lines.push(`Conflictos respetados intactos: ${report.conflicts}`);
+    }
+    for (const { client, name } of report.mcpRemoved ?? []) {
+      lines.push(`MCP retirado: ${name} de ${MCP_CLIENT_NAMES[client]}`);
+    }
+    for (const failure of report.mcpFailed ?? []) lines.push(`! ${failure}`);
+    if (report.oldDataRemoved?.length) {
+      lines.push(`Datos antiguos borrados: ${joinLabels(report.oldDataRemoved)}`);
     }
   }
 

@@ -58,14 +58,10 @@ Para una reorganización, utiliza la skill
 
 ## Coordinación y encargos
 
-- [Verificador externo](agentes/coordinacion/agent-task-external-verifier.md)
-- [TP — Preparar un encargo manual desde el selector](agentes/coordinacion/agent-task-prepare.md)
-- [TV-1 — Comprobar huellas y alcance de una entrega manual](agentes/coordinacion/agent-task-verify.md)
 - [Equipo de agentes mediante archivos compartidos](agentes/coordinacion/agent-team-handoffs.md)
 - [Selección de modelos en los encargos y revisiones](agentes/coordinacion/agent-team-model-handoff.md)
 - [Modos de trabajo de los agentes](agentes/coordinacion/agent-work-modes.md)
-- [Revisión cruzada entre sesiones de Claude y Codex](agentes/coordinacion/peer-review-workflow.md)
-- [Flujo local entre Codex y Claude Code](agentes/coordinacion/task-workflow-mcp.md)
+- [La fábrica de revisión](agentes/coordinacion/fabrica.md)
 
 ## Operación de Agent Toolkit
 
@@ -84,6 +80,3 @@ Para una reorganización, utiliza la skill
 - [Skills recomendadas para Agent Toolkit](skills/skills-recomendadas.md)
 - [Integración y adaptación de Superpowers](skills/superpowers-integration.md)
 - [Fuentes de las skills](skills/fuentes-de-skills.md)
-
-
-- [Revisión entre IA en una terminal](agentes/coordinacion/revision-entre-ia.md)

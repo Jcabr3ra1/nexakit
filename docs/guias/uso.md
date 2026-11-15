@@ -44,7 +44,7 @@ connect/status todavía usan sus adaptadores anteriores.
 - `agents/claude/`: subagentes personales de Claude Code en Markdown con frontmatter YAML.
 - `docs/`: arquitectura, decisiones y guías del sistema reutilizable.
 - `schemas/`: contratos verificables para manifiestos y configuraciones.
-- `bin/`: puntos de entrada locales de `project-memory` y `agent-task`.
+- `bin/`: puntos de entrada locales de `nexakit`, `project-memory` y el servidor MCP de la fábrica.
 - `src/`: diagnósticos y operaciones seguras de la CLI.
 - `test/`: pruebas automáticas con el ejecutor nativo de Node.js.
 
@@ -66,88 +66,12 @@ El proceso de trabajo (diseñar, planificar, depurar, TDD y verificar) lo pone [
 
 Las equivalencias de proceso y reglas de convivencia con el plugin opcional Superpowers están en [Integración y adaptación de Superpowers](../skills/superpowers-integration.md).
 
-## Preparar un encargo para otro agente
+## Pedir una revisión a otras IA
 
-`agent-task prepare` reúne los datos explícitos de una tarea y la recomendación
-del selector v2 en un borrador para revisión y entrega manual. No interpreta
-una necesidad libre mediante IA ni escoge datos faltantes por su cuenta.
-No ejecuta otros clientes, cambia su modelo, consulta cuentas o guarda archivos.
-
-Desde la raíz de la biblioteca puedes probar el ejemplo exclusivamente ficticio:
-
-```bash
-node bin/agent-task.js prepare \
-  --task examples/task-prepare/task.example.json \
-  --request examples/model-selection/request.preference.example.json \
-  --catalog examples/model-selection/catalog.preference.example.json \
-  --policy examples/model-selection/policy.preference.example.json
-```
-
-- Sin opciones de salida: resumen, sin el cuerpo o las rutas privadas del encargo.
-- `--json`: el mismo resumen estructurado.
-- `--show-brief`: borrador completo en el terminal; su contenido puede quedar
-  en scrollback o logs. Es incompatible con `--json`.
-- `--help`: ayuda sin leer documentos de tarea.
-
-Solo `prepared-draft` entrega el borrador, nunca lo marca autorizado/listo.
-`needs-info`, `blocked` e `invalid` conservan pendientes sin usar defaults,
-otro proveedor o una API de pago. Los cuatro JSON deben indicarse explícitamente;
-request/catalog/policy usan v2. Los catálogos y disponibilidades son declaraciones
-revisadas, no una comprobación actual de tu cuenta. Los ejemplos no evalúan
-modelos reales y sus fechas históricas no acreditan disponibilidad hoy.
-
-Tutor conserva un paso y la autoría del usuario. Autónomo prepara un solo rol;
-el proponente, ejecutor y revisor necesitan encargos/decisiones independientes.
-Antes de entregar el texto, revisa el permiso directo, instrucciones vigentes,
-base real y fuentes. Ninguna referencia o huella JSON acredita eso por sí sola.
-
-El comando funciona localmente con `node bin/agent-task.js`; esta entrega no
-lo instala globalmente. Detalles y límites en
-[agent-task prepare](../agentes/coordinacion/agent-task-prepare.md) y el [ejemplo](../../examples/task-prepare/README.md).
-
-## Comprobar huellas de una entrega
-
-`agent-task verify` compara los bytes de los archivos enumerados en un contrato
-ya revisado con sus huellas SHA-256 esperadas antes (`before`) o después
-(`after`) de una entrega. Solo lee el contrato y esas rutas exactas; no ejecuta
-comandos, no lee `.git`, no recorre directorios, no escribe ni envía nada.
-
-```text
-node bin/agent-task.js verify \
-  --contract <contrato-revisado.json> --expect <sha256-registrado-al-revisar> \
-  --source <raíz-del-proyecto> --handoff <carpeta-privada-del-lote> \
-  --phase before
-```
-
-Los valores entre `<>` son marcadores, no rutas de ejemplo ejecutables.
-
-- `--expect` es la huella de los bytes del contrato anotada durante su revisión;
-  no se calcula ni se toma del propio contrato. Si no coincide, el resultado es
-  `blocked` sin comprobar las raíces ni leer ninguna entrada listada. Si el
-  contrato está dentro de una raíz, antes del pin solo se recorren los componentes
-  de su propia ruta y se leen sus bytes.
-- `--source` y `--handoff` son absolutas, físicas, distintas y no anidadas;
-  handoff debe tener exactamente el modo 0700, sin bits setuid/setgid/sticky.
-  No se aceptan HOME, la raíz del disco ni directorios `.git`, `.obsidian` o
-  de configuración de clientes.
-- Lecturas acotadas: contrato hasta 512 KiB; archivos observados hasta 8 MiB
-  cada uno y 32 MiB en total por invocación (el contrato no cuenta en ese total).
-  No se lee más allá del tamaño fijado; crecer o truncarse durante la lectura da
-  `blocked`.
-- `--json` entrega el mismo resumen estructurado; nunca incluye contenidos ni
-  rutas físicas.
-
-`matched` (exit 0) solo indica que los archivos listados coinciden en esa fase.
-`mismatched` (1) señala hashes distintos, archivos ausentes o presentes de forma
-inesperada. `blocked`/`invalid` (2) cubren pin distinto, recursos inseguros o
-cambiados, límites y contratos inválidos. Ningún estado aprueba código,
-pruebas, Git, modelos, consumo o permiso; los archivos no listados quedan sin
-verificar y una expectativa mal revisada puede coincidir con una entrega
-incorrecta. La revisión humana sigue siendo obligatoria.
-
-Funciona en macOS/Linux con `node bin/agent-task.js`, sin instalación global.
-Contrato y límites en [agent-task verify](../agentes/coordinacion/agent-task-verify.md); preparación de
-datos ficticios en el [ejemplo](../../examples/task-verify/README.md).
+La revisión por otras IA es opcional: solo ocurre cuando la pides. Con la skill
+`fabrica` (o `nexakit fabrica`) propones un recorrido por estaciones, lo apruebas y
+solo entonces se lanza; las IA externas leen el diff sin escribir. Detalles y
+límites en [la fábrica de revisión](../agentes/coordinacion/fabrica.md).
 
 ## Perfiles disponibles
 

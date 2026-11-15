@@ -1,0 +1,346 @@
+{
+  "metodos": {
+    "initialize": {
+      "resultado": {
+        "protocolVersion": 1,
+        "agentCapabilities": {
+          "loadSession": true,
+          "promptCapabilities": {
+            "image": true,
+            "audio": false,
+            "embeddedContext": true
+          },
+          "sessionCapabilities": {
+            "close": {}
+          }
+        },
+        "agentInfo": {
+          "name": "agy-falso",
+          "version": "0.0.0"
+        },
+        "authMethods": []
+      }
+    },
+    "session/new": {
+      "resultado": {
+        "sessionId": "ses-1",
+        "models": {
+          "currentModelId": "gemini-4-argon-medium",
+          "availableModels": [
+            {
+              "modelId": "gemini-4-argon-medium",
+              "name": "Gemini 4 Argon (Medium)"
+            },
+            {
+              "modelId": "gemini-4-argon-high",
+              "name": "Gemini 4 Argon (High)"
+            },
+            {
+              "modelId": "gemini-4-hydrogen-xhigh",
+              "name": "Gemini 4 Hydrogen (XHigh)"
+            },
+            {
+              "modelId": "gemini-3.8-flash-low",
+              "name": "Gemini 3.8 Flash (Low)"
+            },
+            {
+              "modelId": "gemini-pro-orchestrator-g1-pro",
+              "name": "Orchestrator (Argon)"
+            }
+          ]
+        },
+        "modes": {
+          "currentModeId": "default",
+          "availableModes": [
+            {
+              "id": "default",
+              "name": "Default"
+            },
+            {
+              "id": "accept-edits",
+              "name": "Accept edits"
+            },
+            {
+              "id": "auto",
+              "name": "Auto"
+            },
+            {
+              "id": "plan",
+              "name": "Plan"
+            }
+          ]
+        },
+        "configOptions": [
+          {
+            "id": "mode",
+            "name": "Mode",
+            "category": "mode",
+            "type": "select",
+            "currentValue": "default",
+            "options": [
+              {
+                "value": "default",
+                "name": "Default"
+              },
+              {
+                "value": "accept-edits",
+                "name": "Accept edits"
+              },
+              {
+                "value": "auto",
+                "name": "Auto"
+              },
+              {
+                "value": "plan",
+                "name": "Plan"
+              }
+            ]
+          }
+        ]
+      },
+      "notificaciones": [
+        {
+          "metodo": "session/update",
+          "params": {
+            "sessionId": "ses-1",
+            "update": {
+              "sessionUpdate": "available_commands_update",
+              "availableCommands": [
+                {
+                  "name": "teamwork",
+                  "description": "Equipo"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "session/set_model": {
+      "resultado": {}
+    },
+    "session/close": {
+      "resultado": {}
+    },
+    "session/prompt": {
+      "diferir": true,
+      "peticiones": [
+        {
+          "metodo": "session/request_permission",
+          "id": "srv-1",
+          "params": {
+            "sessionId": "ses-1",
+            "toolCall": {
+              "toolCallId": "t-Editar src/a.js",
+              "title": "Editar src/a.js",
+              "kind": "edit",
+              "status": "pending"
+            },
+            "options": [
+              {
+                "optionId": "op-allow_once",
+                "name": "allow_once",
+                "kind": "allow_once"
+              },
+              {
+                "optionId": "op-allow_always",
+                "name": "allow_always",
+                "kind": "allow_always"
+              },
+              {
+                "optionId": "op-reject_once",
+                "name": "reject_once",
+                "kind": "reject_once"
+              },
+              {
+                "optionId": "op-reject_always",
+                "name": "reject_always",
+                "kind": "reject_always"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "alResponder": {
+    "srv-1": {
+      "peticiones": [
+        {
+          "metodo": "session/request_permission",
+          "id": "srv-2",
+          "params": {
+            "sessionId": "ses-1",
+            "toolCall": {
+              "toolCallId": "t-Ejecutar npm test",
+              "title": "Ejecutar npm test",
+              "kind": "execute",
+              "status": "pending"
+            },
+            "options": [
+              {
+                "optionId": "op-allow_once",
+                "name": "allow_once",
+                "kind": "allow_once"
+              },
+              {
+                "optionId": "op-reject_always",
+                "name": "reject_always",
+                "kind": "reject_always"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "srv-2": {
+      "peticiones": [
+        {
+          "metodo": "session/request_permission",
+          "id": "srv-3",
+          "params": {
+            "sessionId": "ses-1",
+            "toolCall": {
+              "toolCallId": "t-Borrar x",
+              "title": "Borrar x",
+              "kind": "delete",
+              "status": "pending"
+            },
+            "options": [
+              {
+                "optionId": "op-allow_once",
+                "name": "allow_once",
+                "kind": "allow_once"
+              },
+              {
+                "optionId": "op-allow_always",
+                "name": "allow_always",
+                "kind": "allow_always"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "srv-3": {
+      "peticiones": [
+        {
+          "metodo": "session/request_permission",
+          "id": "srv-4",
+          "params": {
+            "sessionId": "ses-1",
+            "toolCall": "no es un objeto",
+            "options": "todas"
+          }
+        }
+      ]
+    },
+    "srv-4": {
+      "peticiones": [
+        {
+          "metodo": "session/request_permission",
+          "id": "srv-5",
+          "params": {
+            "sessionId": "otra",
+            "toolCall": {
+              "toolCallId": "t-Editar b",
+              "title": "Editar b",
+              "kind": "edit",
+              "status": "pending"
+            },
+            "options": [
+              {
+                "optionId": "op-allow_once",
+                "name": "allow_once",
+                "kind": "allow_once"
+              },
+              {
+                "optionId": "op-reject_once",
+                "name": "reject_once",
+                "kind": "reject_once"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "srv-5": {
+      "peticiones": [
+        {
+          "metodo": "fs/write_text_file",
+          "id": "srv-6",
+          "params": {
+            "sessionId": "ses-1",
+            "path": "/tmp/x",
+            "content": "x"
+          }
+        }
+      ]
+    },
+    "srv-6": {
+      "peticiones": [
+        {
+          "metodo": "terminal/create",
+          "id": "srv-7",
+          "params": {
+            "sessionId": "ses-1",
+            "command": "rm",
+            "args": [
+              "-rf",
+              "x"
+            ]
+          }
+        }
+      ]
+    },
+    "srv-7": {
+      "notificaciones": [
+        {
+          "metodo": "session/update",
+          "params": {
+            "sessionId": "ses-1",
+            "update": {
+              "sessionUpdate": "usage_update",
+              "used": 1500,
+              "size": 1048576
+            }
+          }
+        },
+        {
+          "metodo": "session/update",
+          "params": {
+            "sessionId": "ses-1",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "content": {
+                "type": "text",
+                "text": "{\"hallazgos\":[{\"estacion\":\"pruebas\",\"gra"
+              }
+            }
+          }
+        },
+        {
+          "metodo": "session/update",
+          "params": {
+            "sessionId": "ses-1",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "content": {
+                "type": "text",
+                "text": "vedad\":\"media\",\"archivo\":\"src/a.js\",\"linea\":3,\"categoria\":\"cobertura\",\"hallazgo\":\"Falta una prueba\",\"evidencia\":\"src/a.js:3\",\"propuesta\":\"Añadir la prueba\",\"confianza\":\"alta\"}],\"resumen\":\"Un hallazgo.\"}"
+              }
+            }
+          }
+        }
+      ],
+      "responder": [
+        {
+          "metodo": "session/prompt",
+          "resultado": {
+            "stopReason": "end_turn"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -126,3 +126,11 @@ test('RG Windows home aliases remain forbidden despite path casing', {skip: proc
   const f = await memoryFixture(t);
   await assert.rejects(loadMemoryPolicy(f.manifestPath, {home: f.root.toUpperCase()}), code('RG_ROOT_DENIED'));
 });
+
+test("RG policy loads without depending on the retired task flow", async () => {
+  const source = await fs.readFile(new URL("../src/memory-mcp-policy.js", import.meta.url), "utf8");
+  assert.match(source, /from "\.\/task-document\.js"/u);
+  assert.doesNotMatch(source, /task-prepare|task-verify|task-cli|peer-review|revision/u);
+  const document = await fs.readFile(new URL("../src/task-document.js", import.meta.url), "utf8");
+  assert.doesNotMatch(document, /from "\.\/(?:task-prepare|task-prepare-files|task-verify|revision|peer-)/u);
+});

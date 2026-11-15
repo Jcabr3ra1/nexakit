@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import Ajv2020 from "ajv/dist/2020.js";
-import { parseTaskDocument } from "./task-prepare-files.js";
+import { parseTaskDocument } from "./task-document.js";
 import { containsSensitiveData, isCredentialPath } from "./sensitive-data.js";
 
 export const MEMORY_READ_TOOLS = Object.freeze([

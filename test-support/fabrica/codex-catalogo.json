@@ -1,0 +1,97 @@
+{
+  "version": "codex-cli 0.0.1",
+  "metodos": {
+    "initialize": {
+      "resultado": {
+        "userAgent": "codex-falso/0.0.0",
+        "codexHome": "/tmp/codex-falso",
+        "platformFamily": "unix",
+        "platformOs": "macos"
+      }
+    },
+    "model/list": [
+      {
+        "resultado": {
+          "data": [
+            {
+              "id": "gpt-5.5",
+              "model": "gpt-5.5",
+              "upgrade": null,
+              "upgradeInfo": null,
+              "availabilityNux": null,
+              "displayName": "gpt-5.5",
+              "description": "",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "low",
+                  "description": ""
+                },
+                {
+                  "reasoningEffort": "medium",
+                  "description": ""
+                },
+                {
+                  "reasoningEffort": "high",
+                  "description": ""
+                },
+                {
+                  "reasoningEffort": "xhigh",
+                  "description": ""
+                }
+              ],
+              "defaultReasoningEffort": "low",
+              "inputModalities": [
+                "text"
+              ],
+              "supportsPersonality": false,
+              "multiAgentVersion": null,
+              "additionalSpeedTiers": [],
+              "serviceTiers": [],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            }
+          ],
+          "nextCursor": "pagina-2"
+        }
+      },
+      {
+        "resultado": {
+          "data": [
+            {
+              "id": "gpt-5.5-mini",
+              "model": "gpt-5.5-mini",
+              "upgrade": null,
+              "upgradeInfo": null,
+              "availabilityNux": null,
+              "displayName": "gpt-5.5-mini",
+              "description": "",
+              "modelSpecialty": null,
+              "hidden": false,
+              "supportedReasoningEfforts": [
+                {
+                  "reasoningEffort": "medium",
+                  "description": ""
+                }
+              ],
+              "defaultReasoningEffort": "medium",
+              "inputModalities": [
+                "text"
+              ],
+              "supportsPersonality": false,
+              "multiAgentVersion": null,
+              "additionalSpeedTiers": [],
+              "serviceTiers": [],
+              "defaultServiceTier": null,
+              "availableAccessPrograms": null,
+              "isDefault": false
+            }
+          ],
+          "nextCursor": null
+        }
+      }
+    ]
+  }
+}

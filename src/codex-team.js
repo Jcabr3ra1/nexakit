@@ -115,7 +115,7 @@ async function inspect(target) {
 }
 
 function native(name, description, instructions, pick) {
-  return `# Generado por nexakit codex agentes\nname = ${JSON.stringify(name)}\ndescription = ${JSON.stringify(description)}\nmodel = ${JSON.stringify(pick.model)}\nmodel_reasoning_effort = ${JSON.stringify(pick.effort)}\ndeveloper_instructions = ${JSON.stringify(instructions)}\n`;
+  return `# Generado por \`nexakit codex agentes\`.\nname = ${JSON.stringify(name)}\ndescription = ${JSON.stringify(description)}\nmodel = ${JSON.stringify(pick.model)}\nmodel_reasoning_effort = ${JSON.stringify(pick.effort)}\ndeveloper_instructions = ${JSON.stringify(instructions)}\n`;
 }
 const permissions = 'Los permisos efectivos se heredan de la sesión principal/padre; estas instrucciones de solo lectura y presupuesto son orientativas, no restricciones técnicas. No amplíes permisos.';
 const common = `${permissions}\nRespeta AGENTS.md y las skills del proyecto. Haz solo el encargo; el principal decide, verifica el informe e integra. No solicites automáticamente revisiones a otra IA.`;
@@ -153,6 +153,31 @@ export async function teamPlan(options = {}) {
   return plan;
 }
 
+// First lines nexakit wrote before today's `# Generado por \`nexakit codex agentes\`.`. A profile that only differs from
+// the planned one in that line is still nexakit's: `npx nexakit` brings it up to date (writeTeam with `names`). One
+// with an old mark and other content is reported and never touched.
+const OLD_MARKS = [
+  '# Generado por nexakit codex agentes',
+  '# Generado por `agent-toolkit-inbox agentes`. Ese comando nunca sobrescribe ni borra: lo anterior queda como .anterior-*.',
+];
+export async function staleTeamMarks(plan) {
+  const migrable = [], different = [];
+  for (const file of plan.files) {
+    if (file.state !== 'distinto' || file.snapshot.type !== 'file') continue;
+    let current;
+    try { current = (await inspect(file.path)).content; } catch { continue; }
+    const newline = current?.indexOf('\n') ?? -1;
+    if (newline < 0 || !OLD_MARKS.includes(current.slice(0, newline))) continue;
+    const same = file.content && current.slice(newline) === file.content.slice(file.content.indexOf('\n'));
+    (same ? migrable : different).push(file.name);
+  }
+  return { migrable, different };
+}
+// Read-only: the profiles with an old mark, or null when they cannot be planned (no catalog, unreadable folder).
+export async function teamMarks(options = {}) {
+  try { return await staleTeamMarks(await teamPlan(options)); } catch { return null; }
+}
+
 export async function installedTeam(options = {}) {
   const codexHome = homeOf(options);
   if (!await directories(codexHome)) return [];
@@ -174,10 +199,11 @@ async function checkDirectories(home, expected) {
   return current;
 }
 
-export async function writeTeam(plan, { update = false } = {}) {
+// `names` limits the write to those profiles (the migration of old marks updates only the ones it proved).
+export async function writeTeam(plan, { update = false, names } = {}) {
   const trusted = plans.get(plan);
   if (!trusted || trusted.serialized !== JSON.stringify(plan)) throw fail('Plan inválido o modificado; genera otra vista previa con teamPlan.');
-  const pending = plan.files.filter(file => file.state === 'nuevo' || (update && file.state === 'distinto'));
+  const pending = plan.files.filter(file => (!names || names.includes(file.name)) && (file.state === 'nuevo' || (update && file.state === 'distinto')));
   if (!pending.length) return plan;
   let dirs = await checkDirectories(plan.codexHome, trusted.dirs);
   // Preflight the entire known team before any mutation, including unchanged files.

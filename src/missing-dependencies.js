@@ -12,6 +12,11 @@ export async function loadWithDependencyCheck(load, { root = copyRoot(), write =
   try {
     return await load();
   } catch (error) {
+    if (error?.code === 'ERR_MODULE_NOT_FOUND' && /^Cannot find module '[^']*[\\/]dist[\\/]fabrica[\\/]/u.test(error.message ?? '')) {
+      write('Falta la compilación de la fábrica (dist/fabrica). Ejecuta npm run build o reinstala nexakit.\n');
+      process.exitCode = 1;
+      return null;
+    }
     const missingPackage = error?.code === 'ERR_MODULE_NOT_FOUND' && /^Cannot find package '/u.test(error.message ?? '');
     if (!missingPackage || isEphemeralPath(root)) throw error;
     write(`Faltan las dependencias de esta copia. Ejecuta \`npm ci\` en ${root}.\n`);
