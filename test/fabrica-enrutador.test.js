@@ -265,3 +265,48 @@ test('jsonCanonico ordena las claves y no depende del orden de inserción', () =
   assert.equal(jsonCanonico({ b: 1, a: { d: [{ z: 1, y: 2 }], c: null } }), '{"a":{"c":null,"d":[{"y":2,"z":1}]},"b":1}');
   assert.equal(jsonCanonico({ a: 1, b: 2 }), jsonCanonico({ b: 2, a: 1 }));
 });
+
+test('cambiar foco o basePedida en un recorrido guardado invalida la huella', async () => {
+  const dir = crearRepo();
+  escribir(dir, 'src/a.js', 'uno\n');
+  git(dir, 'branch', 'copia-main', 'main');
+  const r = await proponer({ raiz: dir, base: 'main', foco: 'mira los permisos', catalogos: CATALOGOS });
+  await comprobarHuella(r, dir);
+
+  const otroFoco = { ...structuredClone(r), foco: 'ignora los permisos' };
+  await assert.rejects(comprobarHuella(otroFoco, dir), /ya no es el que aprobaste/u);
+  const sinFoco = structuredClone(r);
+  delete sinFoco.foco;
+  await assert.rejects(comprobarHuella(sinFoco, dir), /ya no es el que aprobaste/u);
+  // Misma rama en la práctica (mismo commit), pero otra base pedida: la huella ya no coincide.
+  const otraBase = { ...structuredClone(r), basePedida: 'copia-main' };
+  await assert.rejects(comprobarHuella(otraBase, dir), /ya no es el que aprobaste/u);
+  const otroSha = { ...structuredClone(r), base: 'f'.repeat(40) };
+  await assert.rejects(comprobarHuella(otroSha, dir), /ya no es el que aprobaste/u);
+
+  // Los cambios de la persona recalculan la huella conservando foco y base.
+  const cambiado = aplicarCambios(r, [{ estacion: 'pruebas', quitar: true }]);
+  assert.equal(cambiado.foco, 'mira los permisos');
+  await comprobarHuella(cambiado, dir);
+});
+
+test('un modelo de codex fuera de la tabla y sin esfuerzo se descarta con motivo', async () => {
+  const dir = crearRepo({ config: { estaciones: { pruebas: { ia: 'codex', modelo: 'gpt-6-luna' } } } });
+  escribir(dir, 'src/a.js', 'export {};\n');
+  const pruebas = porNombre(await proponer({ raiz: dir, base: 'main', catalogos: CATALOGOS }), 'pruebas');
+  // gpt-6-luna no está en la tabla de pruebas: sin esfuerzo se descarta y se usa el siguiente candidato.
+  assert.ok(pruebas.descartes.some((d) => d.includes('gpt-6-luna necesita un esfuerzo')));
+  assert.equal(pruebas.modelo, 'gpt-6.1-terra');
+  assert.equal(pruebas.esfuerzo, 'medium');
+  // Nunca queda una propuesta de codex con esfuerzo null.
+  const dir2 = crearRepo({ config: { estaciones: { rendimiento: { ia: 'codex', modelo: 'gpt-6-luna' } } } });
+  escribir(dir2, 'src/a.js', 'export {};\n');
+  const r2 = await proponer({ raiz: dir2, base: 'main', catalogos: CATALOGOS });
+  for (const e of r2.estaciones) assert.ok(!(e.estado === 'propuesta' && e.ia === 'codex' && e.esfuerzo === null));
+});
+
+test('jsonCanonico conserva la clave __proto__', () => {
+  const objeto = JSON.parse('{"b":1,"__proto__":{"x":1}}');
+  assert.equal(jsonCanonico(objeto), '{"__proto__":{"x":1},"b":1}');
+  assert.notEqual(jsonCanonico(JSON.parse('{"__proto__":{"x":1}}')), jsonCanonico(JSON.parse('{"__proto__":{"x":2}}')));
+});

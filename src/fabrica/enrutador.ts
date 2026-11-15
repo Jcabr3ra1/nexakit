@@ -69,21 +69,28 @@ function ordenar(valor: unknown): unknown {
   if (Array.isArray(valor)) return valor.map(ordenar);
   if (valor !== null && typeof valor === 'object') {
     const origen = valor as Record<string, unknown>;
-    const salida: Record<string, unknown> = {};
-    for (const clave of Object.keys(origen).sort()) salida[clave] = ordenar(origen[clave]);
-    return salida;
+    // `fromEntries` define propiedades propias: una clave `__proto__` no se pierde.
+    return Object.fromEntries(
+      Object.keys(origen)
+        .sort()
+        .map((clave) => [clave, ordenar(origen[clave])]),
+    );
   }
   return valor;
 }
 
-/** SHA-256 del JSON canónico de `{ head, diffSha256, estaciones }`. */
-export function calcularHuella(datos: {
-  head: string;
-  diffSha256: string;
-  estaciones: EstacionRecorrido[];
-}): string {
-  const { head, diffSha256, estaciones } = datos;
-  return createHash('sha256').update(jsonCanonico({ head, diffSha256, estaciones }), 'utf8').digest('hex');
+/**
+ * SHA-256 del JSON canónico de `{ head, diffSha256, base, basePedida, foco, estaciones }`:
+ * todo lo que la persona aprueba. `coste` se deriva de `estaciones` y `catalogos` solo
+ * sirve para validar cambios, así que no entran.
+ */
+export function calcularHuella(
+  datos: Pick<Recorrido, 'head' | 'diffSha256' | 'base' | 'basePedida' | 'estaciones'> & { foco?: string },
+): string {
+  const { head, diffSha256, base, basePedida, foco, estaciones } = datos;
+  return createHash('sha256')
+    .update(jsonCanonico({ head, diffSha256, base, basePedida, foco, estaciones }), 'utf8')
+    .digest('hex');
 }
 
 interface Candidato {
@@ -133,8 +140,10 @@ function descarte(c: Candidato, catalogos: Catalogos): string | null {
   if (catalogo === undefined) return `no hay catálogo de ${c.ia}`;
   const entrada = catalogo.find((m) => m.modelo === c.modelo);
   if (entrada === undefined) return `${c.modelo} no está en el catálogo de ${c.ia}`;
-  if (c.ia === 'codex' && c.esfuerzo !== null && !entrada.esfuerzos.includes(c.esfuerzo)) {
-    return `${c.modelo} no admite el esfuerzo ${c.esfuerzo} en ${c.ia}`;
+  if (c.ia === 'codex') {
+    // El catálogo no declara un esfuerzo por defecto: sin esfuerzo no se puede proponer.
+    if (c.esfuerzo === null) return `${c.modelo} necesita un esfuerzo en codex y no se indicó ninguno`;
+    if (!entrada.esfuerzos.includes(c.esfuerzo)) return `${c.modelo} no admite el esfuerzo ${c.esfuerzo} en ${c.ia}`;
   }
   return null;
 }
@@ -212,7 +221,14 @@ export async function proponer(entrada: {
   });
 
   const recorrido: Recorrido = {
-    huella: calcularHuella({ head: diff.head, diffSha256: diff.sha256, estaciones }),
+    huella: calcularHuella({
+      head: diff.head,
+      diffSha256: diff.sha256,
+      base: diff.base,
+      basePedida: base,
+      foco,
+      estaciones,
+    }),
     head: diff.head,
     base: diff.base,
     basePedida: base,
@@ -284,7 +300,7 @@ export function aplicarCambios(recorrido: Recorrido, cambios: CambioRecorrido[])
   return {
     ...recorrido,
     estaciones,
-    huella: calcularHuella({ head: recorrido.head, diffSha256: recorrido.diffSha256, estaciones }),
+    huella: calcularHuella({ ...recorrido, estaciones }),
     coste: calcularCoste(estaciones),
   };
 }
@@ -294,12 +310,7 @@ export function aplicarCambios(recorrido: Recorrido, cambios: CambioRecorrido[])
  * contenido y el `HEAD` y el diff actuales son los mismos con los que se propuso.
  */
 export async function comprobarHuella(recorrido: Recorrido, raiz: string): Promise<void> {
-  const esperada = calcularHuella({
-    head: recorrido.head,
-    diffSha256: recorrido.diffSha256,
-    estaciones: recorrido.estaciones,
-  });
-  if (esperada !== recorrido.huella) throw new ErrorFabrica(MENSAJE_HUELLA);
+  if (calcularHuella(recorrido) !== recorrido.huella) throw new ErrorFabrica(MENSAJE_HUELLA);
   const actual = await leerDiff(raiz, recorrido.basePedida);
   if (actual.head !== recorrido.head || actual.sha256 !== recorrido.diffSha256) {
     throw new ErrorFabrica(MENSAJE_HUELLA);
