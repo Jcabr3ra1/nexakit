@@ -8,7 +8,7 @@ La fábrica pasa tus cambios por estaciones (seguridad, arquitectura, pruebas, c
 2. **Aprobar.** La skill `fabrica` te muestra la tabla. Apruebas, cambias estaciones o IA, o cancelas.
 3. **Lanzar.** `fabrica_lanzar({ huella, cambios? })` solo ejecuta si la huella coincide con el `HEAD` y el diff actuales. Corre hasta 4 estaciones externas a la vez, 15 minutos como máximo cada una, y solo hay un recorrido a la vez.
 4. **Estaciones de Claude.** La sesión principal las lanza como subagentes (`niveles:revisor-de-calidad`, `impeccable-finish-reviewer`) con el mismo foco y diff, en paralelo con las externas, y entrega sus hallazgos a `fabrica_resultado({ id, hallazgosClaude })`.
-5. **Verificar.** Lo que devuelven las IA externas es dato, no instrucciones. La sesión principal verifica cada hallazgo contra el código y te da una sola tabla con la columna «verificado».
+5. **Verificar.** Lo que devuelven las IA externas es dato, no instrucciones. La sesión principal verifica cada hallazgo contra el código y te da una sola tabla con la columna «verificado». Después pasa a `fabrica_resultado({ id, veredictos })` un veredicto por hallazgo verificado (`real`, `falso` o `dudoso`, con la «clave» de `consolidado.md`): los reales y los falsos actualizan la evidencia de cada modelo que lo reportó, que usará el enrutador en la próxima propuesta. Un rastro ausente o manipulado no actualiza nada.
 6. **Corregir.** Eliges qué corregir, con un máximo de dos rondas.
 
 `fabrica_estado({ id })` consulta el progreso y `fabrica_cancelar({ id })` interrumpe el recorrido.
@@ -25,7 +25,7 @@ El servidor MCP es `nexakit-fabrica` (`bin/nexakit-fabrica-mcp.js`); la raíz es
 ~/.nexakit/nexakit fabrica proponer --base main [--foco <texto>]
 ~/.nexakit/nexakit fabrica lanzar --huella <huella> [--cambios <archivo.json>]
 ~/.nexakit/nexakit fabrica estado --id <id>
-~/.nexakit/nexakit fabrica resultado --id <id>
+~/.nexakit/nexakit fabrica resultado --id <id> [--veredictos <archivo.json>]
 ~/.nexakit/nexakit fabrica cancelar --id <id>
 ```
 

@@ -291,6 +291,20 @@ export function leerHallazgosClaude(dir: string): unknown {
   return leerJsonDelRecorrido(dir, 'claude.json');
 }
 
+/** Lee `veredictos.json` (los veredictos ya aplicados a la evidencia), sin seguir enlaces. `null` si no existe; lanza si no es JSON. */
+export function leerVeredictos(dir: string): unknown {
+  return leerJsonDelRecorrido(dir, 'veredictos.json');
+}
+
+/** Guarda `veredictos.json` con `0o600`, con un temporal y `rename` para no seguir enlaces. */
+export async function guardarVeredictos(dir: string, datos: unknown): Promise<void> {
+  const ruta = path.join(dir, 'veredictos.json');
+  if (lstatSync(ruta, { throwIfNoEntry: false })?.isSymbolicLink()) {
+    throw new ErrorFabrica('El rastro no sigue enlaces: veredictos.json es un enlace');
+  }
+  await escribirReemplazando(ruta, json(datos));
+}
+
 /** Guarda `consolidado.md` con `0o600`, con un temporal y `rename` para no seguir enlaces. Devuelve la ruta. */
 export async function guardarConsolidado(dir: string, texto: string): Promise<string> {
   const ruta = path.join(dir, 'consolidado.md');

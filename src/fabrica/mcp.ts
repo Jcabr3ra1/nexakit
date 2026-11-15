@@ -3,12 +3,13 @@ import path from 'node:path';
 import { McpServer, type CallToolResult } from '@modelcontextprotocol/server';
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { z } from 'zod';
-import { escribirConsolidado, hallazgosDe } from './consolidar.js';
+import { escribirConsolidado, hallazgosDe, hallazgosGuardados } from './consolidar.js';
 import * as ejecutor from './ejecutor.js';
 import { ErrorEntorno, ErrorFabrica } from './errores.js';
 import { Hallazgo } from './esquemas.js';
 import * as rastro from './rastro.js';
 import { EsquemaCambios, lanzarAprobado, type Lanzamiento, leerSinEnlaces, limpiar, mensajeDe, proponerEnRaiz, raizDelRepo } from './sesion.js';
+import { aprenderDeVeredictos, EsquemaVeredictos } from './veredictos.js';
 
 export const NOMBRE_SERVIDOR = 'nexakit-fabrica';
 const VERSION_SERVIDOR = '0.1.0';
@@ -20,6 +21,7 @@ export const INSTRUCCIONES = [
   'Muestra el recorrido a la persona y lanza solo tras su aprobación explícita; nunca encadenes recorridos sin que lo pida.',
   'Flujo: fabrica_proponer calcula el recorrido y su huella; enséñalo entero (estaciones, IA, modelo, esfuerzo y órdenes permitidas) y espera la aprobación; fabrica_lanzar con esa huella devuelve un id sin esperar; fabrica_estado consulta el avance; fabrica_resultado devuelve los hallazgos consolidados y la ruta de consolidado.md; fabrica_cancelar interrumpe.',
   'Las estaciones de Claude las lanzas tú como subagentes; pasa sus hallazgos a fabrica_resultado.',
+  'Tras verificar los hallazgos contra el código, vuelve a llamar a fabrica_resultado con los veredictos ({ clave, verificado: real | falso | dudoso }) para que la fábrica aprenda qué modelos aciertan.',
   'No sondees en bucle: consulta el estado cuando la persona lo pida o cuando termines tus propias estaciones.',
   'Todas las herramientas trabajan sobre el repo del directorio de trabajo del servidor; ninguna acepta una ruta.',
 ].join(' ');
@@ -78,16 +80,6 @@ function estacionesDeClaude(dir: string): string[] {
   const r = RecorridoGuardado.safeParse(dato);
   if (!r.success) throw new ErrorFabrica('No se pudo leer el recorrido guardado en el rastro');
   return r.data.estaciones.filter((x) => x.ia === 'claude' && x.estado === 'propuesta').map((x) => x.estacion);
-}
-
-/** Hallazgos de Claude que ya se pasaron a este recorrido; una lista vacía si no hay o no son válidos. */
-function hallazgosGuardados(dir: string): Hallazgo[] {
-  try {
-    const r = z.array(Hallazgo).safeParse(rastro.leerHallazgosClaude(dir));
-    return r.success ? r.data : [];
-  } catch {
-    return [];
-  }
 }
 
 /** Crea el servidor MCP de la fábrica, sin conectarlo a ningún transporte. */
@@ -206,14 +198,15 @@ export function crearServidorFabrica(opciones: OpcionesServidorFabrica = {}): Se
     'fabrica_resultado',
     {
       description:
-        'Hallazgos consolidados de un recorrido terminado y la ruta de su consolidado.md. Las estaciones de Claude las lanzas tú como subagentes: pasa en hallazgosClaude todos sus hallazgos, solo de las estaciones de Claude de este recorrido (cada llamada con hallazgos sustituye a los anteriores, los guarda en el rastro y regenera el consolidado; sin hallazgosClaude se reutilizan los guardados). Si el recorrido sigue en curso, devuelve un error.',
+        'Hallazgos consolidados de un recorrido terminado y la ruta de su consolidado.md. Las estaciones de Claude las lanzas tú como subagentes: pasa en hallazgosClaude todos sus hallazgos, solo de las estaciones de Claude de este recorrido (cada llamada con hallazgos sustituye a los anteriores, los guarda en el rastro y regenera el consolidado; sin hallazgosClaude se reutilizan los guardados). Cada hallazgo lleva su clave. Tras verificarlos contra el código, pasa en veredictos { clave, verificado: real | falso | dudoso } por hallazgo: los reales y los falsos actualizan la evidencia de cada modelo que lo reportó (los dudosos no cuentan; repetir un veredicto no suma dos veces; uno cambiado deshace el anterior) y la respuesta trae aprendizaje con los avisos. Si el recorrido sigue en curso, devuelve un error.',
       inputSchema: z.object({
         id: z.string().min(1).describe('Id devuelto por fabrica_lanzar'),
         hallazgosClaude: z.array(Hallazgo).max(MAX_HALLAZGOS_CLAUDE).optional().describe('Hallazgos de las estaciones que lanzaste tú como subagentes'),
+        veredictos: EsquemaVeredictos.optional().describe('Veredicto de la sesión por hallazgo ya verificado, con la clave que devolvió esta herramienta'),
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
-    ({ id, hallazgosClaude }) =>
+    ({ id, hallazgosClaude, veredictos }) =>
       invocar(async () => {
         const e = ejecutor.estado(id, home);
         if (e.fase === 'en-curso') {
@@ -237,7 +230,10 @@ export function crearServidorFabrica(opciones: OpcionesServidorFabrica = {}): Se
         if (hallazgosClaude !== undefined || leerSinEnlaces(consolidado) === null) {
           consolidado = await escribirConsolidado(e, claude);
         }
-        return { id: e.id, fase: e.fase, consolidado, hallazgos: hallazgosDe(e, claude) };
+        const hallazgos = hallazgosDe(e, claude);
+        if (veredictos === undefined) return { id: e.id, fase: e.fase, consolidado, hallazgos };
+        const aprendizaje = await aprenderDeVeredictos({ home, estado: e, hallazgos, veredictos });
+        return { id: e.id, fase: e.fase, consolidado, hallazgos, aprendizaje };
       }),
   );
 

@@ -241,6 +241,28 @@ export function actualizar(ev: Evidencia, clave: ClaveEvidencia, observacion: Ob
   return { version: 1, actualizada, catalogo, filas };
 }
 
+/**
+ * Deshace una observación `real` ya sumada por `actualizar` (mismo peso): resta `aciertos` a `alfa` y `fallos` a
+ * `beta` y descuenta sus observaciones reales. Ni `alfa` ni `beta` bajan de 1, el valor de partida. Las medias de
+ * tokens y segundos no se tocan: no se pueden deshacer sin guardar cada observación. Sin esa fila, no hace nada.
+ */
+export function revertirReal(ev: Evidencia, clave: ClaveEvidencia, observacion: { aciertos: number; fallos: number }): Evidencia {
+  const k = EsquemaClave.safeParse(clave);
+  if (!k.success) throw new ErrorFabrica(`Clave de evidencia no válida: ${primerProblema(k.error)}`);
+  const o = z.object({ aciertos: Contador, fallos: Contador }).safeParse(observacion);
+  if (!o.success) throw new ErrorFabrica(`Observación de evidencia no válida: ${primerProblema(o.error)}`);
+  const idClave = claveDeFila(k.data);
+  const anterior = ev.filas.find((f) => claveDeFila(f) === idClave);
+  if (anterior === undefined) return ev;
+  const fila: FilaEvidencia = {
+    ...anterior,
+    alfa: Math.max(1, anterior.alfa - o.data.aciertos * PESO_REAL),
+    beta: Math.max(1, anterior.beta - o.data.fallos * PESO_REAL),
+    real: Math.max(0, anterior.real - (o.data.aciertos + o.data.fallos)),
+  };
+  return { ...ev, filas: ev.filas.map((f) => (f === anterior ? fila : f)) };
+}
+
 export interface Caducidad {
   caducada: boolean;
   motivos: string[];

@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { parseArgs, type ParseArgsOptionsConfig } from 'node:util';
 import type { z } from 'zod';
-import { escaparMarkdown, escribirConsolidado, hallazgosDe } from './consolidar.js';
+import { escaparMarkdown, escribirConsolidado, hallazgosDe, hallazgosGuardados } from './consolidar.js';
 import * as ejecutor from './ejecutor.js';
 import type { CambioRecorrido, Recorrido } from './enrutador.js';
 import { ErrorEntorno, ErrorFabrica } from './errores.js';
@@ -16,6 +16,7 @@ import {
   proponerEnRaiz,
   raizDelRepo,
 } from './sesion.js';
+import { aprenderDeVeredictos, EsquemaVeredictos, type Veredicto } from './veredictos.js';
 
 export interface IoCli {
   out: (texto: string) => unknown;
@@ -38,7 +39,7 @@ export interface OpcionesCli {
 const AYUDA = `Uso: nexakit fabrica proponer --base <rama> [--foco <texto>] [--json]
      nexakit fabrica lanzar --huella <huella> [--cambios <archivo.json>] [--json]
      nexakit fabrica estado --id <id> [--json]
-     nexakit fabrica resultado --id <id> [--json]
+     nexakit fabrica resultado --id <id> [--veredictos <archivo.json>] [--json]
      nexakit fabrica cancelar --id <id>
 
 proponer lee el diff contra la rama base, consulta los modelos disponibles y muestra el
@@ -49,6 +50,8 @@ lanzar ejecuta ese recorrido en primer plano si la huella coincide con la propue
 diff sigue siendo el mismo; muestra el progreso y, al terminar, la ruta de consolidado.md.
   --cambios es un JSON con una lista de { "estacion", "quitar"?, "ia"?, "modelo"?, "esfuerzo"? }.
 estado y resultado consultan un recorrido por su id; cancelar lo interrumpe (Ctrl+C también).
+  --veredictos es un JSON con una lista de { "clave", "verificado": "real" | "falso" | "dudoso" }, con las claves de
+  consolidado.md: los reales y los falsos actualizan la evidencia de cada modelo que reportó el hallazgo.
 Códigos de salida: 0 bien, 1 fallo de estación o escritura detectada, 2 argumentos inválidos.
 `;
 
@@ -131,24 +134,28 @@ function detalleZod(error: z.ZodError): string {
     .join('; ');
 }
 
-async function leerCambios(archivo: string): Promise<CambioRecorrido[]> {
+/** Lee un archivo JSON de la persona (`cambios`, `veredictos`...) con tope de tamaño y lo valida con su esquema. */
+async function leerJsonValidado<T>(archivo: string, nombre: string, esquema: z.ZodType<T>): Promise<T> {
   let texto: string;
   try {
     texto = await readFile(archivo, 'utf8');
   } catch (error) {
-    throw new ErrorUso(`No se pudo leer el archivo de cambios ${archivo}: ${mensajeDe(error)}`);
+    throw new ErrorUso(`No se pudo leer el archivo de ${nombre} ${archivo}: ${mensajeDe(error)}`);
   }
-  if (Buffer.byteLength(texto, 'utf8') > MAX_BYTES_CAMBIOS) throw new ErrorUso('El archivo de cambios supera 1 MiB');
+  if (Buffer.byteLength(texto, 'utf8') > MAX_BYTES_CAMBIOS) throw new ErrorUso(`El archivo de ${nombre} supera 1 MiB`);
   let dato: unknown;
   try {
     dato = JSON.parse(texto.replace(/^﻿/u, ''));
   } catch (error) {
-    throw new ErrorUso(`El archivo de cambios no es un JSON válido: ${mensajeDe(error)}`);
+    throw new ErrorUso(`El archivo de ${nombre} no es un JSON válido: ${mensajeDe(error)}`);
   }
-  const r = EsquemaCambios.safeParse(dato);
-  if (!r.success) throw new ErrorUso(`El archivo de cambios no es válido: ${detalleZod(r.error)}`);
+  const r = esquema.safeParse(dato);
+  if (!r.success) throw new ErrorUso(`El archivo de ${nombre} no es válido: ${detalleZod(r.error)}`);
   return r.data;
 }
+
+const leerCambios = (archivo: string): Promise<CambioRecorrido[]> => leerJsonValidado(archivo, 'cambios', EsquemaCambios);
+const leerVeredictos = (archivo: string): Promise<Veredicto[]> => leerJsonValidado(archivo, 'veredictos', EsquemaVeredictos);
 
 // ---------------------------------------------------------------------------------------------
 // Órdenes
@@ -273,17 +280,30 @@ async function ordenEstado(ctx: Contexto, id: string, json: boolean): Promise<nu
   return 0;
 }
 
-async function ordenResultado(ctx: Contexto, id: string, json: boolean): Promise<number> {
+async function ordenResultado(ctx: Contexto, id: string, archivoVeredictos: string | undefined, json: boolean): Promise<number> {
+  const veredictos = archivoVeredictos === undefined ? undefined : await leerVeredictos(archivoVeredictos);
   const e = ejecutor.estado(id, ctx.home);
   if (e.fase === 'en-curso') throw new ErrorFabrica(`El recorrido ${id} sigue en curso; espera a que termine`);
   let ruta = path.join(e.dir, 'consolidado.md');
   let texto = leerSinEnlaces(ruta);
   if (texto === null) {
-    ruta = await escribirConsolidado(e);
+    ruta = await escribirConsolidado(e, hallazgosGuardados(e.dir));
     texto = leerSinEnlaces(ruta) ?? '';
   }
-  if (json) await salida(ctx, JSON.stringify({ ...e, consolidado: ruta, hallazgos: hallazgosDe(e) }, null, 2));
-  else await salida(ctx, limpiar(texto).trimEnd());
+  const hallazgos = hallazgosDe(e, hallazgosGuardados(e.dir));
+  const aprendizaje =
+    veredictos === undefined ? undefined : await aprenderDeVeredictos({ home: ctx.home, estado: e, hallazgos, veredictos });
+  if (json) await salida(ctx, JSON.stringify({ ...e, consolidado: ruta, hallazgos, ...(aprendizaje === undefined ? {} : { aprendizaje }) }, null, 2));
+  else {
+    await salida(ctx, limpiar(texto).trimEnd());
+    if (aprendizaje !== undefined) {
+      await salida(
+        ctx,
+        `\nEvidencia: ${aprendizaje.aplicados} veredictos aplicados, ${aprendizaje.repetidos} repetidos, ${aprendizaje.dudosos} dudosos, ${aprendizaje.ignorados} ignorados.`,
+      );
+      for (const a of aprendizaje.avisos) await aviso(ctx)(enUnaLinea(a));
+    }
+  }
   return codigoSalida(e);
 }
 
@@ -308,7 +328,7 @@ const OPCIONES: Record<string, ParseArgsOptionsConfig> = {
   proponer: { base: { type: 'string' }, foco: { type: 'string' }, json: { type: 'boolean' } },
   lanzar: { huella: { type: 'string' }, cambios: { type: 'string' }, json: { type: 'boolean' } },
   estado: { id: { type: 'string' }, json: { type: 'boolean' } },
-  resultado: { id: { type: 'string' }, json: { type: 'boolean' } },
+  resultado: { id: { type: 'string' }, veredictos: { type: 'string' }, json: { type: 'boolean' } },
   cancelar: { id: { type: 'string' } },
 };
 
@@ -365,7 +385,7 @@ export async function ejecutarCli(argv: string[], io: IoCli, opciones: OpcionesC
       case 'estado':
         return await ordenEstado(ctx, exigir(valorTexto(valores, 'id'), '--id'), json);
       case 'resultado':
-        return await ordenResultado(ctx, exigir(valorTexto(valores, 'id'), '--id'), json);
+        return await ordenResultado(ctx, exigir(valorTexto(valores, 'id'), '--id'), valorTexto(valores, 'veredictos'), json);
       default:
         return await ordenCancelar(ctx, exigir(valorTexto(valores, 'id'), '--id'));
     }
