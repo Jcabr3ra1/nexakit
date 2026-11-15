@@ -110,7 +110,7 @@ test('initialize no declara escritura de archivos ni terminal, y el proceso se l
     const carpeta = args[5];
     assert.ok(isAbsolute(carpeta), 'la carpeta de datos aislada es absoluta');
     assert.ok(!carpeta.startsWith(process.env.HOME ?? '\0'), 'no está en el HOME real');
-    assert.equal(statSync(carpeta).mode & 0o777, 0o700);
+    if (process.platform !== 'win32') assert.equal(statSync(carpeta).mode & 0o777, 0o700);
     assert.equal(p.cwd(), realpathSync(carpeta), 'el proceso arranca en la carpeta aislada, no en el directorio de trabajo');
     await conector.cerrar();
     assert.equal(existsSync(carpeta), false, 'la carpeta aislada se borra al cerrar');

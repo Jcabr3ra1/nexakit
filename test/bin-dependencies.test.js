@@ -82,3 +82,18 @@ test('only a missing package gets the explanation; any other failure is raised u
     process.exitCode = before;
   }
 });
+
+test('sin dist/fabrica el servidor MCP y la orden fabrica explican cómo compilar, sin traza', async t => {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'bin-dist-')));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  for (const entry of ['bin', 'src', 'catalogs', 'plugins', 'schemas', 'package.json']) await fs.cp(path.join(ROOT, entry), path.join(root, entry), { recursive: true });
+  await fs.symlink(path.join(ROOT, 'node_modules'), path.join(root, 'node_modules'), 'junction');
+  const mensaje = 'Falta la compilación de la fábrica (dist/fabrica). Ejecuta npm run build o reinstala nexakit.\n';
+  const mcp = run(root, 'nexakit-fabrica-mcp.js');
+  assert.equal(mcp.status, 1);
+  assert.equal(mcp.stderr, mensaje);
+  const cli = run(root, 'nexakit.js', 'fabrica', '--help');
+  assert.equal(cli.status, 1);
+  assert.equal(cli.stderr, mensaje);
+  assert.equal(cli.stdout, '');
+});

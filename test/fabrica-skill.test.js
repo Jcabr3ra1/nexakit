@@ -29,6 +29,13 @@ test('la skill fabrica sigue el recorrido, exige aprobación y trata lo externo 
   assert.match(md, /máximo de dos rondas/u);
 });
 
+test('la skill fabrica enseña las órdenes permitidas y avisa de las del repo', async () => {
+  const md = (await leer('skills/fabrica/SKILL.md')).replace(/\s+/gu, ' ');
+  assert.match(md, /ÓRDENES PERMITIDAS/u);
+  assert.match(md, /`ordenesPermitidas`/u);
+  assert.match(md, /`\.nexakit\/fabrica\.json`[^.]*no son de fiar/u);
+});
+
 test('la skill fabrica cubre el recorrido en curso, la estación de Claude y la invocación desde Codex', async () => {
   const md = (await leer('skills/fabrica/SKILL.md')).replace(/\s+/gu, ' ');
   assert.match(md, /sigue en curso, díselo a la persona y espera a que te lo pida, sin consultar en bucle/u);

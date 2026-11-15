@@ -83,6 +83,8 @@ export async function validatePackageRoot(root, version) {
 
   const mcp = await lstatOrNull(path.join(root, 'bin/nexakit-fabrica-mcp.js'));
   if (!mcp?.isFile()) fail('falta bin/nexakit-fabrica-mcp.js');
+  const compilado = await lstatOrNull(path.join(root, 'dist/fabrica/mcp.js'));
+  if (!compilado?.isFile()) fail('falta dist/fabrica/mcp.js');
 
   for (const folder of ['skills', 'catalogs/skills']) {
     let entries;

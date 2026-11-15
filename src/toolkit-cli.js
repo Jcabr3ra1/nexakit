@@ -1,5 +1,6 @@
 import os from 'node:os';
 import { runCli } from './cli.js';
+import { loadWithDependencyCheck } from './missing-dependencies.js';
 import { runModelCommand } from './model-command.js';
 import { runAhorroCommand } from './ahorro-command.js';
 import { runCodexCommand } from './codex-command.js';
@@ -102,7 +103,12 @@ export async function runToolkitCli(
   if (command === 'modelo') return runModelCommand(rest, { out, err }, options);
   if (command === 'codex') return runCodexCommand(rest, { out, err, input, output }, options);
   if (command === 'antigravity') return runAntigravityCommand(rest, { out, err, input, output }, options);
-  if (command === 'fabrica') return (await import('../dist/fabrica/cli.js')).ejecutarCli(rest, { out, err }, options);
+  if (command === 'fabrica') {
+    let aviso = '';
+    const cli = await loadWithDependencyCheck(() => import('../dist/fabrica/cli.js'), { write: text => { aviso += text; } });
+    if (!cli) { await err(aviso); return 1; }
+    return cli.ejecutarCli(rest, { out, err }, options);
+  }
   if (command === 'ahorro') return runAhorroCommand(rest, { out, err }, options);
   if (command === 'lecciones') return runLeccionesCommand(rest, { out, err }, options);
   if (command === 'revision') {
