@@ -14,6 +14,7 @@ herramientas del cliente. No genera audio ni vídeo. historial/recuperar no llam
 Cada consulta se guarda en ~/.agent-toolkit/gemini y su consumo declarado, en consumo.jsonl. --copiar-a nunca sobrescribe.
 Exit: 0 completado, 1 error, 2 uso incorrecto, 3 análisis parcial/no compatible.
 `;
+const COUNTERS = ['inputTokens', 'cacheReadTokens', 'outputTokens', 'totalTokens', 'durationMs'];
 const MEASURED = ['investigar', 'imagen', 'consultar', 'analizar'];
 const NAMES = { '--prompt': 'prompt', '--modelo': 'model', '--copiar-a': 'copyTo', '--espera-seg': 'wait', '--archivo': 'files', '--directorio': 'directory', '--limite': 'limit' };
 const ALLOWED = {
@@ -26,6 +27,7 @@ export async function runGeminiCli(argv, { out, err, tools = { investigar, image
   if (!Object.hasOwn(ALLOWED, command ?? '')) { await err(HELP); return 2; }
   const options = {};
   for (let i=0; i<rest.length; i+=2) {
+    if (['--task', '--project-root'].includes(rest[i])) { await err('--task y --project-root se retiraron; el consumo se guarda en ~/.agent-toolkit/gemini/consumo.jsonl\n'); return 2; }
     const key = NAMES[rest[i]], value = rest[i+1];
     if (!key || !(ALLOWED[command].includes(key)) || value === undefined || !value || (key !== 'files' && Object.hasOwn(options,key))) { await err(HELP); return 2; }
     if (key === 'files') (options.files ??= []).push(value); else options[key] = value;
@@ -47,13 +49,17 @@ export async function runGeminiCli(argv, { out, err, tools = { investigar, image
       if (usageRecord) return usageRecord;
       try {
         const u = result.usage;
-        usageRecord = await store.recordUsage({
+        const measurement = {
           id: 'gemini:' + result.conversationId, agent: 'gemini', model: result.model, source: 'client-reported',
           phase: { investigar: 'research', imagen: 'image', analizar: 'analysis', consultar: 'other' }[command],
           inputTokens: u.input_tokens ?? null, cacheReadTokens: u.cache_read_tokens ?? null,
           outputTokens: u.output_tokens ?? null, totalTokens: u.total_tokens ?? null,
           durationMs: result.durationMs ?? null, costUsd: null
-        });
+        };
+        // Sin ningún contador no hay nada que medir: una consulta correcta no debe fallar por eso.
+        usageRecord = COUNTERS.every(key => measurement[key] === null)
+          ? { recorded: false, reason: 'sin-contadores' }
+          : await store.recordUsage(measurement);
       } catch {
         usageRecord = { recorded: false, error: 'No se guardó la medición de consumo; conserva estos resultados y no repitas la consulta.' };
       }

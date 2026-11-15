@@ -220,8 +220,27 @@ test('the CLI records provider usage once in its own consumo.jsonl and rejects t
   assert.equal(records[0].cacheReadTokens,40);
   assert.equal(records[0].source,'client-reported');
   assert.equal(records[0].id,'gemini:'+CONVERSATION);
-  assert.equal(await runGeminiCli(['consultar','--prompt','hi','--task',CONVERSATION,'--project-root','/project'],io),2);
+  let stderr='';
+  for (const retired of [['--task',CONVERSATION],['--project-root','/project']]) {
+    stderr='';
+    assert.equal(await runGeminiCli(['consultar','--prompt','hi',...retired],{...io,err:t=>{stderr+=t;}}),2);
+    assert.equal(stderr,'--task y --project-root se retiraron; el consumo se guarda en ~/.agent-toolkit/gemini/consumo.jsonl\n');
+  }
   assert.equal(calls.length,1);
+});
+
+test('a correct query without any counter neither records nor fails', async () => {
+  const records=[];
+  const store={recordUsage:async m=>{records.push(m);return {recorded:true};}};
+  const tools={consultar:async ()=>({kind:'consultar',conversationId:CONVERSATION,model:'gemini-3.8-flash-low',usage:{input_tokens:null,cache_read_tokens:null,output_tokens:null,total_tokens:null},durationMs:null})};
+  let stdout='';
+  assert.equal(await runGeminiCli(['consultar','--prompt','hi'],{tools,usageStore:store,out:t=>{stdout+=t;},err:()=>{}}),0);
+  assert.equal(records.length,0);
+  assert.deepEqual(JSON.parse(stdout).usageRecord,{recorded:false,reason:'sin-contadores'});
+  // Real flow through onUsage: agy reported no usage and no duration.
+  const via={consultar:async input=>({kind:'consultar',conversationId:CONVERSATION,model:'gemini-3.8-flash-low',usage:{},durationMs:null,usageRecord:await input.onUsage({conversationId:CONVERSATION,model:'gemini-3.8-flash-low',usage:{},seconds:null})})};
+  assert.equal(await runGeminiCli(['consultar','--prompt','hi'],{tools:via,usageStore:store,out:()=>{},err:()=>{}}),0);
+  assert.equal(records.length,0);
 });
 
 test('the usage store appends private lines to consumo.jsonl without following links', async () => {
