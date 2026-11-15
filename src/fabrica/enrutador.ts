@@ -148,7 +148,8 @@ function descarte(c: Candidato, catalogos: Catalogos): string | null {
   return null;
 }
 
-function calcularCoste(estaciones: EstacionRecorrido[]): Recorrido['coste'] {
+/** Llamadas externas y subagentes de Claude de las estaciones propuestas. */
+export function calcularCoste(estaciones: EstacionRecorrido[]): Recorrido['coste'] {
   let llamadasExternas = 0;
   let subagentesClaude = 0;
   for (const e of estaciones) {

@@ -1,0 +1,169 @@
+import { createHash, randomBytes } from 'node:crypto';
+import { chmod, lstat, mkdir, open, readdir, realpath, rename, rm, unlink } from 'node:fs/promises';
+import type { Stats } from 'node:fs';
+import path from 'node:path';
+import type { Encargo, ResultadoEstacion } from './conectores/tipos.js';
+import type { Recorrido } from './enrutador.js';
+import { ErrorFabrica } from './errores.js';
+import { NOMBRES_ESTACION, type NombreEstacion } from './esquemas.js';
+
+/** Días que se conserva un rastro antes de que `podar` lo borre. */
+export const DIAS_RASTRO = 90;
+
+const PATRON_ID = /^fab-\d{8}-\d{4}-[0-9a-f]{4}$/u;
+const PATRON_REPO = /^[A-Za-z0-9._-]+$/u;
+const DIA_MS = 24 * 60 * 60 * 1000;
+
+/** Encargo tal como queda en el rastro: sin el texto del diff, solo su huella. */
+export type EncargoRastro = Encargo & { diffSha256: string };
+
+function codigoError(error: unknown): unknown {
+  return typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
+}
+
+async function lstatSiExiste(ruta: string): Promise<Stats | null> {
+  try {
+    return await lstat(ruta);
+  } catch (error) {
+    if (codigoError(error) === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+const dos = (n: number): string => String(n).padStart(2, '0');
+
+/** Id del recorrido: `fab-AAAAMMDD-HHMM-<4 hex>`, con la hora local. */
+export function nuevoId(fecha: Date = new Date()): string {
+  const dia = `${fecha.getFullYear()}${dos(fecha.getMonth() + 1)}${dos(fecha.getDate())}`;
+  const hora = `${dos(fecha.getHours())}${dos(fecha.getMinutes())}`;
+  return `fab-${dia}-${hora}-${randomBytes(2).toString('hex')}`;
+}
+
+/** Nombre seguro de la carpeta del repo: su nombre saneado más 8 hex del SHA-256 de la ruta real. */
+export async function nombreRepo(raiz: string): Promise<string> {
+  const real = await realpath(raiz);
+  const saneado = path
+    .basename(real)
+    .replace(/[^A-Za-z0-9._-]+/gu, '_')
+    .replace(/^\.+/u, '')
+    .slice(0, 48);
+  const huella = createHash('sha256').update(real, 'utf8').digest('hex').slice(0, 8);
+  return `${saneado || 'repo'}-${huella}`;
+}
+
+/** Crea la carpeta con `0o700` o comprueba que la que hay es una carpeta real, no un enlace. */
+async function carpetaPropia(ruta: string): Promise<void> {
+  let info = await lstatSiExiste(ruta);
+  if (info === null) {
+    try {
+      await mkdir(ruta, { mode: 0o700 });
+    } catch (error) {
+      if (codigoError(error) !== 'EEXIST') throw error;
+    }
+    info = await lstat(ruta);
+  }
+  if (info.isSymbolicLink() || !info.isDirectory()) {
+    throw new ErrorFabrica(`El rastro no sigue enlaces: ${ruta} no es una carpeta real`);
+  }
+  await chmod(ruta, 0o700);
+}
+
+/** Escribe un archivo nuevo con `0o600`; `wx` falla si ya existe algo ahí, también un enlace. */
+async function escribirNuevo(ruta: string, texto: string): Promise<void> {
+  const archivo = await open(ruta, 'wx', 0o600);
+  try {
+    await archivo.chmod(0o600);
+    await archivo.writeFile(texto, 'utf8');
+  } finally {
+    await archivo.close();
+  }
+}
+
+/** Reemplaza un archivo de forma atómica: temporal nuevo y `rename`, que no sigue enlaces. */
+async function escribirReemplazando(ruta: string, texto: string): Promise<void> {
+  const temporal = path.join(path.dirname(ruta), `.${path.basename(ruta)}.${randomBytes(6).toString('hex')}.tmp`);
+  try {
+    await escribirNuevo(temporal, texto);
+    await rename(temporal, ruta);
+  } catch (error) {
+    await unlink(temporal).catch(() => {});
+    throw error;
+  }
+}
+
+const json = (valor: unknown): string => `${JSON.stringify(valor, null, 2)}\n`;
+
+/** Crea `~/.nexakit/fabrica/<repo>/<id>/` con `recorrido.json`. */
+export async function crear(home: string, repo: string, r: Recorrido): Promise<{ id: string; dir: string }> {
+  if (!PATRON_REPO.test(repo) || repo === '.' || repo === '..') {
+    throw new ErrorFabrica(`Nombre de repo no válido para el rastro: ${repo}`);
+  }
+  const nexakit = path.join(home, '.nexakit');
+  await mkdir(nexakit, { recursive: true, mode: 0o700 });
+  const base = path.join(nexakit, 'fabrica');
+  await carpetaPropia(base);
+  const dirRepo = path.join(base, repo);
+  await carpetaPropia(dirRepo);
+
+  for (let intento = 0; intento < 16; intento += 1) {
+    const id = nuevoId();
+    const dir = path.join(dirRepo, id);
+    try {
+      await mkdir(dir, { mode: 0o700 });
+    } catch (error) {
+      if (codigoError(error) === 'EEXIST') continue;
+      throw error;
+    }
+    await chmod(dir, 0o700);
+    await escribirNuevo(path.join(dir, 'recorrido.json'), json(r));
+    return { id, dir };
+  }
+  throw new ErrorFabrica('No se pudo reservar un id libre para el rastro');
+}
+
+/** Guarda `<estacion>.json` con el encargo (sin el diff) y el resultado. */
+export async function guardarEstacion(
+  dir: string,
+  estacion: NombreEstacion,
+  encargo: EncargoRastro,
+  resultado: ResultadoEstacion,
+): Promise<void> {
+  if (!(NOMBRES_ESTACION as readonly string[]).includes(estacion)) {
+    throw new ErrorFabrica(`Estación desconocida en el rastro: ${estacion}`);
+  }
+  await escribirNuevo(path.join(dir, `${estacion}.json`), json({ estacion, encargo, resultado }));
+}
+
+/** Reescribe `estado.json` con el estado actual del recorrido. */
+export async function guardarEstado(dir: string, estado: unknown): Promise<void> {
+  await escribirReemplazando(path.join(dir, 'estado.json'), json(estado));
+}
+
+/**
+ * Borra los rastros sin actividad en los últimos `dias`. Nunca sigue enlaces: una
+ * carpeta de repo o de recorrido que sea un enlace se deja tal cual. Devuelve los ids borrados.
+ */
+export async function podar(home: string, dias: number = DIAS_RASTRO): Promise<string[]> {
+  if (!Number.isFinite(dias) || dias <= 0) throw new ErrorFabrica('Los días de poda deben ser un número positivo');
+  const base = path.join(home, '.nexakit', 'fabrica');
+  const infoBase = await lstatSiExiste(base);
+  if (infoBase === null || infoBase.isSymbolicLink() || !infoBase.isDirectory()) return [];
+  const limite = Date.now() - dias * DIA_MS;
+  const borrados: string[] = [];
+  for (const repo of (await readdir(base)).sort()) {
+    const dirRepo = path.join(base, repo);
+    const infoRepo = await lstatSiExiste(dirRepo);
+    if (infoRepo === null || infoRepo.isSymbolicLink() || !infoRepo.isDirectory()) continue;
+    for (const id of (await readdir(dirRepo)).sort()) {
+      if (!PATRON_ID.test(id)) continue;
+      const dir = path.join(dirRepo, id);
+      const info = await lstatSiExiste(dir);
+      if (info === null || info.isSymbolicLink() || !info.isDirectory()) continue;
+      if (info.mtimeMs >= limite) continue;
+      // `rm` borra los enlaces de dentro sin seguirlos.
+      await rm(dir, { recursive: true, force: true });
+      borrados.push(id);
+    }
+  }
+  return borrados;
+}
