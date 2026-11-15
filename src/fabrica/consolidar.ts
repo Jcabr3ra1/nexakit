@@ -1,6 +1,6 @@
 import type { ResultadoEstacion } from './conectores/tipos.js';
 import type { EstadoRecorrido } from './ejecutor.js';
-import { NOMBRES_ESTACION, type Hallazgo, type InformeEstacion, type NombreEstacion } from './esquemas.js';
+import { InformeEstacion, NOMBRES_ESTACION, type Hallazgo, type NombreEstacion } from './esquemas.js';
 import * as rastro from './rastro.js';
 
 export type HallazgoConsolidado = Hallazgo & { estaciones: NombreEstacion[] };
@@ -41,7 +41,8 @@ export function consolidar(
 ): HallazgoConsolidado[] {
   const todos: Hallazgo[] = [...hallazgosClaude];
   for (const r of resultados) {
-    for (const h of r.informe?.hallazgos ?? []) todos.push({ ...h, estacion: h.estacion ?? r.estacion });
+    // La estación sale del rastro, nunca del texto del revisor: así no puede fingir corroboración.
+    for (const h of r.informe?.hallazgos ?? []) todos.push({ ...h, estacion: r.estacion });
   }
   // Por archivo, categoría y línea: así los hallazgos cercanos quedan contiguos.
   todos.sort(
@@ -50,6 +51,9 @@ export function consolidar(
       (a.categoria < b.categoria ? -1 : a.categoria > b.categoria ? 1 : 0) ||
       (a.linea ?? -1) - (b.linea ?? -1),
   );
+  // El grupo se forma por vecindad sucesiva: cada hallazgo se compara con el último que entró,
+  // así que una cadena de hallazgos a ≤ 3 líneas entre sí acaba en un solo grupo aunque los
+  // extremos estén más lejos.
   const grupos: Array<{ base: Hallazgo; ultimo: Hallazgo; estaciones: NombreEstacion[] }> = [];
   for (const h of todos) {
     const grupo = grupos.at(-1);
@@ -70,8 +74,7 @@ export function consolidar(
 /** Escapa texto de un revisor para una celda de tabla: sin `|`, saltos de línea ni HTML. */
 export function escaparMarkdown(texto: string): string {
   return texto
-    .replace(/\\/gu, '\\\\')
-    .replace(/\|/gu, '\\|')
+    .replace(/[\\|`[\]!]/gu, (c) => `\\${c}`)
     .replace(/</gu, '&lt;')
     .replace(/>/gu, '&gt;')
     .replace(/[\r\n\p{Zl}\p{Zp}]+/gu, ' ')
@@ -85,6 +88,7 @@ export function consolidadoMarkdown(
   lista: HallazgoConsolidado[],
   estado: EstadoRecorrido,
   modelos: ModeloEstacion[] = [],
+  invalidas: NombreEstacion[] = [],
 ): string {
   const e = escaparMarkdown;
   const out: string[] = [`# Consolidado del recorrido ${e(id)}`, '', `Fase: ${e(estado.fase)}`, ''];
@@ -95,14 +99,15 @@ export function consolidadoMarkdown(
     out.push('| Gravedad | Estaciones | Archivo:línea | Hallazgo | Propuesta | Verificado |', '| --- | --- | --- | --- | --- | --- |');
     for (const h of lista) {
       const sitio = h.linea === null ? h.archivo : `${h.archivo}:${h.linea}`;
-      out.push(`| ${h.gravedad} | ${h.estaciones.join(', ')} | ${e(sitio)} | ${e(h.hallazgo)} | ${e(h.propuesta)} |  |`);
+      out.push(`| ${e(h.gravedad)} | ${e(h.estaciones.join(', '))} | ${e(sitio)} | ${e(h.hallazgo)} | ${e(h.propuesta)} |  |`);
     }
     out.push('');
   }
   const noRevisadas = estado.estaciones.filter((x) => NO_REVISADAS.has(x.estado));
-  if (noRevisadas.length > 0 || estado.motivo !== undefined) {
+  if (noRevisadas.length > 0 || invalidas.length > 0 || estado.motivo !== undefined) {
     out.push('## No revisado', '');
-    for (const x of noRevisadas) out.push(`- ${x.estacion} (${x.estado}): ${e(x.motivo ?? 'sin motivo registrado')}`);
+    for (const x of noRevisadas) out.push(`- ${e(x.estacion)} (${e(x.estado)}): ${e(x.motivo ?? 'sin motivo registrado')}`);
+    for (const i of invalidas) out.push(`- ${e(i)}: informe inválido en el rastro`);
     if (estado.motivo !== undefined) out.push(`- Recorrido: ${e(estado.motivo)}`);
     out.push('');
   }
@@ -114,7 +119,7 @@ export function consolidadoMarkdown(
   if (modelos.length > 0) {
     out.push('## Modelos', '');
     for (const m of modelos) {
-      out.push(`- ${m.estacion}: pedido ${e(m.modelo ?? 'ninguno')}, informado ${e(m.modeloInformado ?? 'ninguno')}`);
+      out.push(`- ${e(m.estacion)}: pedido ${e(m.modelo ?? 'ninguno')}, informado ${e(m.modeloInformado ?? 'ninguno')}`);
     }
     out.push('');
   }
@@ -122,15 +127,32 @@ export function consolidadoMarkdown(
 }
 
 /** Lee el rastro del recorrido, consolida y escribe `consolidado.md` en su carpeta. Devuelve la ruta. */
-export async function escribirConsolidado(estado: EstadoRecorrido): Promise<string> {
+export async function escribirConsolidado(estado: EstadoRecorrido, hallazgosClaude: Hallazgo[] = []): Promise<string> {
   const resultados: Array<{ estacion: NombreEstacion; informe?: InformeEstacion }> = [];
   const modelos: ModeloEstacion[] = [];
+  const invalidas: NombreEstacion[] = [];
   for (const { estacion } of estado.estaciones) {
-    const dato = rastro.leerEstacion(estado.dir, estacion);
+    let dato: ReturnType<typeof rastro.leerEstacion>;
+    try {
+      dato = rastro.leerEstacion(estado.dir, estacion);
+    } catch {
+      invalidas.push(estacion);
+      continue;
+    }
     if (dato === null) continue;
-    const resultado: ResultadoEstacion | undefined = dato.resultado;
-    if (resultado?.estado === 'ok' && resultado.informe !== undefined) resultados.push({ estacion, informe: resultado.informe });
-    modelos.push({ estacion, modelo: dato.encargo?.modelo ?? null, modeloInformado: resultado?.modeloInformado ?? null });
+    const resultado = dato.resultado;
+    if (resultado?.estado === 'ok') {
+      // El rastro es texto en disco: se revalida antes de fiarse.
+      const informe = InformeEstacion.safeParse(resultado.informe);
+      if (informe.success) resultados.push({ estacion, informe: informe.data });
+      else invalidas.push(estacion);
+    }
+    modelos.push({
+      estacion,
+      modelo: typeof dato.encargo?.modelo === 'string' ? dato.encargo.modelo : null,
+      modeloInformado: typeof resultado?.modeloInformado === 'string' ? resultado.modeloInformado : null,
+    });
   }
-  return rastro.guardarConsolidado(estado.dir, consolidadoMarkdown(estado.id, consolidar(resultados), estado, modelos));
+  const lista = consolidar(resultados, hallazgosClaude);
+  return rastro.guardarConsolidado(estado.dir, consolidadoMarkdown(estado.id, lista, estado, modelos, invalidas));
 }

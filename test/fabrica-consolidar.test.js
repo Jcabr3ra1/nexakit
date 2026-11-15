@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { consolidar, consolidadoMarkdown, escribirConsolidado } from '../dist/fabrica/consolidar.js';
@@ -98,6 +98,71 @@ test('escribirConsolidado lee el rastro y escribe consolidado.md con 0o600', asy
     assert.match(md, /codigo: pedido pedido-1, informado real-1/u);
     if (process.platform !== 'win32') assert.equal(statSync(ruta).mode & 0o777, 0o600);
     await escribirConsolidado(estado); // reescribir no falla
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('la estación sale del rastro, no del texto del revisor', () => {
+  const lista = consolidar([{ estacion: 'codigo', informe: informe(h('seguridad', 'alta', 'a.ts', 1)) }]);
+  assert.deepEqual(lista[0].estaciones, ['codigo']);
+});
+
+test('escapado: retorno de carro, U+2028, títulos, enlaces e imágenes', () => {
+  const malo = 'a\r## T\u2028## U\n## V ![x](http://e) [l](u) `c`';
+  const lista = consolidar([{ estacion: 'codigo', informe: informe(h('codigo', 'alta', 'a.ts', 1, { hallazgo: malo, propuesta: malo })) }]);
+  const md = consolidadoMarkdown('fab-1', lista, estadoBase({ estaciones: [{ estacion: 'pruebas', estado: 'fallida', motivo: malo }], motivo: malo }));
+  assert.doesNotMatch(md, /^## [TUV]/mu);
+  assert.doesNotMatch(md, /[\r\u2028]/u);
+  assert.match(md, /\\!\\\[x\\\]\(http:\/\/e\) \\\[l\\\]\(u\) \\`c\\`/u);
+  assert.doesNotMatch(md, /(?<!\\)!\[/u);
+});
+
+function rastroCon(extra) {
+  const dir = mkdtempSync(path.join(tmpdir(), 'fabrica-consol-'));
+  const estado = estadoBase({ dir, estaciones: [{ estacion: 'codigo', estado: 'ok' }, { estacion: 'seguridad', estado: 'ok' }], ...extra });
+  return { dir, estado };
+}
+
+test('rastro inválido o corrupto va a «No revisado»; estado.motivo aparece', async () => {
+  const { dir, estado } = rastroCon({ motivo: 'se cayó el rastro' });
+  try {
+    writeFileSync(path.join(dir, 'codigo.json'), JSON.stringify({ resultado: { estado: 'ok', informe: { hallazgos: [{ x: 1 }], resumen: 'r' } } }));
+    writeFileSync(path.join(dir, 'seguridad.json'), '{no es json');
+    const md = readFileSync(await escribirConsolidado(estado), 'utf8');
+    assert.match(md, /codigo: informe inválido en el rastro/u);
+    assert.match(md, /seguridad: informe inválido en el rastro/u);
+    assert.match(md, /Recorrido: se cayó el rastro/u);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('escribirConsolidado suma los hallazgos de Claude', async () => {
+  const { dir, estado } = rastroCon();
+  try {
+    writeFileSync(path.join(dir, 'codigo.json'), JSON.stringify({ resultado: { estado: 'ok', modeloInformado: null, informe: informe(h('codigo', 'media', 'a.ts', 5)) } }));
+    const md = readFileSync(await escribirConsolidado(estado, [h('arquitectura', 'alta', 'a.ts', 6)]), 'utf8');
+    assert.match(md, /\| alta \| arquitectura, codigo \| a\.ts:6/u);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('consolidado.md como enlace simbólico falla sin escribir a través', async (t) => {
+  if (process.platform === 'win32') return t.skip('sin enlaces en Windows');
+  const { dir, estado } = rastroCon();
+  const fuera = path.join(dir, 'fuera.txt');
+  try {
+    writeFileSync(fuera, 'intacto');
+    try {
+      symlinkSync(fuera, path.join(dir, 'consolidado.md'));
+    } catch {
+      return t.skip('sin permiso para enlaces');
+    }
+    await assert.rejects(escribirConsolidado(estado), /enlace/u);
+    assert.equal(readFileSync(fuera, 'utf8'), 'intacto');
+    assert.ok(existsSync(fuera));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

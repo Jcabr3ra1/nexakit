@@ -157,6 +157,9 @@ export function leerEstacion(dir: string, estacion: NombreEstacion): { encargo?:
 /** Guarda `consolidado.md` con `0o600`, con un temporal y `rename` para no seguir enlaces. Devuelve la ruta. */
 export async function guardarConsolidado(dir: string, texto: string): Promise<string> {
   const ruta = path.join(dir, 'consolidado.md');
+  if (lstatSync(ruta, { throwIfNoEntry: false })?.isSymbolicLink()) {
+    throw new ErrorFabrica('El rastro no sigue enlaces: consolidado.md es un enlace');
+  }
   await escribirReemplazando(ruta, texto);
   return ruta;
 }
