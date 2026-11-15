@@ -20,12 +20,14 @@ test('reconoce quejas repetidas escritas sin tildes ni signos y no las peticione
   for (const t of ['sigue haciendo muchas preguntas', 'otra vez lo mismo', 'ya cansa', 'eso está mal', 'no era eso', 'te pedí que no preguntaras tanto',
     'no funciona lo que hiciste', 'por qué volviste a hacerlo', 'ya me cansaste con las preguntas', 'YA CANSA', 'sigues haciendo muchas preguntas porfavor',
     'otra vez con las preguntas', 'sigues preguntando lo mismo', 'sigues sin entender lo que quiero', 'haces demasiadas preguntas', 'eso esta mal',
-    'lo que hiciste no funciona', 'no sirve lo que hiciste', 'porque volviste a tocar ese archivo', 'te pedi que no hicieras commit'])
+    'lo que hiciste no funciona', 'no sirve lo que hiciste', 'porque volviste a tocar ese archivo', 'te pedi que no hicieras commit',
+    'sigue haciendo muchas yes or no', 'sigues ignorando lo que te digo', 'sigues haciendo lo mismo', 'no me hiciste caso', 'por qué no me haces caso', 'no me has hecho caso'])
     assert.ok(esCorreccion(t), t);
   for (const t of ['¿por qué funciona así?', 'sigue con el plan', 'no funciona el wifi del vecino, pero tú sigue', 'otra vez gracias',
     'corre otra vez las pruebas porfavor', 'sigue con el siguiente paso', 'dime por qué sigue fallando el test', 'el login no funciona en Safari, revísalo',
     'otra vez abre el archivo de configuración', 'sigue haciendo el plan tal como está', 'explícame cómo funciona el hook', 'prueba otra vez con el otro modelo',
-    'cuando no funciona el build, ¿qué se hace?', 'sigue con lo que estabas haciendo', 'no funciona npm en esta máquina, instálalo de nuevo'])
+    'cuando no funciona el build, ¿qué se hace?', 'sigue con lo que estabas haciendo', 'no funciona npm en esta máquina, instálalo de nuevo',
+    'sigues corriendo el test? avisame', 'sigues haciendo pruebas, bien', 'por favor sigue haciendo eso mismo', 'sigue haciendo lo mismo que antes'])
     assert.equal(esCorreccion(t), false, t);
 });
 

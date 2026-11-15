@@ -15,8 +15,9 @@ const CORRECCION = new RegExp([
   String.raw`\bno\s+vuelvas\s+a\b`,
   String.raw`\bcu[aá]ntas\s+veces\b`,
   // Quejas con contexto: palabra de queja + referencia a lo que hizo el asistente. Sin «sigue» ni «no funciona» sueltos.
-  String.raw`\bsigu(e|es|en)\s+(haciendo|preguntando|pidiendo)\s+(muchas|demasiadas|tantas|lo\s+mismo|eso)\b`,
-  String.raw`\bsigues\s+(sin\b|\p{L}+ndo\b)`,
+  String.raw`\bsigu(e|es|en)\s+(haciendo|preguntando|pidiendo)\s+(muchas|demasiadas|tantas)\b`,
+  String.raw`\bsigues\s+(sin\b|(preguntando|pidiendo|insistiendo|ignorando|repitiendo|olvidando)\b|haciendo\s+lo\s+mismo\b)`,
+  String.raw`\bno\s+me\s+(hiciste|haces|has\s+hecho)\s+caso\b`,
   String.raw`\bya\s+(me\s+)?cans(a|as|aste|[eé]|o)(?!\p{L})`,
   String.raw`\botra\s+vez\s+con\s+(las|los|tus|tantas|tantos|esas|esos)\b`,
   String.raw`\b(haces|hiciste|haciendo)\s+(muchas|demasiadas|tantas)\s+preguntas\b`,
