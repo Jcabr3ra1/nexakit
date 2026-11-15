@@ -1,5 +1,5 @@
 import { constants } from 'node:fs';
-import { mkdir, open } from 'node:fs/promises';
+import { chmod, mkdir, open, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { ErrorFabrica } from './errores.js';
@@ -19,7 +19,13 @@ const PESO_REAL = 2;
 export type FuenteEvidencia = 'banco' | 'real';
 
 const Fecha = z.string().refine((valor) => !Number.isNaN(Date.parse(valor)), 'fecha no válida');
-const Positivo = z.number().positive().finite();
+/**
+ * Rango de alfa y beta. Las filas parten de 1 y solo suben, así que el mínimo nunca estorba; fuera de este rango
+ * (números casi cero, o más de mil millones de observaciones) el cálculo de la Beta deja de ser fiable.
+ */
+export const MIN_PARAMETRO = 1e-6;
+export const MAX_PARAMETRO = 1e9;
+const Positivo = z.number().min(MIN_PARAMETRO).max(MAX_PARAMETRO);
 const NoNegativo = z.number().nonnegative().finite();
 const Contador = z.number().int().nonnegative();
 const Modelos = z.array(z.string().min(1));
@@ -86,7 +92,13 @@ const EsquemaObservacion = z.object({
 
 /** Evidencia sin datos: Beta(1,1) implícita para todo. Su fecha es la de creación. */
 export function evidenciaVacia(ahora: Date = new Date()): Evidencia {
-  return { version: 1, actualizada: ahora.toISOString(), catalogo: { codex: [], antigravity: [], claude: [] }, filas: [] };
+  return { version: 1, actualizada: fechaValida(ahora, 'evidenciaVacia').toISOString(), catalogo: { codex: [], antigravity: [], claude: [] }, filas: [] };
+}
+
+/** Devuelve la fecha si es un `Date` con hora válida; si no, `ErrorFabrica` (y no un `RangeError` al formatearla). */
+function fechaValida(fecha: unknown, donde: string): Date {
+  if (!(fecha instanceof Date) || Number.isNaN(fecha.getTime())) throw new ErrorFabrica(`Fecha no válida en ${donde}`);
+  return fecha;
 }
 
 /** Texto del primer problema de un esquema, para el mensaje de error. */
@@ -167,14 +179,17 @@ function betaIncompleta(a: number, b: number, x: number): number {
  * Sin dependencias: beta incompleta por fracción continua de Lentz y bisección sobre [0, 1].
  */
 export function cuantil05(alfa: number, beta: number): number {
-  if (!Number.isFinite(alfa) || !Number.isFinite(beta) || alfa <= 0 || beta <= 0) {
-    throw new ErrorFabrica(`Los parámetros de la Beta deben ser positivos y finitos: alfa=${alfa}, beta=${beta}`);
+  const enRango = (x: number): boolean => x >= MIN_PARAMETRO && x <= MAX_PARAMETRO;
+  if (!enRango(alfa) || !enRango(beta)) {
+    throw new ErrorFabrica(`Los parámetros de la Beta deben estar entre ${MIN_PARAMETRO} y ${MAX_PARAMETRO}: alfa=${alfa}, beta=${beta}`);
   }
   let bajo = 0;
   let alto = 1;
   for (let i = 0; i < 100; i += 1) {
     const medio = (bajo + alto) / 2;
-    if (betaIncompleta(alfa, beta, medio) < CUANTIL) bajo = medio;
+    const acumulada = betaIncompleta(alfa, beta, medio);
+    if (!Number.isFinite(acumulada)) throw new ErrorFabrica(`No se pudo calcular el cuantil de Beta(${alfa}, ${beta}): resultado no finito`);
+    if (acumulada < CUANTIL) bajo = medio;
     else alto = medio;
   }
   return (bajo + alto) / 2;
@@ -196,6 +211,7 @@ export function actualizar(ev: Evidencia, clave: ClaveEvidencia, observacion: Ob
   const o = EsquemaObservacion.safeParse(observacion);
   if (!o.success) throw new ErrorFabrica(`Observación de evidencia no válida: ${primerProblema(o.error)}`);
   const { aciertos, fallos, tokens, segundos, fuente } = o.data;
+  const instante = observacion.ahora === undefined ? new Date() : fechaValida(observacion.ahora, 'actualizar');
   const n = aciertos + fallos;
   if (n === 0) return ev;
 
@@ -220,7 +236,7 @@ export function actualizar(ev: Evidencia, clave: ClaveEvidencia, observacion: Ob
   let actualizada = ev.actualizada;
   if (fuente === 'banco') {
     if (!catalogo[k.data.ia].includes(k.data.modelo)) catalogo[k.data.ia].push(k.data.modelo);
-    actualizada = (observacion.ahora ?? new Date()).toISOString();
+    actualizada = instante.toISOString();
   }
   return { version: 1, actualizada, catalogo, filas };
 }
@@ -232,9 +248,11 @@ export interface Caducidad {
 
 /**
  * Dice si la evidencia conviene renovarla: más de 30 días desde la última medición del banco, o modelos vivos
- * del catálogo que el banco no ha medido. Solo informa: nunca lanza nada.
+ * del catálogo que el banco no ha medido. Solo informa: nunca relanza el banco.
+ * Los días se cuentan completos (se redondea hacia abajo): con 30,5 días la evidencia aún no caduca; con 31 sí.
  */
 export function caducada(ev: Evidencia, catalogosVivos: Partial<Record<IA, readonly string[]>>, ahora: Date): Caducidad {
+  fechaValida(ahora, 'caducada');
   const motivos: string[] = [];
   const dias = Math.max(0, Math.floor((ahora.getTime() - Date.parse(ev.actualizada)) / DIA_MS));
   if (dias > DIAS_CADUCIDAD) motivos.push(`la evidencia tiene ${dias} días`);
@@ -254,6 +272,7 @@ export function caducada(ev: Evidencia, catalogosVivos: Partial<Record<IA, reado
 // ---------------------------------------------------------------------------------------------------------------
 
 const carpetaBase = (home: string): string => path.join(home, '.nexakit', 'fabrica');
+const NOMBRE = 'evidencia.json';
 
 export interface EvidenciaCargada {
   evidencia: Evidencia;
@@ -261,32 +280,23 @@ export interface EvidenciaCargada {
   aviso: string | null;
 }
 
-function sinLeer(motivo: string, ahora: Date): EvidenciaCargada {
-  return {
-    evidencia: evidenciaVacia(ahora),
-    aviso: `No se pudo leer la evidencia guardada (${motivo}): se parte sin datos medidos y el archivo no se toca hasta el próximo guardado.`,
-  };
-}
+type Lectura = { estado: 'ausente' } | { estado: 'valida'; evidencia: Evidencia } | { estado: 'ilegible'; motivo: string };
 
-/**
- * Lee `~/.nexakit/fabrica/evidencia.json` sin seguir enlaces. Nunca lanza: sin archivo da evidencia vacía; con un
- * archivo corrupto, de otra versión, de forma inválida, enlazado o desmesurado, da evidencia vacía y un aviso.
- * No sobrescribe nada: el archivo solo cambia con un `guardar` explícito.
- */
-export async function cargar(home: string, ahora: Date = new Date()): Promise<EvidenciaCargada> {
+/** Lee el archivo sin seguir enlaces y dice si falta, es válido o no se puede leer (con el motivo). Nunca lanza. */
+async function leerArchivo(home: string): Promise<Lectura> {
   try {
     const base = carpetaBase(home);
     const carpeta = await lstatSiExiste(base);
-    if (carpeta === null) return { evidencia: evidenciaVacia(ahora), aviso: null };
-    if (carpeta.isSymbolicLink() || !carpeta.isDirectory()) return sinLeer('la carpeta de la fábrica no es una carpeta real', ahora);
-    const ruta = path.join(base, 'evidencia.json');
+    if (carpeta === null) return { estado: 'ausente' };
+    if (carpeta.isSymbolicLink() || !carpeta.isDirectory()) return { estado: 'ilegible', motivo: 'la carpeta de la fábrica no es una carpeta real' };
+    const ruta = path.join(base, NOMBRE);
     const info = await lstatSiExiste(ruta);
-    if (info === null) return { evidencia: evidenciaVacia(ahora), aviso: null };
-    if (info.isSymbolicLink() || !info.isFile()) return sinLeer('no es un archivo normal', ahora);
+    if (info === null) return { estado: 'ausente' };
+    if (info.isSymbolicLink() || !info.isFile()) return { estado: 'ilegible', motivo: 'no es un archivo normal' };
     const archivo = await open(ruta, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     let texto: string;
     try {
-      if ((await archivo.stat()).size > MAX_BYTES) return sinLeer('el archivo es demasiado grande', ahora);
+      if ((await archivo.stat()).size > MAX_BYTES) return { estado: 'ilegible', motivo: 'el archivo es demasiado grande' };
       texto = await archivo.readFile('utf8');
     } finally {
       await archivo.close();
@@ -295,28 +305,78 @@ export async function cargar(home: string, ahora: Date = new Date()): Promise<Ev
     try {
       valor = JSON.parse(texto);
     } catch {
-      return sinLeer('JSON corrupto', ahora);
+      return { estado: 'ilegible', motivo: 'JSON corrupto' };
     }
     const version = typeof valor === 'object' && valor !== null ? (valor as { version?: unknown }).version : undefined;
-    if (version !== undefined && version !== 1) return sinLeer(`versión desconocida: ${JSON.stringify(version)}`, ahora);
+    if (version !== undefined && version !== 1) return { estado: 'ilegible', motivo: `versión desconocida: ${JSON.stringify(version)}` };
     const resultado = EsquemaEvidencia.safeParse(valor);
-    if (!resultado.success) return sinLeer(`no tiene la forma esperada, ${primerProblema(resultado.error)}`, ahora);
-    return { evidencia: resultado.data, aviso: null };
+    if (!resultado.success) return { estado: 'ilegible', motivo: `no tiene la forma esperada, ${primerProblema(resultado.error)}` };
+    return { estado: 'valida', evidencia: resultado.data };
   } catch (error) {
     const codigo = codigoError(error);
-    return sinLeer(typeof codigo === 'string' ? `error de lectura ${codigo}` : 'error de lectura', ahora);
+    return { estado: 'ilegible', motivo: typeof codigo === 'string' ? `error de lectura ${codigo}` : 'error de lectura' };
   }
 }
 
 /**
- * Guarda la evidencia en `~/.nexakit/fabrica/evidencia.json` (carpeta `0o700`, archivo `0o600`, escritura atómica,
- * sin seguir enlaces). Rechaza una evidencia con forma inválida antes de escribir nada.
+ * Lee `~/.nexakit/fabrica/evidencia.json` sin seguir enlaces. Nunca lanza: sin archivo da evidencia vacía; con un
+ * archivo corrupto, de otra versión, de forma inválida, enlazado o desmesurado, da evidencia vacía y un aviso.
+ * No escribe nada: el archivo solo cambia con un `guardar` explícito, y este lo conserva si no se pudo leer.
  */
-export async function guardar(home: string, ev: Evidencia): Promise<void> {
+export async function cargar(home: string, ahora: Date = new Date()): Promise<EvidenciaCargada> {
+  const lectura = await leerArchivo(home);
+  if (lectura.estado === 'valida') return { evidencia: lectura.evidencia, aviso: null };
+  if (lectura.estado === 'ausente') return { evidencia: evidenciaVacia(ahora), aviso: null };
+  return {
+    evidencia: evidenciaVacia(ahora),
+    aviso: `No se pudo leer la evidencia guardada (${lectura.motivo}): se parte sin datos medidos y el archivo no se toca hasta el próximo guardado.`,
+  };
+}
+
+/** `AAAAMMDDTHHMMSSZ` en UTC, sin signos que molesten en un nombre de archivo. */
+const marcaCompacta = (fecha: Date): string => fecha.toISOString().replace(/[-:]/gu, '').replace(/\.\d+/u, '');
+
+/** Aparta el archivo ilegible a `evidencia.json.corrupto-<marca>` (0o600 si es un archivo normal). Devuelve su nombre. */
+async function apartarIlegible(base: string, ahora: Date): Promise<string> {
+  const ruta = path.join(base, NOMBRE);
+  const marca = marcaCompacta(ahora);
+  for (let intento = 0; intento < 100; intento += 1) {
+    const nombre = `${NOMBRE}.corrupto-${marca}${intento === 0 ? '' : `-${intento}`}`;
+    const destino = path.join(base, nombre);
+    if ((await lstatSiExiste(destino)) !== null) continue;
+    // `rename` mueve el archivo o el enlace mismo, nunca su destino.
+    await rename(ruta, destino);
+    const info = await lstatSiExiste(destino);
+    if (info !== null && info.isFile()) await chmod(destino, 0o600);
+    return nombre;
+  }
+  throw new ErrorFabrica('No se pudo apartar la evidencia ilegible: demasiadas copias con la misma marca');
+}
+
+export interface EvidenciaGuardada {
+  /** Si había un archivo ilegible, dónde se conservó; `null` si no hizo falta. */
+  aviso: string | null;
+}
+
+/**
+ * Guarda la evidencia en `~/.nexakit/fabrica/evidencia.json` (carpeta `0o700`, archivo `0o600`, escritura atómica,
+ * sin seguir enlaces). Rechaza una evidencia con forma inválida antes de escribir nada. Si el archivo actual existe pero
+ * no se puede leer (JSON truncado, versión desconocida...), lo conserva como `evidencia.json.corrupto-<fecha>` en vez
+ * de destruirlo, y lo dice en el aviso.
+ */
+export async function guardar(home: string, ev: Evidencia, ahora: Date = new Date()): Promise<EvidenciaGuardada> {
   const valida = EsquemaEvidencia.safeParse(ev);
   if (!valida.success) throw new ErrorFabrica(`La evidencia no se guarda porque no es válida: ${primerProblema(valida.error)}`);
+  const instante = fechaValida(ahora, 'guardar');
   await mkdir(path.join(home, '.nexakit'), { recursive: true, mode: 0o700 });
   const base = carpetaBase(home);
   await carpetaPropia(base, 'La evidencia');
-  await escribirReemplazando(path.join(base, 'evidencia.json'), `${JSON.stringify(valida.data, null, 2)}\n`);
+  let aviso: string | null = null;
+  const actual = await leerArchivo(home);
+  if (actual.estado === 'ilegible') {
+    const nombre = await apartarIlegible(base, instante);
+    aviso = `La evidencia anterior no se pudo leer (${actual.motivo}) y se conservó como ${nombre}.`;
+  }
+  await escribirReemplazando(path.join(base, NOMBRE), `${JSON.stringify(valida.data, null, 2)}\n`);
+  return { aviso };
 }

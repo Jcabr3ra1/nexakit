@@ -116,8 +116,15 @@ test('cuantil05 sube con los aciertos y baja con los fallos', () => {
   assert.ok(cuantil05(3, 1) < cuantil05(30, 10));
 });
 
-test('cuantil05 rechaza parámetros que no sean positivos y finitos', () => {
+test('cuantil05 rechaza parámetros que no sean positivos y finitos, o fuera de 1e-6 a 1e9', () => {
   for (const [a, b] of [
+    [1e300, 1],
+    [1, 1e300],
+    [Number.MIN_VALUE, 1],
+    [1, Number.MIN_VALUE],
+    [1e-7, 1],
+    [1e9 + 1, 1],
+    [1, 2e9],
     [0, 1],
     [1, 0],
     [-1, 2],
@@ -402,4 +409,95 @@ test('un archivo desmesurado no se lee: evidencia vacía con aviso', async () =>
   const { evidencia, aviso } = await cargar(home);
   assert.deepEqual(evidencia.filas, []);
   assert.match(aviso, /demasiado grande/u);
+});
+
+test('cuantil05 acepta los extremos del rango (1e9 y 1e-6) con valores correctos', () => {
+  // Normal: media 0,5 y desviación √(0,25 / 2e9) = 1,118e-5; el 5 % cae 1,645 desviaciones por debajo.
+  assert.ok(Math.abs(cuantil05(1e9, 1e9) - 0.4999816) < 1e-6);
+  assert.ok(Math.abs(cuantil05(1, 1e9) - 5.1293e-11) < 1e-14);
+  const q = cuantil05(1e-6, 1);
+  assert.ok(q >= 0 && q < 1e-6);
+});
+
+test('el esquema de guardar rechaza alfa o beta por encima de 1e9', async () => {
+  const home = temporal();
+  const mala = { ...evidenciaVacia(AHORA), filas: [{ ...clave(), alfa: 1e300, beta: 1, tokensMedios: 0, segundosMedios: 0, banco: 0, real: 0 }] };
+  await assert.rejects(guardar(home, mala), ErrorFabrica);
+  const minima = { ...evidenciaVacia(AHORA), filas: [{ ...clave(), alfa: Number.MIN_VALUE, beta: 1, tokensMedios: 0, segundosMedios: 0, banco: 0, real: 0 }] };
+  await assert.rejects(guardar(home, minima), ErrorFabrica);
+});
+
+test('actualizar y caducada con un ahora inválido dan ErrorFabrica, no RangeError', () => {
+  const invalida = new Date('no es una fecha');
+  assert.throws(() => actualizar(evidenciaVacia(AHORA), clave(), datos({ aciertos: 1, ahora: invalida })), ErrorFabrica);
+  assert.throws(() => actualizar(evidenciaVacia(AHORA), clave(), datos({ aciertos: 1, ahora: '2026-11-15' })), ErrorFabrica);
+  assert.throws(() => caducada(evidenciaVacia(AHORA), {}, invalida), ErrorFabrica);
+  assert.throws(() => evidenciaVacia(invalida), ErrorFabrica);
+});
+
+test('caducada cuenta días completos: 30,5 días no caduca', () => {
+  const ev = evidenciaVacia(new Date(AHORA.getTime() - 30.5 * DIA));
+  assert.deepEqual(caducada(ev, {}, AHORA), { caducada: false, motivos: [] });
+});
+
+test('guardar conserva un JSON truncado como evidencia.json.corrupto-<fecha> (0o600) y avisa', async () => {
+  const home = temporal();
+  mkdirSync(carpeta(home), { recursive: true });
+  const truncado = '{"version":1,"actualizada":"2026-11-1';
+  writeFileSync(archivo(home), truncado);
+  chmodSync(archivo(home), 0o644);
+
+  const { evidencia } = await cargar(home);
+  const nueva = actualizar(evidencia, clave(), datos({ aciertos: 1, tokens: 1, segundos: 1 }));
+  const { aviso } = await guardar(home, nueva, AHORA);
+
+  const copia = path.join(carpeta(home), 'evidencia.json.corrupto-20261115T120000Z');
+  assert.equal(readFileSync(copia, 'utf8'), truncado);
+  assert.equal(modo(copia), 0o600);
+  assert.match(aviso, /JSON corrupto/u);
+  assert.match(aviso, /evidencia\.json\.corrupto-20261115T120000Z/u);
+  assert.deepEqual((await cargar(home)).evidencia, nueva);
+  assert.equal(modo(archivo(home)), 0o600);
+});
+
+test('guardar con un archivo legible no crea copia ni aviso', async () => {
+  const home = temporal();
+  await guardar(home, evidenciaVacia(AHORA));
+  const { aviso } = await guardar(home, evidenciaVacia(AHORA));
+  assert.equal(aviso, null);
+  assert.deepEqual(readdirSync(carpeta(home)), ['evidencia.json']);
+});
+
+test('guardar conserva también una versión desconocida y no pisa una copia anterior de la misma marca', async () => {
+  const home = temporal();
+  mkdirSync(carpeta(home), { recursive: true });
+  writeFileSync(archivo(home), JSON.stringify({ version: 2, futuro: true }));
+  await guardar(home, evidenciaVacia(AHORA), AHORA);
+  writeFileSync(archivo(home), 'roto otra vez');
+  const { aviso } = await guardar(home, evidenciaVacia(AHORA), AHORA);
+  const copias = readdirSync(carpeta(home)).filter((n) => n.includes('.corrupto-')).sort();
+  assert.deepEqual(copias, ['evidencia.json.corrupto-20261115T120000Z', 'evidencia.json.corrupto-20261115T120000Z-1']);
+  assert.equal(readFileSync(path.join(carpeta(home), copias[0]), 'utf8'), JSON.stringify({ version: 2, futuro: true }));
+  assert.equal(readFileSync(path.join(carpeta(home), copias[1]), 'utf8'), 'roto otra vez');
+  assert.match(aviso, /-1\./u);
+});
+
+test('guardar aparta un enlace simbólico sin tocar su destino', { skip: SIN_ENLACES }, async () => {
+  const home = temporal();
+  mkdirSync(carpeta(home), { recursive: true });
+  const ajeno = path.join(home, 'ajeno.json');
+  writeFileSync(ajeno, 'dato ajeno');
+  chmodSync(ajeno, 0o644);
+  symlinkSync(ajeno, archivo(home));
+  await guardar(home, evidenciaVacia(AHORA), AHORA);
+  assert.equal(readFileSync(ajeno, 'utf8'), 'dato ajeno');
+  assert.equal(modo(ajeno), 0o644);
+  assert.ok(readdirSync(carpeta(home)).includes('evidencia.json.corrupto-20261115T120000Z'));
+  assert.equal(statSync(archivo(home)).isFile(), true);
+});
+
+test('guardar con un ahora inválido da ErrorFabrica sin escribir', async () => {
+  const home = temporal();
+  await assert.rejects(guardar(home, evidenciaVacia(AHORA), new Date('x')), ErrorFabrica);
+  assert.throws(() => statSync(archivo(home)), { code: 'ENOENT' });
 });
