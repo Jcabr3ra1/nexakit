@@ -167,7 +167,8 @@ export function construirEncargo(entrada: {
     raiz,
     base,
     instrucciones: `${instruccionesSinDiff(estacion.estacion, foco)}\n\nDiff que debes revisar:\n${diff}`,
-    ordenesPermitidas: [...ESTACIONES[estacion.estacion].ordenesPermitidas],
+    // Las del recorrido aprobado, no las de la tabla: la persona las vio en la propuesta.
+    ordenesPermitidas: [...estacion.ordenesPermitidas],
   };
 }
 

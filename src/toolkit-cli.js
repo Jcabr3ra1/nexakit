@@ -43,6 +43,7 @@ const HELP = `Uso: npx nexakit [--project <ruta>] [--si]
      nexakit modelo [--nivel <nivel>] [--ia claude|codex|antigravity] [--perfil-codex <nombre>]
      nexakit codex auditar|preparar|agentes|actividad|consumo|recomendar|hook|ejecutar|comparar [opciones]
      nexakit antigravity barra|preparar|agentes|recomendar|hook|ejecutar [opciones]
+     nexakit fabrica proponer|lanzar|estado|resultado|cancelar [opciones]
      nexakit ahorro [--json]
      nexakit lecciones [--json | --descartar]
      npx nexakit recommend [--project <ruta>] [--profile frontend|backend|mcp|security] [--client codex|claude] [--dry-run] [--json]
@@ -62,6 +63,7 @@ reparar re-apunta enlaces rotos de una instalación anterior (--desde es la carp
 que ya no existe); lista lo que encontró y siempre pregunta.
 memoria ejecuta los subcomandos de project-memory (init, connect, doctor, status, sync).
 revision y modelo piden una revisión a otra IA o consultan los modelos disponibles.
+fabrica propone, lanza y consulta un recorrido de revisión con varias IA en paralelo, solo lectura (ver nexakit fabrica --help).
 ahorro resume cuánta salida de comandos recortó el mod nexakit-ahorro (caracteres y tokens estimados).
 lecciones resume las correcciones y lecciones que registra el mod nexakit-lecciones y las que siguen pendientes.
 recommend inspecciona el proyecto en solo lectura; setup prepara las skills base globales y respeta las que quitaste
@@ -103,6 +105,7 @@ export async function runToolkitCli(
   if (command === 'modelo') return runModelCommand(rest, { out, err }, options);
   if (command === 'codex') return runCodexCommand(rest, { out, err, input, output }, options);
   if (command === 'antigravity') return runAntigravityCommand(rest, { out, err, input, output }, options);
+  if (command === 'fabrica') return (await import('../dist/fabrica/cli.js')).ejecutarCli(rest, { out, err }, options);
   if (command === 'ahorro') return runAhorroCommand(rest, { out, err }, options);
   if (command === 'lecciones') return runLeccionesCommand(rest, { out, err }, options);
   if (command === 'revision') return runRevisionCommand(rest, { out, err }, { options });

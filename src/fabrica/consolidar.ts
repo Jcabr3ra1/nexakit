@@ -126,9 +126,15 @@ export function consolidadoMarkdown(
   return `${out.join('\n')}\n`;
 }
 
-/** Lee el rastro del recorrido, consolida y escribe `consolidado.md` en su carpeta. Devuelve la ruta. */
-export async function escribirConsolidado(estado: EstadoRecorrido, hallazgosClaude: Hallazgo[] = []): Promise<string> {
-  const resultados: Array<{ estacion: NombreEstacion; informe?: InformeEstacion }> = [];
+interface Rastro {
+  resultados: Array<{ estacion: NombreEstacion; informe?: InformeEstacion }>;
+  modelos: ModeloEstacion[];
+  invalidas: NombreEstacion[];
+}
+
+/** Lee del rastro el informe y los modelos de cada estación; lo ilegible o inválido va a `invalidas`. */
+function leerRastro(estado: EstadoRecorrido): Rastro {
+  const resultados: Rastro['resultados'] = [];
   const modelos: ModeloEstacion[] = [];
   const invalidas: NombreEstacion[] = [];
   for (const { estacion } of estado.estaciones) {
@@ -153,6 +159,17 @@ export async function escribirConsolidado(estado: EstadoRecorrido, hallazgosClau
       modeloInformado: typeof resultado?.modeloInformado === 'string' ? resultado.modeloInformado : null,
     });
   }
+  return { resultados, modelos, invalidas };
+}
+
+/** Hallazgos unificados del rastro del recorrido, sin escribir nada. */
+export function hallazgosDe(estado: EstadoRecorrido, hallazgosClaude: Hallazgo[] = []): HallazgoConsolidado[] {
+  return consolidar(leerRastro(estado).resultados, hallazgosClaude);
+}
+
+/** Lee el rastro del recorrido, consolida y escribe `consolidado.md` en su carpeta. Devuelve la ruta. */
+export async function escribirConsolidado(estado: EstadoRecorrido, hallazgosClaude: Hallazgo[] = []): Promise<string> {
+  const { resultados, modelos, invalidas } = leerRastro(estado);
   const lista = consolidar(resultados, hallazgosClaude);
   return rastro.guardarConsolidado(estado.dir, consolidadoMarkdown(estado.id, lista, estado, modelos, invalidas));
 }

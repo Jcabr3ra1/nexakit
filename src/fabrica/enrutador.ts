@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { cargarConfig } from './config.js';
 import { clasificar, leerDiff, type Categoria } from './diff.js';
 import { ErrorFabrica } from './errores.js';
-import { TABLA_MODELOS_INICIAL } from './estaciones.js';
+import { ESTACIONES, TABLA_MODELOS_INICIAL } from './estaciones.js';
 import { NOMBRES_ESTACION, type ConfigFabrica, type IA, type NombreEstacion } from './esquemas.js';
 
 /** Catálogo vivo de una IA: modelos y esfuerzos que admite cada uno. */
@@ -17,6 +17,11 @@ export interface EstacionRecorrido {
   esfuerzo: string | null;
   motivo: string;
   descartes: string[];
+  /**
+   * Órdenes exactas que el revisor puede ejecutar. Entran en la huella, así que la persona las
+   * aprueba con el resto del recorrido: las que declara el repo revisado no son de fiar por sí solas.
+   */
+  ordenesPermitidas: string[];
   estado: EstadoEstacion;
 }
 
@@ -148,6 +153,15 @@ export function descarte(c: Candidato, catalogos: Catalogos): string | null {
   return null;
 }
 
+/**
+ * Órdenes de una estación: las de la tabla de estaciones más las de la configuración del repo.
+ * Solo Codex ejecuta órdenes; Antigravity las rechaza todas y Claude no pasa por un conector.
+ */
+function ordenesDe(estacion: NombreEstacion, ia: IA, cfg: ConfigEstacion | undefined): string[] {
+  if (ia !== 'codex') return [];
+  return [...new Set([...ESTACIONES[estacion].ordenesPermitidas, ...(cfg?.ordenesPermitidas ?? [])])];
+}
+
 /** Llamadas externas y subagentes de Claude de las estaciones propuestas. */
 export function calcularCoste(estaciones: EstacionRecorrido[]): Recorrido['coste'] {
   let llamadasExternas = 0;
@@ -193,6 +207,7 @@ export async function proponer(entrada: {
       esfuerzo: null,
       motivo,
       descartes: [],
+      ordenesPermitidas: [],
       estado: 'omitida',
     });
     if (cfg?.activa === false) return omitida('desactivada en la configuración');
@@ -215,10 +230,11 @@ export async function proponer(entrada: {
         esfuerzo: c.ia === 'antigravity' ? null : c.esfuerzo,
         motivo,
         descartes,
+        ordenesPermitidas: ordenesDe(estacion, c.ia, cfg),
         estado: 'propuesta',
       };
     }
-    return { estacion, ia: null, modelo: null, esfuerzo: null, motivo, descartes, estado: 'sin-modelo' };
+    return { estacion, ia: null, modelo: null, esfuerzo: null, motivo, descartes, ordenesPermitidas: [], estado: 'sin-modelo' };
   });
 
   const recorrido: Recorrido = {
@@ -274,6 +290,7 @@ export function aplicarCambios(recorrido: Recorrido, cambios: CambioRecorrido[])
         ia: null,
         modelo: null,
         esfuerzo: null,
+        ordenesPermitidas: [],
         motivo: 'quitada por la persona',
         estado: 'omitida',
       } satisfies Partial<EstacionRecorrido>);
@@ -294,6 +311,9 @@ export function aplicarCambios(recorrido: Recorrido, cambios: CambioRecorrido[])
       ia,
       modelo,
       esfuerzo,
+      // Quien sigue en Codex conserva sus órdenes; al llegar a Codex salen de la tabla, no del repo.
+      ordenesPermitidas:
+        ia !== 'codex' ? [] : actual.ia === 'codex' ? actual.ordenesPermitidas : [...ESTACIONES[actual.estacion].ordenesPermitidas],
       motivo: 'cambiada por la persona',
       estado: 'propuesta',
     } satisfies Partial<EstacionRecorrido>);

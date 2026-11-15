@@ -310,3 +310,72 @@ test('jsonCanonico conserva la clave __proto__', () => {
   assert.equal(jsonCanonico(objeto), '{"__proto__":{"x":1},"b":1}');
   assert.notEqual(jsonCanonico(JSON.parse('{"__proto__":{"x":1}}')), jsonCanonico(JSON.parse('{"__proto__":{"x":2}}')));
 });
+
+test('cada estación propuesta de Codex lleva las órdenes de la tabla y las demás van vacías', async () => {
+  const dir = crearRepo();
+  escribir(dir, 'src/a.js', 'export {};\n');
+  escribir(dir, 'hooks/pre-tool.js', 'export {};\n');
+  const r = await proponer({ raiz: dir, base: 'main', catalogos: CATALOGOS });
+  assert.deepEqual(porNombre(r, 'pruebas').ordenesPermitidas, ['npm test']);
+  assert.deepEqual(porNombre(r, 'seguridad').ordenesPermitidas, []);
+  // Claude no pasa por un conector y las estaciones omitidas no ejecutan nada.
+  assert.deepEqual(porNombre(r, 'codigo').ordenesPermitidas, []);
+  assert.deepEqual(porNombre(r, 'documentacion').ordenesPermitidas, []);
+});
+
+test('las órdenes de la configuración se suman a las de la tabla, sin repetirse, y entran en la huella', async () => {
+  const sin = crearRepo();
+  escribir(sin, 'src/a.js', 'export {};\n');
+  const base = await proponer({ raiz: sin, base: 'main', catalogos: CATALOGOS });
+
+  const con = crearRepo({
+    config: { estaciones: { pruebas: { ordenesPermitidas: ['npm test', 'npm run lint'] }, seguridad: { activa: true, ordenesPermitidas: ['git log'] } } },
+  });
+  escribir(con, 'src/a.js', 'export {};\n');
+  const r = await proponer({ raiz: con, base: 'main', catalogos: CATALOGOS });
+  assert.deepEqual(porNombre(r, 'pruebas').ordenesPermitidas, ['npm test', 'npm run lint']);
+  assert.deepEqual(porNombre(r, 'seguridad').ordenesPermitidas, ['git log']);
+  // Con el mismo diff, solo las órdenes distintas cambian la huella de las estaciones.
+  const igual = structuredClone(r);
+  porNombre(igual, 'pruebas').ordenesPermitidas = ['npm test'];
+  porNombre(igual, 'seguridad').ordenesPermitidas = [];
+  assert.notEqual(calcularHuella(igual), r.huella);
+  assert.notEqual(r.huella, base.huella);
+  // Alterar a mano las órdenes aprobadas invalida el recorrido.
+  const alterado = structuredClone(r);
+  porNombre(alterado, 'pruebas').ordenesPermitidas.push('rm -rf /');
+  await assert.rejects(comprobarHuella(alterado, con), /ya no es el que aprobaste/u);
+});
+
+test('Antigravity rechaza toda orden: sus estaciones van sin órdenes aunque la configuración las declare', async () => {
+  const dir = crearRepo({
+    config: { rutasCriticas: ['src/**'], estaciones: { arquitectura: { ordenesPermitidas: ['npm test'] } } },
+  });
+  escribir(dir, 'src/a.js', 'export {};\n');
+  const r = await proponer({ raiz: dir, base: 'main', catalogos: CATALOGOS });
+  assert.equal(porNombre(r, 'arquitectura').ia, 'antigravity');
+  assert.deepEqual(porNombre(r, 'arquitectura').ordenesPermitidas, []);
+});
+
+test('aplicarCambios ajusta las órdenes al cambiar de IA: las de la tabla al llegar a Codex, ninguna al irse', async () => {
+  const dir = crearRepo({ config: { estaciones: { pruebas: { ordenesPermitidas: ['npm run lint'] } } } });
+  escribir(dir, 'src/a.js', 'export {};\n');
+  const r = await proponer({ raiz: dir, base: 'main', catalogos: CATALOGOS });
+  assert.deepEqual(porNombre(r, 'pruebas').ordenesPermitidas, ['npm test', 'npm run lint']);
+
+  // Sigue en Codex: conserva lo aprobado.
+  const mismoCodex = aplicarCambios(r, [{ estacion: 'pruebas', modelo: 'gpt-6-sol', esfuerzo: 'medium' }]);
+  assert.deepEqual(porNombre(mismoCodex, 'pruebas').ordenesPermitidas, ['npm test', 'npm run lint']);
+
+  // Se va a Antigravity: ninguna orden. Y al volver a Codex, solo las de la tabla (no las del repo).
+  const aAgy = aplicarCambios(r, [{ estacion: 'pruebas', ia: 'antigravity', modelo: 'gemini-4-argon-high' }]);
+  assert.deepEqual(porNombre(aAgy, 'pruebas').ordenesPermitidas, []);
+  const deVuelta = aplicarCambios(aAgy, [{ estacion: 'pruebas', ia: 'codex', modelo: 'gpt-6.1-terra', esfuerzo: 'medium' }]);
+  assert.deepEqual(porNombre(deVuelta, 'pruebas').ordenesPermitidas, ['npm test']);
+
+  // Quitar la estación borra las órdenes; el original no cambia.
+  const quitada = aplicarCambios(r, [{ estacion: 'pruebas', quitar: true }]);
+  assert.deepEqual(porNombre(quitada, 'pruebas').ordenesPermitidas, []);
+  assert.deepEqual(porNombre(r, 'pruebas').ordenesPermitidas, ['npm test', 'npm run lint']);
+  assert.notEqual(quitada.huella, r.huella);
+});

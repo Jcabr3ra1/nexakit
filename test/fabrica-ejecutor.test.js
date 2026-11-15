@@ -74,6 +74,7 @@ const externa = (estacion, ia = 'codex', modelo = 'gpt-6-sol', esfuerzo = 'high'
   esfuerzo: ia === 'codex' ? esfuerzo : null,
   motivo: 'prueba',
   descartes: [],
+  ordenesPermitidas: ia === 'codex' ? [...ESTACIONES[estacion].ordenesPermitidas] : [],
   estado: 'propuesta',
 });
 const deClaude = (estacion) => ({
@@ -83,6 +84,7 @@ const deClaude = (estacion) => ({
   esfuerzo: null,
   motivo: 'prueba',
   descartes: [],
+  ordenesPermitidas: [],
   estado: 'propuesta',
 });
 
@@ -148,6 +150,28 @@ test('construirEncargo une foco, criterios, foco de la persona, aviso de solo le
   const sinFoco = construirEncargo({ estacion: externa('codigo'), raiz: '/r', base: 'b', diff: 'd' });
   assert.ok(!sinFoco.instrucciones.includes('persona'));
   assert.deepEqual(sinFoco.ordenesPermitidas, []);
+});
+
+test('el encargo lleva las órdenes del recorrido aprobado y no las de la tabla de estaciones', async () => {
+  const aprobada = { ...externa('pruebas', 'codex', 'gpt-6-sol', 'medium'), ordenesPermitidas: ['npm run lint'] };
+  const encargo = construirEncargo({ estacion: aprobada, raiz: '/r', base: 'b', diff: 'd' });
+  assert.deepEqual(encargo.ordenesPermitidas, ['npm run lint']);
+  assert.notEqual(encargo.ordenesPermitidas, aprobada.ordenesPermitidas, 'debe ser una copia');
+
+  // De extremo a extremo: lo que recibe el conector es lo del recorrido, también cuando la tabla no declara nada.
+  const dir = crearRepo();
+  const home = temporal('fabrica-home-');
+  const sinOrdenes = { ...externa('pruebas', 'codex', 'gpt-6-sol', 'medium'), ordenesPermitidas: [] };
+  const conMas = { ...externa('seguridad'), ordenesPermitidas: ['git log'] };
+  const r = await recorridoCon(dir, [sinOrdenes, conMas]);
+  const recibidas = {};
+  const codex = conector('codex', async (e) => {
+    recibidas[e.estacion] = e.ordenesPermitidas;
+    return ok(e);
+  });
+  const { id } = await lanzar(r, { raiz: dir, conectores: { codex }, home });
+  await esperar(id);
+  assert.deepEqual(recibidas, { pruebas: [], seguridad: ['git log'] });
 });
 
 test('con 6 estaciones externas y paralelismo 4 nunca hay más de 4 a la vez', async () => {

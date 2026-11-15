@@ -93,8 +93,8 @@ async function escribirReemplazando(ruta: string, texto: string): Promise<void> 
 
 const json = (valor: unknown): string => `${JSON.stringify(valor, null, 2)}\n`;
 
-/** Crea `~/.nexakit/fabrica/<repo>/<id>/` con `recorrido.json`. */
-export async function crear(home: string, repo: string, r: Recorrido): Promise<{ id: string; dir: string }> {
+/** Valida el nombre del repo y deja listas `~/.nexakit/fabrica/` y `~/.nexakit/fabrica/<repo>/`. */
+async function prepararCarpetaRepo(home: string, repo: string): Promise<string> {
   if (!PATRON_REPO.test(repo) || repo === '.' || repo === '..') {
     throw new ErrorFabrica(`Nombre de repo no válido para el rastro: ${repo}`);
   }
@@ -104,6 +104,12 @@ export async function crear(home: string, repo: string, r: Recorrido): Promise<{
   await carpetaPropia(base);
   const dirRepo = path.join(base, repo);
   await carpetaPropia(dirRepo);
+  return dirRepo;
+}
+
+/** Crea `~/.nexakit/fabrica/<repo>/<id>/` con `recorrido.json`. */
+export async function crear(home: string, repo: string, r: Recorrido): Promise<{ id: string; dir: string }> {
+  const dirRepo = await prepararCarpetaRepo(home, repo);
 
   for (let intento = 0; intento < 16; intento += 1) {
     const id = nuevoId();
@@ -119,6 +125,35 @@ export async function crear(home: string, repo: string, r: Recorrido): Promise<{
     return { id, dir };
   }
   throw new ErrorFabrica('No se pudo reservar un id libre para el rastro');
+}
+
+/** Guarda la última propuesta del repo en `~/.nexakit/fabrica/<repo>/propuesta.json`. Devuelve la ruta. */
+export async function guardarPropuesta(home: string, repo: string, r: Recorrido): Promise<string> {
+  const ruta = path.join(await prepararCarpetaRepo(home, repo), 'propuesta.json');
+  await escribirReemplazando(ruta, json(r));
+  return ruta;
+}
+
+/**
+ * Lee `propuesta.json` del repo, sin seguir enlaces. `null` si no existe o no es un archivo normal;
+ * si el JSON no se puede leer, lanza.
+ */
+export function leerPropuesta(home: string, repo: string): unknown {
+  if (!PATRON_REPO.test(repo) || repo === '.' || repo === '..') return null;
+  const base = path.join(home, '.nexakit', 'fabrica');
+  for (const carpeta of [base, path.join(base, repo)]) {
+    const info = lstatSync(carpeta, { throwIfNoEntry: false });
+    if (info === undefined || !info.isDirectory() || info.isSymbolicLink()) return null;
+  }
+  const archivo = path.join(base, repo, 'propuesta.json');
+  const info = lstatSync(archivo, { throwIfNoEntry: false });
+  if (info === undefined || !info.isFile()) return null;
+  const fd = openSync(archivo, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  try {
+    return JSON.parse(readFileSync(fd, 'utf8')) as unknown;
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /** Guarda `<estacion>.json` con el encargo (sin el diff) y el resultado. */
