@@ -9,7 +9,7 @@ import { promisify } from 'node:util';
 import { resolveCliInvocation } from '../../../src/cli-executable.js';
 import { hallazgosJsonSchema, InformeEstacion } from '../esquemas.js';
 import { ClienteJsonRpc, ErrorProceso } from '../jsonrpc.js';
-import type { AlProgreso, Conector, Denegacion, Encargo, ResultadoEstacion } from './tipos.js';
+import { nombreSeguro, type AlProgreso, type Conector, type Denegacion, type Encargo, type ResultadoEstacion } from './tipos.js';
 import type { ApplyPatchApprovalResponse } from '../protocolos/codex/ApplyPatchApprovalResponse.js';
 import type { ExecCommandApprovalParams } from '../protocolos/codex/ExecCommandApprovalParams.js';
 import type { ExecCommandApprovalResponse } from '../protocolos/codex/ExecCommandApprovalResponse.js';
@@ -288,11 +288,12 @@ class ConectorCodex implements Conector {
       if (!esObjeto(respuesta)) break;
       const datos = Array.isArray(respuesta['data']) ? respuesta['data'] : [];
       for (const modelo of datos) {
-        if (!esObjeto(modelo) || typeof modelo['model'] !== 'string') continue;
+        // Un nombre de modelo raro no pasa aguas abajo: se descarta aquí.
+        if (!esObjeto(modelo) || typeof modelo['model'] !== 'string' || !nombreSeguro(modelo['model'])) continue;
         const opciones = Array.isArray(modelo['supportedReasoningEfforts']) ? modelo['supportedReasoningEfforts'] : [];
         const esfuerzos = opciones
           .map((opcion: unknown) => (esObjeto(opcion) ? texto(opcion['reasoningEffort']) : null))
-          .filter((esfuerzo): esfuerzo is string => esfuerzo !== null);
+          .filter((esfuerzo): esfuerzo is string => esfuerzo !== null && nombreSeguro(esfuerzo));
         modelos.push({ modelo: modelo['model'], esfuerzos });
       }
       cursor = texto(respuesta['nextCursor']) || null;

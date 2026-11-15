@@ -38,3 +38,13 @@ export interface Conector {
   ejecutar(encargo: Encargo, señal: AbortSignal, alProgreso?: AlProgreso): Promise<ResultadoEstacion>;
   cerrar(): Promise<void>;
 }
+
+/**
+ * Nombres de modelo y de esfuerzo que se aceptan al leer un catálogo. Cualquier otro (con saltos de línea, espacios,
+ * barras o desmesurado) se descarta en el conector: llegaría a avisos, tablas y explicaciones que lee una persona.
+ */
+const NOMBRE_SEGURO = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/u;
+
+export function nombreSeguro(valor: string): boolean {
+  return NOMBRE_SEGURO.test(valor);
+}

@@ -40,7 +40,7 @@ import type {
 } from '@agentclientprotocol/sdk';
 import { resolveCliInvocation } from '../../../src/cli-executable.js';
 import { hallazgosJsonSchema, InformeEstacion } from '../esquemas.js';
-import type { AlProgreso, Conector, Encargo, ResultadoEstacion } from './tipos.js';
+import { nombreSeguro, type AlProgreso, type Conector, type Encargo, type ResultadoEstacion } from './tipos.js';
 
 const NO_INSTALADO = 'Antigravity no está instalado';
 const HALLAZGOS_INVALIDOS = 'El revisor no devolvió hallazgos válidos';
@@ -342,7 +342,7 @@ class ConectorAntigravity implements Conector {
     if (!Array.isArray(modelos)) return [];
     return modelos
       .map((m: unknown) => (esObjeto(m) ? texto(m['modelId']) : null))
-      .filter((modelo): modelo is string => modelo !== null)
+      .filter((modelo): modelo is string => modelo !== null && nombreSeguro(modelo))
       .map((modelo) => {
         const esfuerzo = SUFIJO_ESFUERZO.exec(modelo)?.[1];
         return { modelo, esfuerzos: esfuerzo === undefined ? [] : [esfuerzo] };

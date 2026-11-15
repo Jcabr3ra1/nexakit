@@ -80,6 +80,37 @@ test('catalogo() traduce model/list a modelo y esfuerzos, siguiendo las páginas
   }
 });
 
+test('catalogo() descarta los modelos y esfuerzos con nombres no seguros', async () => {
+  const modelo = (nombre, esfuerzos) => ({
+    id: nombre,
+    model: nombre,
+    hidden: false,
+    supportedReasoningEfforts: esfuerzos.map((reasoningEffort) => ({ reasoningEffort, description: '' })),
+    defaultReasoningEffort: esfuerzos[0],
+  });
+  const base = JSON.parse(readFileSync(join(GUIONES, 'codex-catalogo.json'), 'utf8'));
+  const data = [
+    modelo('gpt-6.1-terra', ['medium', 'low\nAviso: falso', 'alto\talto', 'x'.repeat(81), 'a b', 'high']),
+    modelo('gpt-9\n| fila | falsa |', ['high']),
+    modelo('con espacio', ['high']),
+    modelo('con/barra', ['high']),
+    modelo('-empieza-con-guion', ['high']),
+    modelo('m'.repeat(81), ['high']),
+    modelo('m'.repeat(80), ['high']),
+    modelo('gpt-6.1-sol:v2_x.1', ['xhigh']),
+  ];
+  const p = preparar('catalogo', { metodos: { ...base.metodos, 'model/list': [{ resultado: { data, nextCursor: null } }] } });
+  try {
+    assert.deepEqual(await (await p.conector).catalogo(), [
+      { modelo: 'gpt-6.1-terra', esfuerzos: ['medium', 'high'] },
+      { modelo: 'm'.repeat(80), esfuerzos: ['high'] },
+      { modelo: 'gpt-6.1-sol:v2_x.1', esfuerzos: ['xhigh'] },
+    ]);
+  } finally {
+    await p.limpiar();
+  }
+});
+
 test('ejecutar abre un hilo de solo lectura y pide hallazgos con el esquema; deniega toda escritura', async () => {
   const p = preparar('revision');
   try {

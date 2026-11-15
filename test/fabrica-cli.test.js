@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os';
 import { gitConfigGlobalVacio } from '../test-support/git-aislado.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ejecutarCli } from '../dist/fabrica/cli.js';
+import { ejecutarCli, tablaRecorrido } from '../dist/fabrica/cli.js';
+import { calcularHuella } from '../dist/fabrica/enrutador.js';
 import { actualizar, evidenciaVacia, guardar } from '../dist/fabrica/evidencia.js';
 import { nombreRepo } from '../dist/fabrica/rastro.js';
 import { runToolkitCli } from '../src/toolkit-cli.js';
@@ -211,19 +212,57 @@ test('con evidencia en el HOME la CLI explica la elección medida', async () => 
 });
 
 test('la explicación se recorta a 160 columnas con la sangría incluida', async () => {
-  const largo = 'x'.repeat(200);
-  const catalogo = { resultado: { data: [modeloCodex('gpt-6.1-terra', [largo]), modeloCodex('gpt-6.1-sol', ['high'])], nextCursor: null } };
+  // Los nombres más largos que admite un catálogo: 80 caracteres cada uno.
+  const modelo = 'm'.repeat(80);
+  const esfuerzo = 'e'.repeat(80);
+  const catalogo = { resultado: { data: [modeloCodex(modelo, [esfuerzo]), modeloCodex('gpt-6.1-sol', ['high'])], nextCursor: null } };
   const codex = guionCodexOk();
   codex.metodos['model/list'] = catalogo;
   const e = escenario({ config: CONFIG_AGY, codex });
   const ahora = new Date();
-  const ev = actualizar(evidenciaVacia(ahora), { ia: 'codex', modelo: 'gpt-6.1-terra', esfuerzo: largo, estacion: 'pruebas' }, { aciertos: 100, fallos: 2, tokens: 4000, segundos: 10, fuente: 'banco', ahora });
+  const ev = actualizar(evidenciaVacia(ahora), { ia: 'codex', modelo, esfuerzo, estacion: 'pruebas' }, { aciertos: 100, fallos: 2, tokens: 4000, segundos: 10, fuente: 'banco', ahora });
   await guardar(e.home, ev, ahora);
   const { out } = await cli(['proponer', '--base', 'main'], e);
   const linea = out.split('\n').find((l) => l.startsWith('  pruebas: '));
   assert.ok(linea, out);
   assert.equal([...linea].length, 160);
   assert.ok(linea.endsWith('…'));
+});
+
+test('un nombre con saltos de línea o tabuladores no parte la explicación, un aviso ni una celda', async () => {
+  const e = escenario({ config: CONFIG_AGY });
+  const r = JSON.parse((await cli(['proponer', '--base', 'main', '--json'], e)).out);
+  const pruebas = porNombre(r, 'pruebas');
+  pruebas.explicacion = 'gpt\nAviso: falso\t\u2028| seguridad | codex | x |: calidad';
+  pruebas.descartes = ['m\n| codigo | codex | falso |\r\n\u2029fin'];
+  r.avisos = ['pruebas: sin datos\nAviso: otra línea\ty más'];
+  const lineas = tablaRecorrido(r).join('\n').split('\n');
+  assert.ok(lineas.includes('  pruebas: gpt Aviso: falso | seguridad | codex | x |: calidad'), lineas.join('\n'));
+  assert.ok(lineas.includes('Aviso: pruebas: sin datos Aviso: otra línea y más'), lineas.join('\n'));
+  assert.equal(lineas.filter((l) => l.startsWith('Aviso:')).length, 1, 'ningún aviso falso');
+  assert.equal(lineas.filter((l) => l.startsWith('|')).length, 2 + 7, 'ninguna fila falsa');
+  assert.ok(lineas.some((l) => l.startsWith('| pruebas |') && l.includes('descartes: m \\| codigo')), lineas.join('\n'));
+  assert.ok(!/[\t\u2028\u2029\r]/u.test(lineas.join('\n')));
+});
+
+test('una propuesta guardada con el formato anterior se rechaza y pide volver a proponer', async () => {
+  const e = escenario({ config: CONFIG_AGY });
+  const r = JSON.parse((await cli(['proponer', '--base', 'main', '--json'], e)).out);
+  // Formato anterior: sin explicacion, calidad ni avisos; su huella era la de entonces.
+  const vieja = structuredClone(r);
+  for (const x of vieja.estaciones) {
+    delete x.explicacion;
+    delete x.calidad;
+  }
+  delete vieja.avisos;
+  vieja.huella = calcularHuella(vieja);
+  assert.notEqual(vieja.huella, r.huella);
+  const propuesta = path.join(e.home, '.nexakit', 'fabrica', await nombreRepo(e.dir), 'propuesta.json');
+  writeFileSync(propuesta, JSON.stringify(vieja, null, 2));
+  const { codigo, err, out } = await cli(['lanzar', '--huella', vieja.huella], e);
+  assert.equal(codigo, 1);
+  assert.match(err, /No hay una propuesta con esa huella; vuelve a proponer/u);
+  assert.equal(out, '');
 });
 
 test('proponer no aborta si una IA no está instalada: avisa y pasa al siguiente candidato', async () => {

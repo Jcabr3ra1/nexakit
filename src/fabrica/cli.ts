@@ -59,7 +59,13 @@ const MAX_BYTES_CAMBIOS = 1024 * 1024;
 /** Argumentos inválidos: salida con código 2. */
 class ErrorUso extends Error {}
 
-const celda = (texto: string): string => escaparMarkdown(limpiar(texto));
+/**
+ * Texto de una sola línea: `limpiar` deja pasar `\n` y `\t`, y un nombre de modelo con ellos partiría una celda, una
+ * explicación o un aviso y permitiría colar una línea «Aviso:» o una fila de la tabla falsas.
+ */
+const enUnaLinea = (texto: string): string => limpiar(texto).replace(/[\r\n\t\p{Zl}\p{Zp}]+/gu, ' ');
+
+const celda = (texto: string): string => escaparMarkdown(enUnaLinea(texto));
 
 const COLUMNAS_EXPLICACION = 160;
 
@@ -72,7 +78,7 @@ function recortar(texto: string, max: number): string {
 // ---------------------------------------------------------------------------------------------
 // Formato
 
-function tablaRecorrido(r: Recorrido): string[] {
+export function tablaRecorrido(r: Recorrido): string[] {
   const lineas = [
     `Recorrido propuesto, huella ${r.huella}`,
     `Base: ${limpiar(r.basePedida)} (${r.base.slice(0, 12)}) · HEAD: ${r.head.slice(0, 12)}`,
@@ -90,9 +96,9 @@ function tablaRecorrido(r: Recorrido): string[] {
   const elecciones = r.estaciones.filter((e) => e.explicacion !== '');
   if (elecciones.length > 0) {
     lineas.push('', 'Por qué cada modelo:');
-    for (const e of elecciones) lineas.push(recortar(`  ${limpiar(e.estacion)}: ${limpiar(e.explicacion)}`, COLUMNAS_EXPLICACION));
+    for (const e of elecciones) lineas.push(recortar(`  ${enUnaLinea(e.estacion)}: ${enUnaLinea(e.explicacion)}`, COLUMNAS_EXPLICACION));
   }
-  if (r.avisos.length > 0) lineas.push('', ...r.avisos.map((a) => `Aviso: ${limpiar(a)}`));
+  if (r.avisos.length > 0) lineas.push('', ...r.avisos.map((a) => `Aviso: ${enUnaLinea(a)}`));
   lineas.push('', `Coste estimado: ${r.coste.llamadasExternas} llamadas externas y ${r.coste.subagentesClaude} subagentes de Claude.`);
   return lineas;
 }

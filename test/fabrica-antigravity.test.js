@@ -95,6 +95,31 @@ test('catalogo() sale de session/new y deduce el esfuerzo del sufijo del id', as
   }
 });
 
+test('catalogo() descarta los modelos con nombres no seguros', async () => {
+  const base = guionBase('catalogo');
+  const nuevo = JSON.parse(JSON.stringify(base.metodos['session/new']));
+  nuevo.resultado.models.availableModels = [
+    'gemini-4-argon-high',
+    'gemini-4\n| fila | falsa |-low',
+    'con espacio-low',
+    'con/barra-high',
+    '-guion-medium',
+    `${'m'.repeat(76)}-low`,
+    `${'m'.repeat(77)}-low`,
+    'gemini-3.8-flash-medium',
+  ].map((modelId) => ({ modelId, name: modelId }));
+  const p = preparar('catalogo', { metodos: { ...base.metodos, 'session/new': nuevo } });
+  try {
+    assert.deepEqual(await (await p.conector).catalogo(), [
+      { modelo: 'gemini-4-argon-high', esfuerzos: ['high'] },
+      { modelo: `${'m'.repeat(76)}-low`, esfuerzos: ['low'] },
+      { modelo: 'gemini-3.8-flash-medium', esfuerzos: ['medium'] },
+    ]);
+  } finally {
+    await p.limpiar();
+  }
+});
+
 test('initialize no declara escritura de archivos ni terminal, y el proceso se lanza aislado', async () => {
   const p = preparar('catalogo');
   try {
