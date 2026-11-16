@@ -231,9 +231,12 @@ export function crearServidorFabrica(opciones: OpcionesServidorFabrica = {}): Se
           consolidado = await escribirConsolidado(e, claude);
         }
         const hallazgos = hallazgosDe(e, claude);
-        if (veredictos === undefined) return { id: e.id, fase: e.fase, consolidado, hallazgos };
-        const aprendizaje = await aprenderDeVeredictos({ home, estado: e, hallazgos, veredictos });
-        return { id: e.id, fase: e.fase, consolidado, hallazgos, aprendizaje };
+        // Con hallazgos de Claude nuevos también se revisa lo ya contado: puede haber veredictos sobre hallazgos corregidos.
+        if (veredictos === undefined && hallazgosClaude === undefined) return { id: e.id, fase: e.fase, consolidado, hallazgos };
+        const repo = await rastro.nombreRepo(await raizDelRepo(cwd()));
+        const aprendizaje = await aprenderDeVeredictos({ home, repo, estado: e, hallazgos, veredictos: veredictos ?? [] });
+        const informar = veredictos !== undefined || aprendizaje.revertidos > 0 || aprendizaje.avisos.length > 0;
+        return { id: e.id, fase: e.fase, consolidado, hallazgos, ...(informar ? { aprendizaje } : {}) };
       }),
   );
 

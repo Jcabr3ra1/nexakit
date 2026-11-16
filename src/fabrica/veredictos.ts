@@ -11,6 +11,8 @@ import { limpiar, mensajeDe } from './sesion.js';
 
 /** Tope de veredictos por llamada: igual que el de hallazgos de Claude. */
 export const MAX_VEREDICTOS = 500;
+/** Observaciones que un recorrido puede sumar a la evidencia por estación: un recorrido no mueve la evidencia sin tope. */
+export const MAX_VEREDICTOS_POR_ESTACION = 5;
 
 export const Veredicto = z.object({
   clave: z.string().min(1).max(64),
@@ -27,12 +29,23 @@ const ClaveFila = z.object({
   estacion: NombreEstacion,
 });
 
-/** `veredictos.json`: por hallazgo, el veredicto ya aplicado y las filas de evidencia que sumó (para poder deshacerlo). */
+const Origen = z.object({ verificado: z.enum(['real', 'falso']), fila: ClaveFila });
+type Aplicado = z.infer<typeof Origen>;
+
+/**
+ * `veredictos.json`: por ORIGEN (la clave propia del hallazgo de una estación, que no cambia aunque cambie el grupo
+ * en el que se funde), el veredicto ya aplicado y la fila de evidencia que sumó, para no contarlo dos veces y poder
+ * deshacerlo. `tokens` son las estaciones cuyos tokens ya entraron en la media de su fila en este recorrido.
+ */
 const Registro = z.object({
   version: z.literal(1),
-  aplicados: z.record(z.string(), z.object({ verificado: z.enum(['real', 'falso']), filas: z.array(ClaveFila) })),
+  origenes: z.record(z.string(), Origen),
+  tokens: z.array(NombreEstacion),
 });
-type Aplicado = z.infer<typeof Registro>['aplicados'][string];
+interface EstadoRegistro {
+  origenes: Map<string, Aplicado>;
+  tokens: Set<NombreEstacion>;
+}
 
 const EstacionDelRecorrido = z.object({
   estacion: NombreEstacion,
@@ -46,16 +59,18 @@ type EstacionRecorridoGuardada = z.infer<typeof EstacionDelRecorrido>;
 export interface ResultadoAprendizaje {
   /** Veredictos nuevos (o cambiados) que se sumaron a la evidencia. */
   aplicados: number;
+  /** Observaciones que se deshicieron: un veredicto que cambió, un dudoso tras un real o un hallazgo de Claude que ya no existe. */
+  revertidos: number;
   /** Veredictos que ya estaban aplicados con el mismo valor. */
   repetidos: number;
   /** Veredictos dudosos: no cuentan. */
   dudosos: number;
-  /** Veredictos sin clave conocida o sin ninguna estación a la que atribuirlos. */
+  /** Veredictos sin clave conocida, sin ninguna estación a la que atribuirlos o por encima del tope por estación. */
   ignorados: number;
   avisos: string[];
 }
 
-const vacio = (avisos: string[] = []): ResultadoAprendizaje => ({ aplicados: 0, repetidos: 0, dudosos: 0, ignorados: 0, avisos });
+const vacio = (avisos: string[] = []): ResultadoAprendizaje => ({ aplicados: 0, revertidos: 0, repetidos: 0, dudosos: 0, ignorados: 0, avisos });
 
 /** Una sola actualización de la evidencia a la vez en este proceso: leer, sumar y guardar no se pisan entre llamadas. */
 let cola: Promise<unknown> = Promise.resolve();
@@ -84,20 +99,20 @@ function leerRecorrido(dir: string): Map<NombreEstacion, EstacionRecorridoGuarda
   return new Map(r.data.estaciones.map((e) => [e.estacion, e]));
 }
 
-function leerRegistro(dir: string): Map<string, Aplicado> | string {
+function leerRegistro(dir: string): EstadoRegistro | string {
   let dato: unknown;
   try {
     dato = rastro.leerVeredictos(dir);
   } catch {
     return 'veredictos.json no se puede leer';
   }
-  if (dato === null) return new Map();
+  if (dato === null) return { origenes: new Map(), tokens: new Set() };
   const r = Registro.safeParse(dato);
   if (!r.success) return 'veredictos.json no tiene la forma esperada';
-  return new Map(Object.entries(r.data.aplicados));
+  return { origenes: new Map(Object.entries(r.data.origenes)), tokens: new Set(r.data.tokens) };
 }
 
-const serializar = (aplicados: Map<string, Aplicado>): unknown => ({ version: 1, aplicados: Object.fromEntries(aplicados) });
+const serializar = (r: EstadoRegistro): unknown => ({ version: 1, origenes: Object.fromEntries(r.origenes), tokens: [...r.tokens] });
 
 interface Atribucion {
   clave: ClaveEvidencia;
@@ -129,36 +144,60 @@ function atribuir(dir: string, estacion: NombreEstacion, recorrido: Map<NombreEs
   return { clave: { ia: e.ia, modelo: e.modelo, esfuerzo: e.esfuerzo, estacion }, tokens };
 }
 
-function sumar(ev: Evidencia, a: Atribucion, verificado: 'real' | 'falso'): Evidencia {
-  const previa = ev.filas.find(
-    (f) => f.ia === a.clave.ia && f.modelo === a.clave.modelo && f.esfuerzo === a.clave.esfuerzo && f.estacion === a.clave.estacion,
-  );
-  // Lo que no consta no se inventa: la media de la fila queda como estaba (o en 0 si la fila es nueva).
-  return actualizar(ev, a.clave, {
+/** Suma una observación real. Los tokens, si se pasan, entran en la media; los segundos nunca constan en el rastro. */
+function sumar(ev: Evidencia, clave: ClaveEvidencia, verificado: 'real' | 'falso', tokens: number | undefined): Evidencia {
+  return actualizar(ev, clave, {
     aciertos: verificado === 'real' ? 1 : 0,
     fallos: verificado === 'falso' ? 1 : 0,
-    tokens: a.tokens ?? previa?.tokensMedios ?? 0,
-    segundos: previa?.segundosMedios ?? 0,
+    tokens,
     fuente: 'real',
   });
 }
 
+const deshacer = (ev: Evidencia, o: Aplicado): Evidencia =>
+  revertirReal(ev, o.fila, { aciertos: o.verificado === 'real' ? 1 : 0, fallos: o.verificado === 'falso' ? 1 : 0 });
+
 /** Clave de una sola línea para un aviso: viene de la sesión y no se refleja tal cual. */
 const claveParaAviso = (clave: string): string => limpiar(clave).replace(/[^0-9A-Za-z_-]/gu, '?').slice(0, 64);
 
-async function aprender(home: string, estado: EstadoRecorrido, hallazgos: HallazgoConsolidado[], veredictos: Veredicto[]): Promise<ResultadoAprendizaje> {
-  const recorrido = leerRecorrido(estado.dir);
-  if (typeof recorrido === 'string') return vacio([`${recorrido}: no se actualiza la evidencia.`]);
+async function aprender(
+  home: string,
+  repo: string,
+  estado: EstadoRecorrido,
+  hallazgos: HallazgoConsolidado[],
+  veredictos: Veredicto[],
+): Promise<ResultadoAprendizaje> {
   const registro = leerRegistro(estado.dir);
   if (typeof registro === 'string') return vacio([`${registro}: no se actualiza la evidencia.`]);
+  // Sin veredictos ni nada aplicado antes no hay nada que hacer.
+  if (veredictos.length === 0 && registro.origenes.size === 0) return vacio();
+  if (path.basename(path.dirname(estado.dir)) !== repo) {
+    return vacio(['El recorrido es de otro repo, no del actual: no se actualiza la evidencia.']);
+  }
+  const recorrido = leerRecorrido(estado.dir);
+  if (typeof recorrido === 'string') return vacio([`${recorrido}: no se actualiza la evidencia.`]);
   const cargada = await cargar(home);
   if (cargada.aviso !== null) return vacio([`${cargada.aviso} No se actualiza la evidencia.`]);
 
+  const previo = serializar(registro);
+  const habiaRegistro = registro.origenes.size > 0 || registro.tokens.size > 0;
   const porClave = new Map(hallazgos.map((h) => [h.clave, h]));
+  const vigentes = new Set(hallazgos.flatMap((h) => h.origenes.map((o) => o.clave)));
   const resultado = vacio();
-  const aplicados = new Map(registro);
   let ev = cargada.evidencia;
   let cambio = false;
+
+  // Los hallazgos de Claude pueden corregirse después de dar veredictos: lo contado sobre uno que ya no existe se
+  // deshace, para que su sustituto no cuente encima de él. Los de las IA externas salen del rastro y no se tocan.
+  for (const [origen, o] of [...registro.origenes]) {
+    if (o.fila.ia !== 'claude' || vigentes.has(origen)) continue;
+    ev = deshacer(ev, o);
+    registro.origenes.delete(origen);
+    resultado.revertidos += 1;
+    cambio = true;
+  }
+
+  const enEstacion = (estacion: NombreEstacion): number => [...registro.origenes.values()].filter((o) => o.fila.estacion === estacion).length;
   for (const v of veredictos) {
     const h = porClave.get(v.clave);
     if (h === undefined) {
@@ -168,42 +207,64 @@ async function aprender(home: string, estado: EstadoRecorrido, hallazgos: Hallaz
     }
     if (v.verificado === 'dudoso') {
       resultado.dudosos += 1;
+      // Un dudoso tras un real o un falso deja ese hallazgo sin veredicto: lo sumado antes se deshace.
+      for (const origen of h.origenes) {
+        const o = registro.origenes.get(origen.clave);
+        if (o === undefined) continue;
+        ev = deshacer(ev, o);
+        registro.origenes.delete(origen.clave);
+        resultado.revertidos += 1;
+        cambio = true;
+      }
       continue;
     }
-    const anterior = aplicados.get(v.clave);
-    if (anterior?.verificado === v.verificado) {
-      resultado.repetidos += 1;
-      continue;
+    let nuevos = 0;
+    let atribuidos = 0;
+    for (const origen of h.origenes) {
+      const o = registro.origenes.get(origen.clave);
+      if (o?.verificado === v.verificado) {
+        atribuidos += 1;
+        continue;
+      }
+      const a = atribuir(estado.dir, origen.estacion, recorrido);
+      if (typeof a === 'string') {
+        resultado.avisos.push(`Hallazgo ${claveParaAviso(v.clave)}, ${a}: no cuenta para esa estación.`);
+        continue;
+      }
+      if (o === undefined && enEstacion(origen.estacion) >= MAX_VEREDICTOS_POR_ESTACION) {
+        resultado.avisos.push(
+          `Hallazgo ${claveParaAviso(v.clave)}, ${origen.estacion}: ya hay ${MAX_VEREDICTOS_POR_ESTACION} veredictos de esta estación en el recorrido, no cuenta.`,
+        );
+        continue;
+      }
+      atribuidos += 1;
+      // Un veredicto que cambia de real a falso (o al revés) deshace primero lo que sumó el anterior.
+      if (o !== undefined) {
+        ev = deshacer(ev, o);
+        resultado.revertidos += 1;
+      }
+      // Los tokens de la estación entran una sola vez en el recorrido, no una por veredicto.
+      const conTokens = a.tokens !== null && !registro.tokens.has(origen.estacion);
+      ev = sumar(ev, a.clave, v.verificado, conTokens ? (a.tokens ?? undefined) : undefined);
+      if (conTokens) registro.tokens.add(origen.estacion);
+      registro.origenes.set(origen.clave, { verificado: v.verificado, fila: a.clave });
+      nuevos += 1;
+      cambio = true;
     }
-    const atribuciones: Atribucion[] = [];
-    for (const estacion of h.estaciones) {
-      const a = atribuir(estado.dir, estacion, recorrido);
-      if (typeof a === 'string') resultado.avisos.push(`Hallazgo ${v.clave}, ${a}: no cuenta para esa estación.`);
-      else atribuciones.push(a);
-    }
-    if (atribuciones.length === 0) {
-      resultado.ignorados += 1;
-      continue;
-    }
-    // Un veredicto que cambia de real a falso (o al revés) deshace primero lo que sumó el anterior.
-    for (const f of anterior?.filas ?? []) {
-      ev = revertirReal(ev, f, { aciertos: anterior?.verificado === 'real' ? 1 : 0, fallos: anterior?.verificado === 'falso' ? 1 : 0 });
-    }
-    for (const a of atribuciones) ev = sumar(ev, a, v.verificado);
-    aplicados.set(v.clave, { verificado: v.verificado, filas: atribuciones.map((a) => a.clave) });
-    resultado.aplicados += 1;
-    cambio = true;
+    if (nuevos > 0) resultado.aplicados += 1;
+    else if (atribuidos > 0) resultado.repetidos += 1;
+    else resultado.ignorados += 1;
   }
   if (!cambio) return resultado;
 
   // Primero se anota qué se aplicó: si algo falla a medias, es mejor perder un recuento que contarlo dos veces.
-  await rastro.guardarVeredictos(estado.dir, serializar(aplicados));
+  await rastro.guardarVeredictos(estado.dir, serializar(registro));
   try {
     const guardada = await guardar(home, ev);
     if (guardada.aviso !== null) resultado.avisos.push(guardada.aviso);
   } catch (error) {
-    if (registro.size === 0) await rm(path.join(estado.dir, 'veredictos.json'), { force: true }).catch(() => {});
-    else await rastro.guardarVeredictos(estado.dir, serializar(registro)).catch(() => {});
+    if (!habiaRegistro) await rm(path.join(estado.dir, 'veredictos.json'), { force: true }).catch(() => {});
+    else await rastro.guardarVeredictos(estado.dir, previo).catch(() => {});
     throw error;
   }
   return resultado;
@@ -212,17 +273,21 @@ async function aprender(home: string, estado: EstadoRecorrido, hallazgos: Hallaz
 /**
  * Aprende del uso real: cada veredicto «real» suma un acierto y cada «falso» un fallo, con fuente `real`, a la fila de
  * evidencia de CADA estación (y su modelo y esfuerzo) que reportó ese hallazgo. «dudoso» no cuenta. El mismo veredicto
- * repetido no cuenta doble; si cambia, se deshace el anterior. Si el rastro no existe o su huella no coincide, no
- * actualiza nada. Nunca lanza: lo que falle se devuelve como aviso.
+ * repetido no cuenta doble, aunque cambie la clave del grupo: se deduplica por origen (el hallazgo de cada estación). Si
+ * cambia, o llega un dudoso, se deshace el anterior. Como mucho `MAX_VEREDICTOS_POR_ESTACION` por estación y recorrido.
+ * Si el rastro no existe, su huella no coincide o el recorrido es de otro repo, no actualiza nada. También deshace lo
+ * contado sobre hallazgos de Claude que se corrigieron y ya no existen. Nunca lanza: lo que falle se devuelve como aviso.
  */
 export function aprenderDeVeredictos(opciones: {
   home: string;
+  /** Nombre del repo actual en el rastro (`nombreRepo(raiz)`): un recorrido de otro repo no puede mover la evidencia. */
+  repo: string;
   estado: EstadoRecorrido;
   hallazgos: HallazgoConsolidado[];
   veredictos: Veredicto[];
 }): Promise<ResultadoAprendizaje> {
-  const { home, estado, hallazgos, veredictos } = opciones;
-  const segura = cola.then(() => aprender(home, estado, hallazgos, veredictos)).catch((error: unknown) => vacio([`No se pudo actualizar la evidencia: ${limpiar(mensajeDe(error))}`]));
+  const { home, repo, estado, hallazgos, veredictos } = opciones;
+  const segura = cola.then(() => aprender(home, repo, estado, hallazgos, veredictos)).catch((error: unknown) => vacio([`No se pudo actualizar la evidencia: ${limpiar(mensajeDe(error))}`]));
   cola = segura;
   return segura;
 }

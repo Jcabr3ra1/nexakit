@@ -10,7 +10,8 @@ import { claveDe, consolidadoMarkdown, hallazgosDe } from '../dist/fabrica/conso
 import { calcularHuella } from '../dist/fabrica/enrutador.js';
 import { actualizar, cargar, evidenciaVacia, guardar, revertirReal } from '../dist/fabrica/evidencia.js';
 import { crearServidorFabrica } from '../dist/fabrica/mcp.js';
-import { aprenderDeVeredictos } from '../dist/fabrica/veredictos.js';
+import { nombreRepo } from '../dist/fabrica/rastro.js';
+import { aprenderDeVeredictos, MAX_VEREDICTOS_POR_ESTACION } from '../dist/fabrica/veredictos.js';
 
 const posix = process.platform !== 'win32';
 const temporales = [];
@@ -61,9 +62,11 @@ const estacionRecorrido = (f) => ({
  * Un rastro de recorrido terminado, escrito a mano: `recorrido.json` con su huella, `<estacion>.json` por cada
  * estación externa con sus hallazgos y tokens, y `estado.json`. Las estaciones de Claude solo constan en el recorrido.
  */
-function rastroFalso({ externas = [[FILA_SEGURIDAD, [hallazgo('seguridad', 'src/a.js', 10)], 1200]], claude = [], tokens = true } = {}) {
+async function rastroFalso({ externas = [[FILA_SEGURIDAD, [hallazgo('seguridad', 'src/a.js', 10)], 1200]], claude = [], tokens = true } = {}) {
   const home = temporal('fabrica-veredictos-');
-  const dir = path.join(home, '.nexakit', 'fabrica', 'repo-1', ID);
+  const raiz = temporal('fabrica-veredictos-raiz-');
+  const repo = await nombreRepo(raiz);
+  const dir = path.join(home, '.nexakit', 'fabrica', repo, ID);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const filas = [...externas.map(([f]) => f), ...claude];
   const datos = {
@@ -98,7 +101,7 @@ function rastroFalso({ externas = [[FILA_SEGURIDAD, [hallazgo('seguridad', 'src/
     escriturasDetectadas: [],
   };
   writeFileSync(path.join(dir, 'estado.json'), `${JSON.stringify(estado)}\n`);
-  return { home, dir, estado, claudeHallazgos: [] };
+  return { home, raiz, repo, dir, estado };
 }
 
 const clave = (...hs) => hs.map((h) => claveDe(h));
@@ -114,7 +117,7 @@ async function evidenciaDelBanco(home, filas) {
 }
 
 async function aprender(r, veredictos, claude = []) {
-  return aprenderDeVeredictos({ home: r.home, estado: r.estado, hallazgos: hallazgosDelRastro(r, claude), veredictos });
+  return aprenderDeVeredictos({ home: r.home, repo: r.repo, estado: r.estado, hallazgos: hallazgosDelRastro(r, claude), veredictos });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -131,8 +134,8 @@ test('la clave es estable: 12 hex de estación, archivo, línea y categoría, si
   assert.notEqual(claveDe({ ...a, linea: null }), claveDe({ ...a, linea: 0 }));
 });
 
-test('cada hallazgo consolidado lleva su clave y consolidado.md la muestra en la columna «Clave»', () => {
-  const r = rastroFalso();
+test('cada hallazgo consolidado lleva su clave y consolidado.md la muestra en la columna «Clave»', async () => {
+  const r = await rastroFalso();
   const [h] = hallazgosDelRastro(r);
   assert.equal(h.clave, claveDe(hallazgo('seguridad', 'src/a.js', 10)));
   const md = consolidadoMarkdown(ID, [h], r.estado);
@@ -144,7 +147,7 @@ test('cada hallazgo consolidado lleva su clave y consolidado.md la muestra en la
 // Aprender
 
 test('un veredicto real suma a alfa y uno falso a beta de la fila del modelo y esfuerzo que usó la estación', async () => {
-  const r = rastroFalso({
+  const r = await rastroFalso({
     externas: [[FILA_SEGURIDAD, [hallazgo('seguridad', 'src/a.js', 10), hallazgo('seguridad', 'src/b.js', 5)], 1200]],
   });
   await evidenciaDelBanco(r.home, [FILA_SEGURIDAD]);
@@ -167,7 +170,7 @@ test('un veredicto real suma a alfa y uno falso a beta de la fila del modelo y e
 });
 
 test('sin evidencia previa se crea la fila con Beta(1,1) más el veredicto, solo para esa estación', async () => {
-  const r = rastroFalso();
+  const r = await rastroFalso();
   const res = await aprender(r, [{ clave: clave(hallazgo('seguridad', 'src/a.js', 10))[0], verificado: 'real' }]);
   assert.equal(res.aplicados, 1);
   const ev = (await cargar(r.home)).evidencia;
@@ -179,7 +182,7 @@ test('sin evidencia previa se crea la fila con Beta(1,1) más el veredicto, solo
 });
 
 test('un hallazgo reportado por varias estaciones actualiza cada estación y modelo', async () => {
-  const r = rastroFalso({
+  const r = await rastroFalso({
     externas: [
       [FILA_SEGURIDAD, [hallazgo('seguridad', 'src/a.js', 10)], 1000],
       [FILA_CODIGO, [hallazgo('codigo', 'src/a.js', 12)], 3000],
@@ -198,7 +201,7 @@ test('un hallazgo reportado por varias estaciones actualiza cada estación y mod
 });
 
 test('las estaciones de Claude también aprenden: el modelo es el agente y no hay esfuerzo', async () => {
-  const r = rastroFalso({ externas: [], claude: [FILA_PRUEBAS] });
+  const r = await rastroFalso({ externas: [], claude: [FILA_PRUEBAS] });
   const delAgente = hallazgo('pruebas', 'test/a.test.js', 3);
   const lista = hallazgosDelRastro(r, [delAgente]);
   assert.equal(lista.length, 1);
@@ -209,7 +212,7 @@ test('las estaciones de Claude también aprenden: el modelo es el agente y no ha
 });
 
 test('los dudosos no cuentan y no escriben nada', async () => {
-  const r = rastroFalso();
+  const r = await rastroFalso();
   const res = await aprender(r, [{ clave: clave(hallazgo('seguridad', 'src/a.js', 10))[0], verificado: 'dudoso' }]);
   assert.deepEqual({ aplicados: res.aplicados, dudosos: res.dudosos }, { aplicados: 0, dudosos: 1 });
   assert.equal(existsSync(path.join(r.home, '.nexakit', 'fabrica', 'evidencia.json')), false);
@@ -217,7 +220,7 @@ test('los dudosos no cuentan y no escriben nada', async () => {
 });
 
 test('una clave desconocida se ignora con aviso y el resto sigue', async () => {
-  const r = rastroFalso();
+  const r = await rastroFalso();
   const res = await aprender(r, [
     { clave: 'ffffffffffff', verificado: 'real' },
     { clave: 'mala\nclave|con**cosas', verificado: 'falso' },
@@ -232,7 +235,7 @@ test('una clave desconocida se ignora con aviso y el resto sigue', async () => {
 });
 
 test('sin ninguna clave conocida no se toca la evidencia', async () => {
-  const r = rastroFalso();
+  const r = await rastroFalso();
   const res = await aprender(r, [{ clave: 'ffffffffffff', verificado: 'real' }]);
   assert.equal(res.aplicados, 0);
   assert.equal(existsSync(path.join(r.home, '.nexakit', 'fabrica', 'evidencia.json')), false);
@@ -242,7 +245,7 @@ test('sin ninguna clave conocida no se toca la evidencia', async () => {
 // Rastro de confianza
 
 test('sin rastro del recorrido no se actualiza nada y se avisa', async () => {
-  const r = rastroFalso();
+  const r = await rastroFalso();
   rmSync(path.join(r.dir, 'recorrido.json'));
   const res = await aprender(r, [{ clave: clave(hallazgo('seguridad', 'src/a.js', 10))[0], verificado: 'real' }]);
   assert.equal(res.aplicados, 0);
@@ -251,7 +254,7 @@ test('sin rastro del recorrido no se actualiza nada y se avisa', async () => {
 });
 
 test('un recorrido manipulado (la huella no coincide) no actualiza nada', async () => {
-  const r = rastroFalso();
+  const r = await rastroFalso();
   const ruta = path.join(r.dir, 'recorrido.json');
   const recorrido = JSON.parse(readFileSync(ruta, 'utf8'));
   recorrido.estaciones[0].modelo = 'modelo-inventado';
@@ -264,7 +267,7 @@ test('un recorrido manipulado (la huella no coincide) no actualiza nada', async 
 
 test('un recorrido ilegible o de otra forma no actualiza nada', async () => {
   for (const contenido of ['{no es json', '{"huella":3}', '[]']) {
-    const r = rastroFalso();
+    const r = await rastroFalso();
     writeFileSync(path.join(r.dir, 'recorrido.json'), contenido);
     const res = await aprender(r, [{ clave: clave(hallazgo('seguridad', 'src/a.js', 10))[0], verificado: 'real' }]);
     assert.equal(res.aplicados, 0, contenido);
@@ -274,7 +277,7 @@ test('un recorrido ilegible o de otra forma no actualiza nada', async () => {
 });
 
 test('un encargo del rastro que contradice el recorrido aprobado no cuenta para esa estación', async () => {
-  const r = rastroFalso();
+  const r = await rastroFalso();
   const ruta = path.join(r.dir, 'seguridad.json');
   const dato = JSON.parse(readFileSync(ruta, 'utf8'));
   dato.encargo.modelo = 'otro-modelo';
@@ -287,7 +290,7 @@ test('un encargo del rastro que contradice el recorrido aprobado no cuenta para 
 });
 
 test('si los tokens no constan en el rastro no se inventan: la media de la fila queda como estaba', async () => {
-  const r = rastroFalso({ tokens: false });
+  const r = await rastroFalso({ tokens: false });
   await evidenciaDelBanco(r.home, [FILA_SEGURIDAD]);
   const antes = filaDe((await cargar(r.home)).evidencia, FILA_SEGURIDAD);
   await aprender(r, [{ clave: clave(hallazgo('seguridad', 'src/a.js', 10))[0], verificado: 'real' }]);
@@ -298,7 +301,7 @@ test('si los tokens no constan en el rastro no se inventan: la media de la fila 
 });
 
 test('una evidencia ilegible no se sustituye: no se actualiza nada y el archivo sigue ahí', async () => {
-  const r = rastroFalso();
+  const r = await rastroFalso();
   const ruta = path.join(r.home, '.nexakit', 'fabrica', 'evidencia.json');
   writeFileSync(ruta, '{corrupto');
   const res = await aprender(r, [{ clave: clave(hallazgo('seguridad', 'src/a.js', 10))[0], verificado: 'real' }]);
@@ -309,8 +312,8 @@ test('una evidencia ilegible no se sustituye: no se actualiza nada y el archivo 
 });
 
 test('un veredictos.json ilegible o inválido no actualiza nada, para no contar dos veces', async () => {
-  for (const contenido of ['{no es json', '{"version":2,"aplicados":{}}', '{"version":1,"aplicados":{"x":{"verificado":"dudoso","filas":[]}}}']) {
-    const r = rastroFalso();
+  for (const contenido of ['{no es json', '{"version":2,"origenes":{},"tokens":[]}', '{"version":1,"origenes":{"x":{"verificado":"dudoso","fila":{}}},"tokens":[]}']) {
+    const r = await rastroFalso();
     writeFileSync(path.join(r.dir, 'veredictos.json'), contenido);
     const res = await aprender(r, [{ clave: clave(hallazgo('seguridad', 'src/a.js', 10))[0], verificado: 'real' }]);
     assert.equal(res.aplicados, 0, contenido);
@@ -324,7 +327,7 @@ test('un veredictos.json ilegible o inválido no actualiza nada, para no contar 
 // Deduplicación
 
 test('el mismo veredicto enviado dos veces no cuenta doble, ni en la misma llamada ni en otra', async () => {
-  const r = rastroFalso();
+  const r = await rastroFalso();
   const k = clave(hallazgo('seguridad', 'src/a.js', 10))[0];
   const primera = await aprender(r, [{ clave: k, verificado: 'real' }, { clave: k, verificado: 'real' }]);
   assert.deepEqual({ aplicados: primera.aplicados, repetidos: primera.repetidos }, { aplicados: 1, repetidos: 1 });
@@ -335,17 +338,21 @@ test('el mismo veredicto enviado dos veces no cuenta doble, ni en la misma llama
 });
 
 test('veredictos.json lleva 0o600, es JSON y guarda el veredicto y las filas aplicadas', { skip: !posix }, async () => {
-  const r = rastroFalso();
+  const r = await rastroFalso();
   const k = clave(hallazgo('seguridad', 'src/a.js', 10))[0];
   await aprender(r, [{ clave: k, verificado: 'falso' }]);
   const ruta = path.join(r.dir, 'veredictos.json');
   assert.equal(statSync(ruta).mode & 0o777, 0o600);
-  assert.deepEqual(JSON.parse(readFileSync(ruta, 'utf8')), { version: 1, aplicados: { [k]: { verificado: 'falso', filas: [FILA_SEGURIDAD] } } });
+  assert.deepEqual(JSON.parse(readFileSync(ruta, 'utf8')), {
+    version: 1,
+    origenes: { [k]: { verificado: 'falso', fila: FILA_SEGURIDAD } },
+    tokens: ['seguridad'],
+  });
   assert.equal(statSync(path.join(r.home, '.nexakit', 'fabrica', 'evidencia.json')).mode & 0o777, 0o600);
 });
 
 test('si el veredicto cambia de real a falso se revierte el anterior y se aplica el nuevo, y al revés', async () => {
-  const r = rastroFalso();
+  const r = await rastroFalso();
   await evidenciaDelBanco(r.home, [FILA_SEGURIDAD]);
   const base = filaDe((await cargar(r.home)).evidencia, FILA_SEGURIDAD);
   const k = clave(hallazgo('seguridad', 'src/a.js', 10))[0];
@@ -367,7 +374,7 @@ test('si el veredicto cambia de real a falso se revierte el anterior y se aplica
 });
 
 test('al revertir, un hallazgo con varias estaciones deshace cada una de ellas', async () => {
-  const r = rastroFalso({
+  const r = await rastroFalso({
     externas: [
       [FILA_SEGURIDAD, [hallazgo('seguridad', 'src/a.js', 10)], 1000],
       [FILA_CODIGO, [hallazgo('codigo', 'src/a.js', 12)], 3000],
@@ -395,7 +402,7 @@ test('revertirReal nunca baja alfa ni beta del valor de partida ni las observaci
 });
 
 test('dos llamadas simultáneas no pierden ninguna actualización', async () => {
-  const r = rastroFalso({
+  const r = await rastroFalso({
     externas: [[FILA_SEGURIDAD, [hallazgo('seguridad', 'src/a.js', 10), hallazgo('seguridad', 'src/b.js', 50)], 1200]],
   });
   const [ka, kb] = clave(hallazgo('seguridad', 'src/a.js', 10), hallazgo('seguridad', 'src/b.js', 50));
@@ -405,7 +412,7 @@ test('dos llamadas simultáneas no pierden ninguna actualización', async () => 
 });
 
 test('si la evidencia no se puede guardar, el veredicto no queda anotado y se avisa', { skip: process.platform !== 'darwin' }, async (t) => {
-  const r = rastroFalso();
+  const r = await rastroFalso();
   const k = clave(hallazgo('seguridad', 'src/a.js', 10))[0];
   await evidenciaDelBanco(r.home, [FILA_SEGURIDAD]);
   const ruta = path.join(r.home, '.nexakit', 'fabrica', 'evidencia.json');
@@ -432,7 +439,7 @@ test('si la evidencia no se puede guardar, el veredicto no queda anotado y se av
 });
 
 test('veredictos.json que es un enlace no se sigue: se avisa y no se actualiza nada', { skip: !posix }, async () => {
-  const r = rastroFalso();
+  const r = await rastroFalso();
   const fuera = path.join(r.home, 'fuera.json');
   writeFileSync(fuera, 'dato ajeno');
   symlinkSync(fuera, path.join(r.dir, 'veredictos.json'));
@@ -444,8 +451,8 @@ test('veredictos.json que es un enlace no se sigue: se avisa y no se actualiza n
 // ---------------------------------------------------------------------------------------------
 // MCP y CLI
 
-async function conectar(r) {
-  const servidor = crearServidorFabrica({ homeDirectory: r.home, cwd: r.home, environment: {}, avisar: () => {} });
+async function conectar(r, cwd = r.raiz) {
+  const servidor = crearServidorFabrica({ homeDirectory: r.home, cwd, environment: {}, avisar: () => {} });
   const [extremoCliente, extremoServidor] = InMemoryTransport.createLinkedPair();
   await servidor.server.connect(extremoServidor);
   const cliente = new Client({ name: 'prueba', version: '0.0.0' }, { capabilities: {} });
@@ -459,7 +466,7 @@ const llamar = async (cliente, args) => {
 };
 
 test('fabrica_resultado expone la clave, aplica los veredictos y devuelve el aprendizaje', async () => {
-  const r = rastroFalso({
+  const r = await rastroFalso({
     externas: [[FILA_SEGURIDAD, [hallazgo('seguridad', 'src/a.js', 10)], 1200]],
     claude: [FILA_PRUEBAS],
   });
@@ -495,7 +502,7 @@ test('fabrica_resultado expone la clave, aplica los veredictos y devuelve el apr
 });
 
 test('fabrica_resultado rechaza un veredicto con un valor que no es real, falso o dudoso', async () => {
-  const r = rastroFalso();
+  const r = await rastroFalso();
   const { cliente } = await conectar(r);
   const respuesta = await cliente.callTool({ name: 'fabrica_resultado', arguments: { id: ID, veredictos: [{ clave: 'abc', verificado: 'quizá' }] } });
   assert.equal(respuesta.isError, true);
@@ -503,7 +510,7 @@ test('fabrica_resultado rechaza un veredicto con un valor que no es real, falso 
 });
 
 test('fabrica_resultado con un rastro manipulado devuelve los hallazgos y un aviso, sin actualizar la evidencia', async () => {
-  const r = rastroFalso();
+  const r = await rastroFalso();
   const ruta = path.join(r.dir, 'recorrido.json');
   const recorrido = JSON.parse(readFileSync(ruta, 'utf8'));
   recorrido.estaciones[0].esfuerzo = 'low';
@@ -518,15 +525,15 @@ test('fabrica_resultado con un rastro manipulado devuelve los hallazgos y un avi
   assert.equal(existsSync(path.join(r.home, '.nexakit', 'fabrica', 'evidencia.json')), false);
 });
 
-async function cli(argv, r) {
+async function cli(argv, r, cwd = r.raiz) {
   let out = '';
   let err = '';
-  const codigo = await ejecutarCli(argv, { out: (t) => { out += t; }, err: (t) => { err += t; } }, { homeDirectory: r.home, cwd: r.home, environment: {} });
+  const codigo = await ejecutarCli(argv, { out: (t) => { out += t; }, err: (t) => { err += t; } }, { homeDirectory: r.home, cwd, environment: {} });
   return { codigo, out, err };
 }
 
 test('resultado --veredictos aplica los veredictos y los cuenta; --json trae el aprendizaje y las claves', async () => {
-  const r = rastroFalso();
+  const r = await rastroFalso();
   const k = clave(hallazgo('seguridad', 'src/a.js', 10))[0];
   const archivo = path.join(r.home, 'veredictos.json');
   writeFileSync(archivo, JSON.stringify([{ clave: k, verificado: 'real' }, { clave: 'ffffffffffff', verificado: 'falso' }]));
@@ -547,7 +554,7 @@ test('resultado --veredictos aplica los veredictos y los cuenta; --json trae el 
 });
 
 test('resultado sin --veredictos no toca la evidencia', async () => {
-  const r = rastroFalso();
+  const r = await rastroFalso();
   const res = await cli(['resultado', '--id', ID, '--json'], r);
   assert.equal(res.codigo, 0, res.err);
   assert.equal(JSON.parse(res.out).aprendizaje, undefined);
@@ -555,7 +562,7 @@ test('resultado sin --veredictos no toca la evidencia', async () => {
 });
 
 test('resultado --veredictos con un archivo que no existe o no es válido da código 2 sin tocar nada', async () => {
-  const r = rastroFalso();
+  const r = await rastroFalso();
   const perdido = await cli(['resultado', '--id', ID, '--veredictos', path.join(r.home, 'no-existe.json')], r);
   assert.equal(perdido.codigo, 2);
   assert.match(perdido.err, /No se pudo leer el archivo de veredictos/u);
@@ -565,4 +572,175 @@ test('resultado --veredictos con un archivo que no existe o no es válido da có
   assert.equal(malo.codigo, 2);
   assert.match(malo.err, /El archivo de veredictos no es válido/u);
   assert.equal(existsSync(path.join(r.home, '.nexakit', 'fabrica', 'evidencia.json')), false);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Deduplicación por origen, tope, tokens, dudoso y repo (ronda de corrección 1)
+
+test('un hallazgo de Claude adyacente cambia la clave del grupo pero no cuenta otra vez a la estación externa', async () => {
+  const r = await rastroFalso({ externas: [[FILA_SEGURIDAD, [hallazgo('seguridad', 'src/a.js', 10)], 1200]], claude: [FILA_PRUEBAS] });
+  const [sola] = hallazgosDelRastro(r);
+  await aprender(r, [{ clave: sola.clave, verificado: 'real' }]);
+
+  const adyacente = hallazgo('pruebas', 'src/a.js', 8);
+  const [grupo] = hallazgosDelRastro(r, [adyacente]);
+  assert.deepEqual(grupo.estaciones, ['seguridad', 'pruebas']);
+  assert.notEqual(grupo.clave, sola.clave, 'el grupo lo encabeza ahora el hallazgo de Claude');
+  const res = await aprender(r, [{ clave: grupo.clave, verificado: 'real' }], [adyacente]);
+  assert.equal(res.aplicados, 1);
+  const ev = (await cargar(r.home)).evidencia;
+  assert.deepEqual({ alfa: filaDe(ev, FILA_SEGURIDAD).alfa, real: filaDe(ev, FILA_SEGURIDAD).real }, { alfa: 3, real: 1 });
+  assert.deepEqual({ alfa: filaDe(ev, FILA_PRUEBAS).alfa, real: filaDe(ev, FILA_PRUEBAS).real }, { alfa: 3, real: 1 });
+
+  const otra = await aprender(r, [{ clave: grupo.clave, verificado: 'real' }], [adyacente]);
+  assert.deepEqual({ aplicados: otra.aplicados, repetidos: otra.repetidos }, { aplicados: 0, repetidos: 1 });
+  // Y al volver a la clave anterior (sin el hallazgo de Claude) tampoco.
+  const vuelta = await aprender(r, [{ clave: sola.clave, verificado: 'real' }]);
+  assert.equal(vuelta.repetidos, 1);
+  assert.equal(filaDe((await cargar(r.home)).evidencia, FILA_SEGURIDAD).alfa, 3);
+});
+
+test('corregir los hallazgos de Claude tras los veredictos no deja cuentas huérfanas ni dobles', async () => {
+  const r = await rastroFalso({ externas: [], claude: [FILA_PRUEBAS] });
+  const x = hallazgo('pruebas', 'test/a.test.js', 3);
+  const x2 = hallazgo('pruebas', 'test/a.test.js', 40);
+  const lectura = async () => filaDe((await cargar(r.home)).evidencia, FILA_PRUEBAS);
+  await aprender(r, [{ clave: claveDe(x), verificado: 'real' }], [x]);
+  assert.equal((await lectura()).alfa, 3);
+
+  // Claude corrige su hallazgo (otra línea) y se repite el veredicto: el nuevo cuenta y el viejo se deshace.
+  const res = await aprender(r, [{ clave: claveDe(x2), verificado: 'real' }], [x2]);
+  assert.deepEqual({ aplicados: res.aplicados, revertidos: res.revertidos }, { aplicados: 1, revertidos: 1 });
+  assert.deepEqual({ alfa: (await lectura()).alfa, real: (await lectura()).real }, { alfa: 3, real: 1 });
+
+  // Si Claude retira el hallazgo sin dar más veredictos, también se deshace.
+  const retirado = await aprender(r, [], []);
+  assert.equal(retirado.revertidos, 1);
+  assert.deepEqual({ alfa: (await lectura()).alfa, real: (await lectura()).real }, { alfa: 1, real: 0 });
+});
+
+test('lo contado sobre hallazgos de una IA externa no se deshace aunque cambie la lista de Claude', async () => {
+  const r = await rastroFalso({ externas: [[FILA_SEGURIDAD, [hallazgo('seguridad', 'src/a.js', 10)], 1200]], claude: [FILA_PRUEBAS] });
+  const [h] = hallazgosDelRastro(r);
+  await aprender(r, [{ clave: h.clave, verificado: 'real' }]);
+  const res = await aprender(r, [], [hallazgo('pruebas', 'test/z.test.js', 1)]);
+  assert.equal(res.revertidos, 0);
+  assert.equal(filaDe((await cargar(r.home)).evidencia, FILA_SEGURIDAD).alfa, 3);
+});
+
+test('un recorrido no mueve la evidencia sin tope: 500 hallazgos de Claude «real» suben como mucho 5 observaciones', async () => {
+  assert.equal(MAX_VEREDICTOS_POR_ESTACION, 5);
+  const r = await rastroFalso({ externas: [], claude: [FILA_PRUEBAS] });
+  const inventados = Array.from({ length: 500 }, (_, i) => hallazgo('pruebas', `src/f${i}.js`, 1));
+  const lista = hallazgosDelRastro(r, inventados);
+  assert.equal(lista.length, 500);
+  const res = await aprender(r, lista.map((h) => ({ clave: h.clave, verificado: 'real' })), inventados);
+  assert.deepEqual({ aplicados: res.aplicados, ignorados: res.ignorados }, { aplicados: 5, ignorados: 495 });
+  assert.match(res.avisos[0], /ya hay 5 veredictos de esta estación/u);
+  const fila = filaDe((await cargar(r.home)).evidencia, FILA_PRUEBAS);
+  assert.deepEqual({ alfa: fila.alfa, beta: fila.beta, real: fila.real }, { alfa: 11, beta: 1, real: 5 });
+  // Un veredicto que cambia de uno ya contado no usa plaza nueva; y al deshacer uno se libera.
+  const cambio = await aprender(r, [{ clave: lista[0].clave, verificado: 'falso' }], inventados);
+  assert.equal(cambio.aplicados + cambio.ignorados, 1);
+});
+
+test('el tope es por estación: otra estación del mismo recorrido sigue contando', async () => {
+  const r = await rastroFalso({
+    externas: [[FILA_SEGURIDAD, Array.from({ length: 7 }, (_, i) => hallazgo('seguridad', `src/s${i}.js`, 1)), 900]],
+    claude: [FILA_PRUEBAS],
+  });
+  const delAgente = [hallazgo('pruebas', 'test/a.test.js', 1)];
+  const lista = hallazgosDelRastro(r, delAgente);
+  const res = await aprender(r, lista.map((h) => ({ clave: h.clave, verificado: 'real' })), delAgente);
+  assert.deepEqual({ aplicados: res.aplicados, ignorados: res.ignorados }, { aplicados: 6, ignorados: 2 });
+  assert.equal(filaDe((await cargar(r.home)).evidencia, FILA_PRUEBAS).alfa, 3);
+  assert.equal(filaDe((await cargar(r.home)).evidencia, FILA_SEGURIDAD).alfa, 11);
+});
+
+test('los tokens de una estación entran una sola vez por recorrido, no una por veredicto', async () => {
+  const r = await rastroFalso({
+    externas: [[FILA_SEGURIDAD, [hallazgo('seguridad', 'src/a.js', 1), hallazgo('seguridad', 'src/b.js', 1), hallazgo('seguridad', 'src/c.js', 1)], 1200]],
+  });
+  await evidenciaDelBanco(r.home, [FILA_SEGURIDAD]);
+  const antes = filaDe((await cargar(r.home)).evidencia, FILA_SEGURIDAD);
+  const lista = hallazgosDelRastro(r);
+  await aprender(r, lista.map((h) => ({ clave: h.clave, verificado: 'real' })));
+  const despues = filaDe((await cargar(r.home)).evidencia, FILA_SEGURIDAD);
+  const previas = antes.banco + antes.real;
+  // Una muestra de 1200 con una observación: no tres.
+  assert.ok(Math.abs(despues.tokensMedios - (antes.tokensMedios * previas + 1200) / (previas + 1)) < 1e-9);
+  assert.equal(despues.real, 3);
+  // Repetir en otra llamada tampoco los vuelve a meter.
+  await aprender(r, lista.map((h) => ({ clave: h.clave, verificado: 'falso' })));
+  assert.equal(filaDe((await cargar(r.home)).evidencia, FILA_SEGURIDAD).tokensMedios, despues.tokensMedios);
+});
+
+test('sin tokens en el rastro una fila nueva queda con coste desconocido (0), y el primer coste conocido la sustituye', async () => {
+  const r = await rastroFalso({ tokens: false });
+  await aprender(r, [{ clave: clave(hallazgo('seguridad', 'src/a.js', 10))[0], verificado: 'real' }]);
+  const fila = filaDe((await cargar(r.home)).evidencia, FILA_SEGURIDAD);
+  assert.deepEqual({ tokens: fila.tokensMedios, segundos: fila.segundosMedios }, { tokens: 0, segundos: 0 });
+  const medida = actualizar((await cargar(r.home)).evidencia, FILA_SEGURIDAD, { aciertos: 1, fallos: 0, tokens: 700, segundos: 9, fuente: 'banco' });
+  assert.deepEqual({ tokens: medida.filas[0].tokensMedios, segundos: medida.filas[0].segundosMedios }, { tokens: 700, segundos: 9 });
+});
+
+test('un dudoso después de un real deshace el real, y un real posterior vuelve a contar', async () => {
+  const r = await rastroFalso();
+  const k = clave(hallazgo('seguridad', 'src/a.js', 10))[0];
+  const leer = async () => filaDe((await cargar(r.home)).evidencia, FILA_SEGURIDAD);
+  await aprender(r, [{ clave: k, verificado: 'real' }]);
+  const res = await aprender(r, [{ clave: k, verificado: 'dudoso' }]);
+  assert.deepEqual({ dudosos: res.dudosos, revertidos: res.revertidos, aplicados: res.aplicados }, { dudosos: 1, revertidos: 1, aplicados: 0 });
+  assert.deepEqual({ alfa: (await leer()).alfa, beta: (await leer()).beta, real: (await leer()).real }, { alfa: 1, beta: 1, real: 0 });
+  assert.equal(JSON.parse(readFileSync(path.join(r.dir, 'veredictos.json'), 'utf8')).origenes[k], undefined);
+  assert.equal((await aprender(r, [{ clave: k, verificado: 'real' }])).aplicados, 1);
+  assert.equal((await leer()).alfa, 3);
+});
+
+test('un recorrido de otro repo no mueve la evidencia', async () => {
+  const r = await rastroFalso();
+  const res = await aprenderDeVeredictos({
+    home: r.home,
+    repo: 'otro-repo-12345678',
+    estado: r.estado,
+    hallazgos: hallazgosDelRastro(r),
+    veredictos: [{ clave: clave(hallazgo('seguridad', 'src/a.js', 10))[0], verificado: 'real' }],
+  });
+  assert.equal(res.aplicados, 0);
+  assert.match(res.avisos[0], /otro repo/u);
+  assert.equal(existsSync(path.join(r.home, '.nexakit', 'fabrica', 'evidencia.json')), false);
+});
+
+test('fabrica_resultado y resultado rechazan los veredictos de un recorrido de otro repo', async () => {
+  const r = await rastroFalso();
+  const otra = temporal('fabrica-veredictos-otra-');
+  const k = clave(hallazgo('seguridad', 'src/a.js', 10))[0];
+
+  const { cliente } = await conectar(r, otra);
+  const respuesta = await llamar(cliente, { id: ID, veredictos: [{ clave: k, verificado: 'real' }] });
+  assert.equal(respuesta.isError, undefined, respuesta.texto);
+  const datos = JSON.parse(respuesta.texto);
+  assert.equal(datos.aprendizaje.aplicados, 0);
+  assert.match(datos.aprendizaje.avisos[0], /otro repo/u);
+
+  const archivo = path.join(r.home, 'veredictos.json');
+  writeFileSync(archivo, JSON.stringify([{ clave: k, verificado: 'real' }]));
+  const porCli = await cli(['resultado', '--id', ID, '--veredictos', archivo, '--json'], r, otra);
+  assert.match(JSON.parse(porCli.out).aprendizaje.avisos[0], /otro repo/u);
+  assert.equal(existsSync(path.join(r.home, '.nexakit', 'fabrica', 'evidencia.json')), false);
+
+  // En el repo correcto, sí.
+  assert.equal(JSON.parse((await cli(['resultado', '--id', ID, '--veredictos', archivo, '--json'], r)).out).aprendizaje.aplicados, 1);
+});
+
+test('fabrica_resultado deshace lo contado sobre un hallazgo de Claude corregido al pasar los nuevos', async () => {
+  const r = await rastroFalso({ externas: [], claude: [FILA_PRUEBAS] });
+  const { cliente } = await conectar(r);
+  const x = hallazgo('pruebas', 'test/a.test.js', 3);
+  await llamar(cliente, { id: ID, hallazgosClaude: [x] });
+  await llamar(cliente, { id: ID, veredictos: [{ clave: claveDe(x), verificado: 'real' }] });
+  assert.equal(filaDe((await cargar(r.home)).evidencia, FILA_PRUEBAS).alfa, 3);
+  const corregido = JSON.parse((await llamar(cliente, { id: ID, hallazgosClaude: [hallazgo('pruebas', 'test/a.test.js', 40)] })).texto);
+  assert.equal(corregido.aprendizaje.revertidos, 1);
+  assert.equal(filaDe((await cargar(r.home)).evidencia, FILA_PRUEBAS).alfa, 1);
 });

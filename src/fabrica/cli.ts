@@ -7,6 +7,7 @@ import { escaparMarkdown, escribirConsolidado, hallazgosDe, hallazgosGuardados }
 import * as ejecutor from './ejecutor.js';
 import type { CambioRecorrido, Recorrido } from './enrutador.js';
 import { ErrorEntorno, ErrorFabrica } from './errores.js';
+import { nombreRepo } from './rastro.js';
 import {
   EsquemaCambios,
   limpiar,
@@ -292,7 +293,9 @@ async function ordenResultado(ctx: Contexto, id: string, archivoVeredictos: stri
   }
   const hallazgos = hallazgosDe(e, hallazgosGuardados(e.dir));
   const aprendizaje =
-    veredictos === undefined ? undefined : await aprenderDeVeredictos({ home: ctx.home, estado: e, hallazgos, veredictos });
+    veredictos === undefined
+      ? undefined
+      : await aprenderDeVeredictos({ home: ctx.home, repo: await nombreRepo(await raizDelRepo(ctx.cwd)), estado: e, hallazgos, veredictos });
   if (json) await salida(ctx, JSON.stringify({ ...e, consolidado: ruta, hallazgos, ...(aprendizaje === undefined ? {} : { aprendizaje }) }, null, 2));
   else {
     await salida(ctx, limpiar(texto).trimEnd());
