@@ -436,6 +436,20 @@ async function medirUna(ej: EjecucionBanco, caso: CasoBanco, opciones: OpcionesE
 }
 
 /**
+ * Comprueba, sin tocar nada, que `plan` es el plan que aprobó la persona: forma válida, huella con 64 hex que coincide
+ * con la del plan y con su contenido, y llamadas iguales a las ejecuciones. Lanza `ErrorFabrica` si algo no cuadra.
+ */
+export function verificarPlanAprobado(plan: unknown, huella: string | undefined): PlanBanco {
+  if (typeof huella !== 'string' || !/^[0-9a-f]{64}$/u.test(huella)) throw new ErrorFabrica(MENSAJE_SIN_HUELLA);
+  const analisis = EsquemaPlan.safeParse(plan);
+  if (!analisis.success) throw new ErrorFabrica(MENSAJE_PLAN);
+  const aprobado = analisis.data;
+  if (huellaPlan(aprobado) !== aprobado.huella || aprobado.huella !== huella) throw new ErrorFabrica(MENSAJE_PLAN);
+  if (aprobado.coste.llamadas !== aprobado.ejecuciones.length) throw new ErrorFabrica(MENSAJE_PLAN);
+  return { ...aprobado, avisos: aprobado.avisos ?? [] };
+}
+
+/**
  * Ejecuta un plan del banco aprobado. Exige la huella que vio la persona y rechaza el plan si no coincide o si se
  * alteró después de calcularla. Cada ejecución corre con la propia fábrica (`lanzar`, sus conectores, su comprobación
  * del disco y su rastro) en un repo git temporal y aleatorio, sin lecciones, y solo mide la estación del caso. Las
@@ -443,13 +457,7 @@ async function medirUna(ej: EjecucionBanco, caso: CasoBanco, opciones: OpcionesE
  * escribieron en el repo, fallaron o se cancelaron se devuelven como inválidas y no se registran.
  */
 export async function ejecutarBanco(plan: unknown, opciones: OpcionesEjecutar): Promise<ResultadoBanco> {
-  const { huella } = opciones;
-  if (typeof huella !== 'string' || !/^[0-9a-f]{64}$/u.test(huella)) throw new ErrorFabrica(MENSAJE_SIN_HUELLA);
-  const analisis = EsquemaPlan.safeParse(plan);
-  if (!analisis.success) throw new ErrorFabrica(MENSAJE_PLAN);
-  const aprobado = analisis.data;
-  if (huellaPlan(aprobado) !== aprobado.huella || aprobado.huella !== huella) throw new ErrorFabrica(MENSAJE_PLAN);
-  if (aprobado.coste.llamadas !== aprobado.ejecuciones.length) throw new ErrorFabrica(MENSAJE_PLAN);
+  const aprobado = verificarPlanAprobado(plan, opciones.huella);
 
   const home = opciones.home ?? os.homedir();
   const casos = new Map(cargarCasos(opciones.raizCasos ?? RAIZ_CASOS).map((c) => [idCaso(c), c]));

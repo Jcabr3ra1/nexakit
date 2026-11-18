@@ -162,6 +162,38 @@ export function leerPropuesta(home: string, repo: string): unknown {
   }
 }
 
+const NOMBRE_PLAN_BANCO = 'banco-plan.json';
+
+/** Guarda el plan del banco en `~/.nexakit/fabrica/banco-plan.json` (0o600, atómico, sin seguir enlaces). */
+export async function guardarPlanBanco(home: string, plan: unknown): Promise<string> {
+  const ruta = path.join(await prepararBase(home), NOMBRE_PLAN_BANCO);
+  await escribirReemplazando(ruta, json(plan));
+  return ruta;
+}
+
+/** Lee el plan guardado del banco sin seguir enlaces. `null` si no existe o no es un archivo normal. */
+export function leerPlanBanco(home: string): unknown {
+  const base = path.join(home, '.nexakit', 'fabrica');
+  const carpeta = lstatSync(base, { throwIfNoEntry: false });
+  if (carpeta === undefined || !carpeta.isDirectory() || carpeta.isSymbolicLink()) return null;
+  const archivo = path.join(base, NOMBRE_PLAN_BANCO);
+  const info = lstatSync(archivo, { throwIfNoEntry: false });
+  if (info === undefined || !info.isFile() || info.size > 1024 * 1024) return null;
+  const fd = openSync(archivo, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  try {
+    return JSON.parse(readFileSync(fd, 'utf8')) as unknown;
+  } catch {
+    return null;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** Borra el plan guardado del banco (no sigue enlaces: `unlink` quita el enlace mismo). */
+export async function borrarPlanBanco(home: string): Promise<void> {
+  await unlink(path.join(home, '.nexakit', 'fabrica', NOMBRE_PLAN_BANCO)).catch(() => {});
+}
+
 /** Estado vivo de una estación del recorrido en curso, tal como lo muestra la barra. */
 export interface EstacionActiva {
   estacion: NombreEstacion;

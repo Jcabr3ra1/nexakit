@@ -524,3 +524,85 @@ test('nexakit --help menciona fabrica y la orden se despacha desde toolkit-cli',
   assert.equal(salida, '');
   assert.match(err, /Uso: nexakit fabrica/u);
 });
+
+// ---------------------------------------------------------------------------------------------
+// Banco
+
+const rutaPlanBanco = (home) => path.join(home, '.nexakit', 'fabrica', 'banco-plan.json');
+
+test('banco planificar muestra el plan con su coste y la orden exacta, y lo guarda en privado', async () => {
+  const e = escenario();
+  const { codigo, out, err } = await cli(['banco', 'planificar', '--estacion', 'seguridad'], e);
+  assert.equal(codigo, 0, err);
+  assert.match(out, /Banco de pruebas, fase 1: \d+ llamadas? a modelos externos/u);
+  assert.match(out, /seguridad\/inyeccion-orden: codex gpt-6\.1-terra low/u);
+  const ruta = rutaPlanBanco(e.home);
+  const plan = JSON.parse(readFileSync(ruta, 'utf8'));
+  assert.equal(plan.fase, 1);
+  assert.ok(out.includes(`nexakit fabrica banco ejecutar --huella ${plan.huella}`));
+  assert.equal(statSync(ruta).mode & 0o777, 0o600);
+});
+
+test('banco planificar --json imprime solo JSON y la fase 2 sin evidencia pide antes la fase 1', async () => {
+  const e = escenario();
+  const r = await cli(['banco', 'planificar', '--json'], e);
+  assert.equal(r.codigo, 0, r.err);
+  assert.equal(JSON.parse(r.out).fase, 1);
+
+  const sin = await cli(['banco', 'planificar', '--fase', '2'], e);
+  assert.equal(sin.codigo, 1);
+  assert.match(sin.err, /fase 2 necesita medidas del banco: planifica y ejecuta antes la fase 1/u);
+
+  assert.equal((await cli(['banco', 'planificar', '--fase', '3'], e)).codigo, 2);
+  assert.equal((await cli(['banco', 'planificar', '--estacion', 'inventada'], e)).codigo, 1);
+  assert.equal((await cli(['banco'], e)).codigo, 2);
+});
+
+test('banco ejecutar sin plan, con otra huella o con el plan alterado falla sin crear conectores', async () => {
+  const e = escenario();
+  // Un conector que no existe: si se intentara crear, la orden fallaría con otro mensaje.
+  e.env.NEXAKIT_FABRICA_CODEX = JSON.stringify(['/no/existe/codex']);
+  const falsa = 'a'.repeat(64);
+  const sinPlan = await cli(['banco', 'ejecutar', '--huella', falsa], e);
+  assert.equal(sinPlan.codigo, 1);
+  assert.match(sinPlan.err, /No hay un plan del banco guardado/u);
+
+  const ok = escenario();
+  await cli(['banco', 'planificar', '--estacion', 'seguridad'], ok);
+  const guardado = JSON.parse(readFileSync(rutaPlanBanco(ok.home), 'utf8'));
+  const otra = await cli(['banco', 'ejecutar', '--huella', falsa], { ...ok, env: { ...ok.env, NEXAKIT_FABRICA_CODEX: JSON.stringify(['/no/existe/codex']) } });
+  assert.equal(otra.codigo, 1);
+  assert.match(otra.err, /no es el que aprobaste/u);
+
+  guardado.ejecuciones[0].modelo = 'otro-modelo';
+  writeFileSync(rutaPlanBanco(ok.home), JSON.stringify(guardado));
+  const alterado = await cli(['banco', 'ejecutar', '--huella', guardado.huella], { ...ok, env: { ...ok.env, NEXAKIT_FABRICA_CODEX: JSON.stringify(['/no/existe/codex']) } });
+  assert.equal(alterado.codigo, 1);
+  assert.match(alterado.err, /no es el que aprobaste/u);
+  assert.ok(existsSync(rutaPlanBanco(ok.home)), 'un plan rechazado no se borra');
+});
+
+test('banco ejecutar corre el plan guardado, muestra el progreso y el resumen por estación, y borra el plan', async () => {
+  const e = escenario();
+  const plan = JSON.parse((await cli(['banco', 'planificar', '--estacion', 'seguridad', '--json'], e)).out);
+  const { codigo, out, err } = await cli(['banco', 'ejecutar', '--huella', plan.huella], e);
+  assert.match(out, new RegExp(`\\[1/${plan.coste.llamadas}\\] seguridad/inyeccion-orden:`, 'u'), err);
+  assert.match(out, /Resumen del banco, fase 1:/u);
+  assert.match(out, /seguridad: \d+ aciertos, \d+ fallos, \d+ inválidas, \d+ tokens/u);
+  assert.ok([0, 1].includes(codigo), err);
+  assert.ok(!existsSync(rutaPlanBanco(e.home)), 'el plan ejecutado se borra');
+  // Sin plan no se puede volver a lanzar.
+  const otra = await cli(['banco', 'ejecutar', '--huella', plan.huella], e);
+  assert.equal(otra.codigo, 1);
+  assert.match(otra.err, /No hay un plan del banco guardado/u);
+});
+
+test('banco ejecutar --json imprime solo JSON con el resumen', async () => {
+  const e = escenario();
+  const plan = JSON.parse((await cli(['banco', 'planificar', '--estacion', 'seguridad', '--json'], e)).out);
+  const { out } = await cli(['banco', 'ejecutar', '--huella', plan.huella, '--json'], e);
+  const resultado = JSON.parse(out);
+  assert.equal(resultado.huella, plan.huella);
+  assert.equal(resultado.ejecuciones.length, plan.coste.llamadas);
+  assert.equal(resultado.resumen[0].estacion, 'seguridad');
+});

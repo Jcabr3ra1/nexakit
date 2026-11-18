@@ -6,9 +6,14 @@ import type { z } from 'zod';
 import { escaparMarkdown, escribirConsolidado, type HallazgoConsolidado, hallazgosDe, hallazgosGuardados } from './consolidar.js';
 import * as ejecutor from './ejecutor.js';
 import type { CambioRecorrido, Recorrido } from './enrutador.js';
+import { describirPlan, ejecutarBanco, planificarBanco, verificarPlanAprobado, type EjecucionMedida, type ResultadoBanco } from './banco/ejecutar.js';
 import { ErrorEntorno, ErrorFabrica } from './errores.js';
-import { nombreRepo } from './rastro.js';
+import { cargar } from './evidencia.js';
+import { borrarPlanBanco, guardarPlanBanco, leerPlanBanco, nombreRepo } from './rastro.js';
 import {
+  cerrarConectores,
+  consultarCatalogos,
+  crearConectoresDesdeEntorno,
   EsquemaCambios,
   limpiar,
   lanzarAprobado,
@@ -42,6 +47,8 @@ const AYUDA = `Uso: nexakit fabrica proponer --base <rama> [--foco <texto>] [--j
      nexakit fabrica estado --id <id> [--json]
      nexakit fabrica resultado --id <id> [--veredictos <archivo.json>] [--json]
      nexakit fabrica cancelar --id <id>
+     nexakit fabrica banco planificar [--fase 1|2] [--estacion <estacion>] [--json]
+     nexakit fabrica banco ejecutar --huella <huella> [--json]
 
 proponer lee el diff contra la rama base, consulta los modelos disponibles y muestra el
 recorrido de revisión: estaciones, IA, modelo, esfuerzo, órdenes permitidas y huella. Cada
@@ -53,6 +60,10 @@ diff sigue siendo el mismo; muestra el progreso y, al terminar, la ruta de conso
 estado y resultado consultan un recorrido por su id; cancelar lo interrumpe (Ctrl+C también).
   --veredictos es un JSON con una lista de { "clave", "verificado": "real" | "falso" | "dudoso" }, con las claves de
   consolidado.md: los reales y los falsos actualizan la evidencia de cada modelo que reportó el hallazgo.
+banco mide los modelos con casos con fallos sembrados y suma el resultado a la evidencia. planificar no ejecuta
+nada: muestra las llamadas, el coste estimado y la huella, y guarda el plan en ~/.nexakit/fabrica/banco-plan.json.
+ejecutar solo lanza ese plan guardado si la huella coincide, en primer plano, y lo borra al terminar. La fase 1 mide
+cada modelo con su esfuerzo más bajo; la fase 2 (necesita la fase 1) mide los tres finalistas por estación.
 Códigos de salida: 0 bien, 1 fallo de estación o escritura detectada, 2 argumentos inválidos.
 `;
 
@@ -334,6 +345,96 @@ async function ordenCancelar(ctx: Contexto, id: string): Promise<number> {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Banco
+
+async function ordenBancoPlanificar(ctx: Contexto, faseTexto: string | undefined, estacion: string | undefined, json: boolean): Promise<number> {
+  if (faseTexto !== undefined && faseTexto !== '1' && faseTexto !== '2') throw new ErrorUso('--fase debe ser 1 o 2');
+  const fase = faseTexto === '2' ? 2 : 1;
+  const { evidencia, aviso: avisoEvidencia } = await cargar(ctx.home);
+  if (fase === 2 && !evidencia.filas.some((f) => f.banco > 0)) {
+    throw new ErrorFabrica('La fase 2 necesita medidas del banco: planifica y ejecuta antes la fase 1');
+  }
+  if (avisoEvidencia !== null) await aviso(ctx)(enUnaLinea(avisoEvidencia));
+  const conectores = await crearConectoresDesdeEntorno({ entorno: ctx.entorno, avisar: aviso(ctx) });
+  let catalogos;
+  try {
+    catalogos = await consultarCatalogos(conectores, aviso(ctx));
+  } finally {
+    await cerrarConectores(conectores);
+  }
+  const plan = planificarBanco({ fase, catalogos, evidencia, ...(estacion === undefined ? {} : { estaciones: [estacion] }) });
+  const ruta = await guardarPlanBanco(ctx.home, plan);
+  if (json) await salida(ctx, JSON.stringify({ ...plan, archivo: ruta }, null, 2));
+  else {
+    await salida(ctx, limpiar(describirPlan(plan)));
+    await salida(ctx, `\nPlan guardado en ${ruta}`);
+    await salida(ctx, `Para ejecutarlo, con la aprobación de la persona: nexakit fabrica banco ejecutar --huella ${plan.huella}`);
+  }
+  return 0;
+}
+
+interface ResumenEstacion {
+  estacion: string;
+  aciertos: number;
+  fallos: number;
+  invalidas: number;
+  tokens: number;
+}
+
+/** Suma por estación los aciertos, fallos, ejecuciones inválidas y tokens de lo medido. */
+function resumirBanco(ejecuciones: readonly EjecucionMedida[]): ResumenEstacion[] {
+  const por = new Map<string, ResumenEstacion>();
+  for (const e of ejecuciones) {
+    const estacion = e.caso.split('/')[0] ?? e.caso;
+    const r = por.get(estacion) ?? { estacion, aciertos: 0, fallos: 0, invalidas: 0, tokens: 0 };
+    if (e.valida) {
+      r.aciertos += e.observacion?.aciertos ?? 0;
+      r.fallos += e.observacion?.fallos ?? 0;
+    } else r.invalidas += 1;
+    r.tokens += e.tokens ?? 0;
+    por.set(estacion, r);
+  }
+  return [...por.values()];
+}
+
+async function ordenBancoEjecutar(ctx: Contexto, huella: string, json: boolean): Promise<number> {
+  // El plan solo llega del archivo que dejó `planificar`: nunca por argumentos ni por stdin.
+  const guardado = leerPlanBanco(ctx.home);
+  if (guardado === null) throw new ErrorFabrica('No hay un plan del banco guardado; planifícalo antes con «nexakit fabrica banco planificar»');
+  const plan = verificarPlanAprobado(guardado, huella);
+  const ias = [...new Set(plan.ejecuciones.map((e) => e.ia))];
+  const conectores = await crearConectoresDesdeEntorno({ ias, entorno: ctx.entorno, avisar: aviso(ctx) });
+  let resultado: ResultadoBanco;
+  try {
+    resultado = await ejecutarBanco(plan, {
+      huella,
+      conectores,
+      home: ctx.home,
+      alAvanzar: (m, i, total) => {
+        if (json) return;
+        const estado = m.valida ? 'válida' : `inválida (${m.motivo ?? 'sin motivo'})`;
+        void ctx.io.out(`[${i + 1}/${total}] ${enUnaLinea(m.caso)}: ${enUnaLinea(m.ia)} ${enUnaLinea(m.modelo)}${m.esfuerzo === null ? '' : ` ${enUnaLinea(m.esfuerzo)}`} - ${estado}\n`);
+      },
+    });
+  } finally {
+    await cerrarConectores(conectores);
+  }
+  await borrarPlanBanco(ctx.home);
+  const resumen = resumirBanco(resultado.ejecuciones);
+  const invalidas = resumen.reduce((n, r) => n + r.invalidas, 0);
+  if (json) await salida(ctx, JSON.stringify({ ...resultado, resumen }, null, 2));
+  else {
+    await salida(ctx, `\nResumen del banco, fase ${resultado.fase}:`);
+    for (const r of resumen) {
+      await salida(ctx, `  ${enUnaLinea(r.estacion)}: ${r.aciertos} aciertos, ${r.fallos} fallos, ${r.invalidas} inválidas, ${r.tokens} tokens`);
+    }
+    for (const a of resultado.avisos) await aviso(ctx)(enUnaLinea(a));
+    await salida(ctx, 'La evidencia quedó actualizada. El plan se borró: para medir de nuevo hay que planificar otra vez.');
+  }
+  return invalidas > 0 ? 1 : 0;
+}
+
+// ---------------------------------------------------------------------------------------------
 // Entrada
 
 const OPCIONES: Record<string, ParseArgsOptionsConfig> = {
@@ -342,6 +443,8 @@ const OPCIONES: Record<string, ParseArgsOptionsConfig> = {
   estado: { id: { type: 'string' }, json: { type: 'boolean' } },
   resultado: { id: { type: 'string' }, veredictos: { type: 'string' }, json: { type: 'boolean' } },
   cancelar: { id: { type: 'string' } },
+  'banco planificar': { fase: { type: 'string' }, estacion: { type: 'string' }, json: { type: 'boolean' } },
+  'banco ejecutar': { huella: { type: 'string' }, json: { type: 'boolean' } },
 };
 
 function valorTexto(valores: Record<string, unknown>, nombre: string): string | undefined {
@@ -367,7 +470,11 @@ export async function ejecutarCli(argv: string[], io: IoCli, opciones: OpcionesC
     sondeoMs: opciones.sondeoMs ?? SONDEO_MS,
     salir: opciones.salir ?? ((codigo) => process.exit(codigo)),
   };
-  const [orden, ...resto] = argv;
+  const [primera, ...siguientes] = argv;
+  // `banco` lleva su propia orden: `banco planificar` y `banco ejecutar`.
+  const compuesta = primera === 'banco';
+  const orden = compuesta ? `banco ${siguientes[0] ?? ''}`.trimEnd() : primera;
+  const resto = compuesta ? siguientes.slice(1) : siguientes;
   if (orden === '--help' || orden === '-h') {
     await io.out(AYUDA);
     return 0;
@@ -394,6 +501,10 @@ export async function ejecutarCli(argv: string[], io: IoCli, opciones: OpcionesC
         return await ordenProponer(ctx, exigir(valorTexto(valores, 'base'), '--base'), valorTexto(valores, 'foco'), json);
       case 'lanzar':
         return await ordenLanzar(ctx, exigir(valorTexto(valores, 'huella'), '--huella'), valorTexto(valores, 'cambios'), json);
+      case 'banco planificar':
+        return await ordenBancoPlanificar(ctx, valorTexto(valores, 'fase'), valorTexto(valores, 'estacion'), json);
+      case 'banco ejecutar':
+        return await ordenBancoEjecutar(ctx, exigir(valorTexto(valores, 'huella'), '--huella'), json);
       case 'estado':
         return await ordenEstado(ctx, exigir(valorTexto(valores, 'id'), '--id'), json);
       case 'resultado':

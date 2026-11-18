@@ -123,7 +123,7 @@ export async function cerrarConectores(conectores: Conectores): Promise<void> {
 }
 
 /** Catálogos vivos con un tope de 30 s por IA. Una IA que falla queda sin catálogo y se avisa. */
-async function consultarCatalogos(conectores: Conectores, avisar: Avisar): Promise<Catalogos> {
+export async function consultarCatalogos(conectores: Conectores, avisar: Avisar): Promise<Catalogos> {
   const catalogos: Catalogos = {};
   await Promise.all(
     (Object.entries(conectores) as Array<[IA, Conector]>).map(async ([ia, conector]) => {
