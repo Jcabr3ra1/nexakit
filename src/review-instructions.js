@@ -1,8 +1,11 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { randomUUID, createHash } from 'node:crypto';
+import { targets, readText, checkParent, proof as readProof, blockOf as findBlock, writeAtomic, hash } from './instructions-block.js';
 const START = '<!-- nexakit:review:start -->',
   END = '<!-- nexakit:review:end -->';
+const proofPath = (home) => path.join(home, '.nexakit', 'review-instructions.json');
+const proof = (home) => readProof(proofPath(home));
+const blockOf = (text) => findBlock(text, START, END);
 const BODY = `${START}
 # Método de trabajo de nexakit
 
@@ -34,7 +37,6 @@ pasarlo por la fábrica; sigue la skill fabrica. Usa la orden estable
 Si una tarea larga queda a medias —pausa, cambio de IA, bloqueo o cierre— escribe o actualiza la nota de seguimiento con project-handoff; recomienda sesión nueva en los casos de project-handoff, y cierra el seguimiento al integrar con cerrar-memoria.
 ${END}`;
 
-const hash = (text) => createHash('sha256').update(text).digest('hex');
 // SHA-256 of every block earlier versions of nexakit installed (from the history of this file), newest first. A block
 // that matches one of them was written by nexakit even without its record in review-instructions.json, so it is
 // replaced by the current one; any other text between the marks was edited by the person and is never touched.
@@ -47,71 +49,6 @@ const PREVIOUS_BODY_HASHES = new Set([
   'a59f9d7f20e328a0e990566dee78e9fe90623598bc8bd85eb593808217aae123', // d815d60: revisión certificada
   'b9ed8e99a370f760c46574fa0e1854768d35498eb70fc619337851843d97c32a', // d73e44a: revisión por sesión
 ]);
-const proofPath = (home) => path.join(home, '.nexakit', 'review-instructions.json');
-const NAMES = { claude: 'CLAUDE.md', codex: 'AGENTS.md', antigravity: 'GEMINI.md' };
-function targets({ homeDirectory, environment = {}, codexHome, agents = Object.keys(NAMES) }) {
-  if (!homeDirectory || !path.isAbsolute(homeDirectory))
-    throw new Error('Se requiere homeDirectory absoluto.');
-  const folders = {
-    claude: path.join(homeDirectory, '.claude'),
-    codex: codexHome ?? environment.CODEX_HOME ?? path.join(homeDirectory, '.codex'),
-    antigravity: path.join(homeDirectory, '.gemini'),
-  };
-  return agents
-    .filter((client) => NAMES[client])
-    .map((client) => ({ client, name: NAMES[client], target: path.join(folders[client], NAMES[client]) }));
-}
-async function readText(file) {
-  try {
-    const stat = await fs.lstat(file);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 1024 * 1024)
-      throw new Error('Archivo de instrucciones o registro en conflicto.');
-    return await fs.readFile(file, 'utf8');
-  } catch (error) {
-    if (error.code === 'ENOENT') return null;
-    throw error;
-  }
-}
-async function checkParent(directory, create = false) {
-  const info = await fs.lstat(directory).catch((error) => {
-    if (error.code === 'ENOENT') return null;
-    throw error;
-  });
-  if (info && (!info.isDirectory() || info.isSymbolicLink()))
-    throw new Error('La carpeta de instrucciones o registro no es normal.');
-  if (!info && create) await fs.mkdir(directory, { recursive: true, mode: 0o700 });
-}
-async function proof(home) {
-  await checkParent(path.dirname(proofPath(home)));
-  const text = await readText(proofPath(home));
-  if (text === null) return {};
-  const records = JSON.parse(text);
-  if (!records || typeof records !== 'object' || Array.isArray(records))
-    throw new Error('Registro de instrucciones inválido.');
-  return records;
-}
-function blockOf(text) {
-  const a = text?.indexOf(START) ?? -1,
-    b = text?.indexOf(END) ?? -1;
-  if (a < 0 || b <= a || text.indexOf(START, a + START.length) >= 0 || text.indexOf(END, b + END.length) >= 0)
-    return null;
-  return text.slice(a, b + END.length);
-}
-async function writeAtomic(target, text, lock) {
-  await lock.assertHeld();
-  const stat = await fs.lstat(target).catch((error) => {
-    if (error.code === 'ENOENT') return null;
-    throw error;
-  });
-  const tmp = target + '.' + randomUUID();
-  await fs.writeFile(tmp, text, { flag: 'wx', mode: stat?.mode ?? 0o600 });
-  try {
-    await lock.assertHeld();
-    await fs.rename(tmp, target);
-  } finally {
-    await fs.rm(tmp, { force: true });
-  }
-}
 export async function planReviewInstructions(options = {}) {
   const owned = await proof(options.homeDirectory),
     items = [];
