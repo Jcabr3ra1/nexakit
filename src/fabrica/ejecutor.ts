@@ -59,6 +59,8 @@ export interface OpcionesLanzar {
   home?: string;
   /** Mínimo entre dos escrituras de `activo.json`. */
   intervaloActivoMs?: number;
+  /** Modo banco: los encargos salen sin lecciones, para medir el modelo y no las reglas de la persona. */
+  sinLecciones?: boolean;
 }
 
 type Catalogo = Array<{ modelo: string; esfuerzos: string[] }>;
@@ -464,6 +466,7 @@ export async function lanzar(r: Recorrido, opciones: OpcionesLanzar): Promise<{ 
     topeCatalogoMs = TOPE_CATALOGO_MS,
     home = os.homedir(),
     intervaloActivoMs = INTERVALO_ACTIVO_MS,
+    sinLecciones = false,
   } = opciones;
   if (!Number.isInteger(paralelismo) || paralelismo < 1) {
     throw new ErrorFabrica('El paralelismo debe ser un número entero mayor que cero');
@@ -543,7 +546,7 @@ export async function lanzar(r: Recorrido, opciones: OpcionesLanzar): Promise<{ 
       marcar(fila, 'fallida', MODELO_RETIRADO);
       continue;
     }
-    const lecciones = await leccionesDelRepo(home, raiz, e.estacion, avisos);
+    const lecciones = sinLecciones ? [] : await leccionesDelRepo(home, raiz, e.estacion, avisos);
     const encargo = construirEncargo({ estacion: e, raiz, base: r.base, foco: r.foco, diff: diff.texto, nonce, lecciones });
     trabajos.push({
       fila,
