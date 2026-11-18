@@ -24,4 +24,13 @@ El servidor MCP `nexakit-fabrica` ofrece `fabrica_proponer`, `fabrica_lanzar`, `
 7. **Una sola tabla y veredictos.** Entrega una tabla con estación, hallazgo, gravedad, verificado (sí o no, con la prueba) y propuesta. Después, para que la fábrica aprenda, vuelve a llamar a `fabrica_resultado({ id, veredictos })` con un veredicto por hallazgo ya verificado: `{ clave, verificado }`, donde `clave` es la que trae cada hallazgo (columna «clave» de `consolidado.md`) y `verificado` es `real` (existe tras comprobarlo en el código), `falso` (no existe) o `dudoso` (no lo pudiste comprobar; no cuenta). No pases veredictos de hallazgos que no verificaste. Repetir un veredicto no suma dos veces, uno cambiado (o un `dudoso` posterior) deshace el anterior, y cada estación suma como mucho 5 veredictos por recorrido: da veredicto solo a los hallazgos que de verdad comprobaste. Solo vale para el repo del recorrido. Si la respuesta trae avisos en `aprendizaje`, díselos a la persona. Sin el servidor MCP: `~/.nexakit/nexakit fabrica resultado --id <id> --veredictos <archivo.json>`.
 8. **Corregir.** Pregunta qué corregir. Corrige solo lo que la persona elija, vuelve a comprobar y, si hace falta, repite el recorrido completo desde proponer: máximo de dos rondas por petición.
 
+## Banco de pruebas de modelos (solo si la persona lo pide)
+
+El banco mide Codex y Antigravity con casos con fallos sembrados y suma el resultado a la evidencia que usa el enrutador. Gasta tokens: nunca lo lances por tu cuenta, ni siquiera cuando un aviso de evidencia lo sugiera.
+
+1. **Planificar.** Ejecuta `~/.nexakit/nexakit fabrica banco planificar [--fase 1|2] [--estacion e]`. No ejecuta nada: guarda el plan en `~/.nexakit/fabrica/banco-plan.json` y muestra las llamadas, los tokens estimados y la huella. Sin `--fase` es la 1.
+2. **Enseñar y esperar el sí.** Muestra a la persona el plan y el coste tal cual salen y pide su aprobación explícita. Un silencio, una duda o un sí a otra cosa no cuentan.
+3. **Ejecutar.** Solo con su sí, ejecuta `~/.nexakit/nexakit fabrica banco ejecutar --huella <huella>` con la huella del plan que ella vio. Corre en primer plano, con progreso, y al terminar da un resumen por estación (aciertos, fallos, inválidas y tokens) y borra el plan: para medir otra vez hay que planificar de nuevo. Si la huella no coincide o no hay plan, falla sin lanzar nada.
+4. **Fase 2.** Mide los tres finalistas de cada estación y necesita la evidencia de la fase 1. Tiene su propia aprobación: el sí de la fase 1 no vale para ella.
+
 Si algo falla o hay avisos, díselo sin ocultarlo. No hagas commit, push ni PR por tu cuenta.

@@ -27,6 +27,10 @@ El servidor MCP es `nexakit-fabrica` (`bin/nexakit-fabrica-mcp.js`); la raíz es
 ~/.nexakit/nexakit fabrica estado --id <id>
 ~/.nexakit/nexakit fabrica resultado --id <id> [--veredictos <archivo.json>]
 ~/.nexakit/nexakit fabrica cancelar --id <id>
+~/.nexakit/nexakit fabrica banco planificar [--fase 1|2] [--estacion <estacion>]
+~/.nexakit/nexakit fabrica banco ejecutar --huella <huella>
 ```
+
+El banco mide los modelos de Codex y Antigravity con casos con fallos sembrados (`bench/casos`) y suma el resultado a `~/.nexakit/fabrica/evidencia.json`, de donde el enrutador elige el modelo más barato que basta. `banco planificar` no ejecuta nada: guarda el plan en `~/.nexakit/fabrica/banco-plan.json` y muestra las llamadas, los tokens estimados y la huella. `banco ejecutar` solo corre ese plan guardado si la huella coincide, en primer plano y con progreso; al terminar da un resumen por estación y borra el plan, así que para medir otra vez hay que planificar de nuevo. Gasta tokens, por eso solo se lanza con la aprobación explícita de la persona, y la fase 2 (los tres finalistas por estación, que necesita la fase 1) tiene la suya.
 
 El rastro de cada recorrido queda en `~/.nexakit/fabrica/<repo>/<id>/`, con permisos restringidos y poda a los 90 días.

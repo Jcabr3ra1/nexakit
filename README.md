@@ -38,6 +38,8 @@ npx nexakit memoria <subcomando>               # Operaciones avanzadas de memori
 npx nexakit setup --omitir <skill> --apply   # Declarar quitada una skill global que ya no enlazas
 npx nexakit setup --reponer <skill> --apply  # Devolver una skill global que quitaste
 ~/.nexakit/nexakit fabrica proponer --base main  # Proponer un recorrido de revisión (nada se lanza sin tu aprobación)
+~/.nexakit/nexakit fabrica banco planificar    # Planificar la medición de modelos y ver su coste (no ejecuta nada)
+~/.nexakit/nexakit fabrica banco ejecutar --huella <huella>  # Ejecutar el plan aprobado (gasta tokens)
 ~/.nexakit/nexakit modelo                      # Ver catálogo real de modelos y esfuerzos
 ~/.nexakit/nexakit ahorro                      # Cuánta salida de comandos recortó nexakit-ahorro
 ~/.nexakit/nexakit codex auditar               # Revisar contexto y recomendaciones de Codex

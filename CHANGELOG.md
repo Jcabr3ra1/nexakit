@@ -1,5 +1,31 @@
 # Cambios
 
+## 0.12.0
+
+### El enrutador inteligente
+
+La fábrica elige cada modelo con datos medidos, enseña por qué y aprende de lo que ocurre en el uso real.
+
+- La barra de estado muestra las estaciones de la fábrica en curso, también las de Codex y Antigravity, con su estado y sus tokens.
+- Evidencia por modelo y estación (`~/.nexakit/fabrica/evidencia.json`): aciertos y fallos medidos, tokens y tiempo. Caduca a los 30 días o cuando aparece un modelo nuevo en el catálogo; en ambos casos solo se avisa, nunca se relanza nada solo.
+- Decisión por riesgo: el enrutador elige el modelo más barato que basta, comparando el cuantil del 5 % de la calidad medida con el umbral del riesgo (bajo 0,6, medio 0,75, alto 0,85). Sin datos, manda la tabla manual y avisa de que conviene medir.
+- Cada estación de la propuesta explica por qué se eligió su modelo y con qué calidad medida.
+- `elegir-modelo` usa la misma evidencia, y reconoce los modelos `hydrogen` y `carbon`.
+- Aprendizaje por veredictos: `nexakit fabrica resultado --id <id> --veredictos <archivo.json>` suma a la evidencia los hallazgos que la persona o Claude verificaron como reales o falsos, con tope por estación y sin contar dos veces el mismo.
+
+### Banco de pruebas de modelos
+
+- Casos con fallos sembrados en `bench/casos/<estacion>/<caso>/` para seguridad, arquitectura, pruebas, rendimiento y documentación, con casos limpios para medir los falsos positivos.
+- `nexakit fabrica banco planificar [--fase 1|2] [--estacion e]` calcula las llamadas, los tokens estimados y la huella, y guarda el plan; no ejecuta nada. La fase 1 mide cada modelo con su esfuerzo más bajo; la fase 2 mide los tres finalistas por estación y necesita antes la fase 1.
+- `nexakit fabrica banco ejecutar --huella <huella>` solo corre el plan guardado si la huella coincide, en primer plano y con progreso, con la propia fábrica y en un repo temporal sin lecciones. Muestra un resumen por estación (aciertos, fallos, inválidas y tokens) y borra el plan. Gasta tokens: la skill `fabrica` lo propone solo si la persona lo pide y espera su sí explícito, también para la fase 2.
+
+### Lecciones: aprender de las correcciones
+
+- Se reconocen las quejas repetidas de la persona como correcciones.
+- Almacén común de lecciones y `nexakit lecciones registrar|aceptar|retirar`: una lección solo entra con aprobación explícita.
+- Un bloque de lecciones en `CLAUDE.md`, `AGENTS.md` y `GEMINI.md` las comparte con Claude, Codex y Antigravity.
+- La fábrica aplica las lecciones del repo a los encargos de las estaciones, tratadas como datos que un revisor no puede manipular.
+
 ## 0.11.0
 
 ### La fábrica de revisión
