@@ -7,6 +7,7 @@ import { readCleanProjectAnswers } from './skill-recommendations.js';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import { planReviewInstructions } from './review-instructions.js';
+import { planLeccionesInstructions } from './lecciones-instructions.js';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { connectMemory } from './connect.js';
@@ -264,6 +265,7 @@ export async function gatherSetupState({
   }
 
   const reviewInstructions = await planReviewInstructions({ homeDirectory, environment, codexHome });
+  const leccionesInstructions = await planLeccionesInstructions({ homeDirectory, environment, codexHome }).catch(() => ({ items: [] }));
   // nexakit-fabrica per agent (register, repair, retire the old MCP). Registering needs the script: it exists, or
   // the stable copy installed first in the same confirmation brings it.
   const canRegister = setup.mcp.entryExists || stableCopy.needed;
@@ -280,6 +282,7 @@ export async function gatherSetupState({
     generators:await loadGeneratorsCatalog(),
     cleanProject:await readCleanProjectAnswers(project.root),
     reviewInstructions,
+    leccionesInstructions,
     fabricaMcp,
     codexAgents,
     superpowers,

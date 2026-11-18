@@ -238,6 +238,7 @@ export async function runToolkitCli(
         const cleanJson = {
           applied: report.applied,
           reviewInstructions: report.reviewInstructions ?? [],
+          leccionesInstructions: report.leccionesInstructions ?? [],
           projectRoot: report.projectRoot,
           includeGlobal: report.includeGlobal,
           items: report.items.map(({ catalogEntry, ...itemRest }) => itemRest),
@@ -457,6 +458,10 @@ function migrationReport(result) {
   for (const item of result.reviewInstructions ?? []) {
     if (item.reason === 'editado') lines.push(`! ${item.name}: el bloque de nexakit está editado a mano; no lo toco`);
     else if (item.update) lines.push(`! ${item.name}: hay reglas de trabajo nuevas (ejecuta npx nexakit)`);
+  }
+  for (const item of result.leccionesInstructions ?? []) {
+    if (item.reason === 'editado') lines.push(`! ${item.name}: el bloque de lecciones de nexakit está editado a mano; no lo toco`);
+    else if (item.update) lines.push(`! ${item.name}: las lecciones compartidas cambiaron (ejecuta npx nexakit)`);
   }
   const agents = result.codexAgents;
   const count = (list, one, many) => `${list.length} ${list.length === 1 ? one : many}`;

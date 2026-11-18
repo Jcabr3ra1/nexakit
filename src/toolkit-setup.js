@@ -25,6 +25,7 @@ import { actualRoot, ensureStableInstall, nexakitDir } from './stable-install.js
 import { inspectMods } from './mods.js';
 import { defaultRunner, inspectSuperpowers } from './superpowers.js';
 import { planReviewInstructions } from './review-instructions.js';
+import { planLeccionesInstructions } from './lecciones-instructions.js';
 import { teamMarks } from './codex-team.js';
 
 import packageJson from '../package.json' with { type: 'json' };
@@ -679,6 +680,19 @@ async function reviewInstructionsReport(options) {
     return [];
   }
 }
+async function leccionesInstructionsReport(options) {
+  try {
+    return (await planLeccionesInstructions(options)).items.map(({ client, name, state, reason, update }) => ({
+      client,
+      name,
+      state,
+      ...(reason && { reason }),
+      ...(update && { update }),
+    }));
+  } catch {
+    return [];
+  }
+}
 export async function executable(name, environment) {
   return Boolean(await findExecutable(name, environment));
 }
@@ -734,6 +748,7 @@ export async function doctorToolkit({
       ? setup.mcp.fabrica
       : Object.fromEntries(Object.entries(setup.mcp.fabrica).filter(([, action]) => !action.registrar && !action.reparar)),
     reviewInstructions: await reviewInstructionsReport({ homeDirectory, environment, codexHome, agents: setup.clients }),
+    leccionesInstructions: await leccionesInstructionsReport({ homeDirectory, environment, codexHome, agents: setup.clients }),
     ...(setup.clients.includes('codex') && { codexAgents: await teamMarks({ codexHome }) }),
     activeRoot: setup.activeRoot,
     legacy: setup.legacy,

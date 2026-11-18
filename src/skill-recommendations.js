@@ -1,5 +1,6 @@
 import generatorsData from '../catalogs/generadores.json' with { type: 'json' };
 import { ownedReviewInstructions, removeReviewInstructions } from './review-instructions.js';
+import { ownedLeccionesInstructions, removeLeccionesInstructions } from './lecciones-instructions.js';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -1423,6 +1424,13 @@ export async function planToolkitDetach({
           agents: clients
         })
       : [],
+    leccionesInstructions: includeGlobal && !skillNames
+      ? await ownedLeccionesInstructions({
+          homeDirectory: homeReal,
+          codexHome: codexHome ?? environment.CODEX_HOME ?? path.join(homeReal, '.codex'),
+          agents: clients
+        })
+      : [],
     homeDirectory: homeReal,
     reviewCodexHome: codexHome ?? environment.CODEX_HOME ?? path.join(homeReal, ".codex"),
     reviewAgents: clients,
@@ -1491,14 +1499,22 @@ export async function applyToolkitDetach(plan) {
     throw new Error('Se requiere una vista previa válida de desacoplado.');
   }
 
-  if (plan.reviewInstructions?.length) {
+  if (plan.reviewInstructions?.length || plan.leccionesInstructions?.length) {
     const lock = await acquireLock(nexakitDir(plan.homeDirectory));
     try {
-      await removeReviewInstructions({
-        homeDirectory: plan.homeDirectory,
-        codexHome: plan.reviewCodexHome,
-        agents: plan.reviewAgents
-      }, lock);
+      // Primero el bloque de lecciones, que se escribió después: así se restaura el archivo original.
+      if (plan.leccionesInstructions?.length)
+        await removeLeccionesInstructions({
+          homeDirectory: plan.homeDirectory,
+          codexHome: plan.reviewCodexHome,
+          agents: plan.reviewAgents
+        }, lock);
+      if (plan.reviewInstructions?.length)
+        await removeReviewInstructions({
+          homeDirectory: plan.homeDirectory,
+          codexHome: plan.reviewCodexHome,
+          agents: plan.reviewAgents
+        }, lock);
     } finally {
       await lock.release();
     }
@@ -1735,6 +1751,7 @@ export function formatDetachReport(report) {
   }
 
   if (report.reviewInstructions?.length) lines.push(`  - Quitar solo el bloque de revisión de ${report.reviewInstructions.join(', ')}`);
+  if (report.leccionesInstructions?.length) lines.push(`  - Quitar solo el bloque de lecciones de ${report.leccionesInstructions.join(', ')}`);
   return lines.join('\n') + '\n';
 }
 

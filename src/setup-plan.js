@@ -333,6 +333,22 @@ export function buildConfirmation(state, answers) {
     );
     block('review-instructions', 'Reglas de trabajo de tus IA');
   }
+  const leccionItems = (state.leccionesInstructions?.items ?? []).filter((item) => instructionNames.has(item.name));
+  for (const item of leccionItems.filter((item) => item.state === 'conflict'))
+    add(
+      '!',
+      item.reason === 'editado'
+        ? `${item.name}: el bloque de lecciones de nexakit está editado a mano; no lo toco`
+        : `${item.name}: no se pueden compartir las lecciones; no lo toco`,
+    );
+  const pendingLecciones = leccionItems.filter((item) => item.state === 'pending');
+  if (pendingLecciones.length) {
+    add(
+      pendingLecciones.every((item) => item.remove) ? '−' : pendingLecciones.every((item) => item.update) ? '↻' : '+',
+      `Lecciones de nexakit en tus instrucciones de ${joinNames(pendingLecciones.map((item) => AGENT_NAMES[item.client]))}`,
+    );
+    block('lecciones-instructions', 'Lecciones compartidas con tus IA');
+  }
   if (answersChanged && (blocks.length || state.savedAnswers)) {
     // Saved first, before any block that can fail, so a retry starts from what the person decided.
     blocks.unshift({ id: 'answers', label: 'Respuestas guardadas' });
