@@ -70,6 +70,7 @@
     "assets/brand/",
     "docs/skills/evidencias/",
     "assets/runtime/",
+    "bench/",
     "scripts/prepare-package.js",
     "scripts/validate-skill-catalog.js"
   ],

@@ -1,0 +1,25 @@
+{
+  "estacion": "pruebas",
+  "base": {
+    "archivos": [
+      "src/precio.ts",
+      "test/precio.test.js"
+    ]
+  },
+  "cambio": {
+    "archivos": [
+      "src/precio.ts"
+    ]
+  },
+  "fallos": [
+    {
+      "archivo": "src/precio.ts",
+      "lineas": [
+        5,
+        10
+      ],
+      "categoria": "sin-prueba",
+      "descripcion": "conDescuento tiene tres ramas y un error y ninguna prueba las cubre."
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "estacion": "rendimiento",
+  "base": {
+    "archivos": [
+      "src/informe.js"
+    ]
+  },
+  "cambio": {
+    "archivos": [
+      "src/informe.js"
+    ]
+  },
+  "fallos": [
+    {
+      "archivo": "src/informe.js",
+      "lineas": [
+        3,
+        4
+      ],
+      "categoria": "consulta-n-mas-uno",
+      "descripcion": "Se lanza una consulta a la base por cada pedido en lugar de una sola para todos los clientes."
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "estacion": "rendimiento",
+  "base": {
+    "archivos": [
+      "src/correo.html",
+      "src/plantilla.ts"
+    ]
+  },
+  "cambio": {
+    "archivos": [
+      "src/plantilla.ts"
+    ]
+  },
+  "fallos": [
+    {
+      "archivo": "src/plantilla.ts",
+      "lineas": [
+        4,
+        4
+      ],
+      "categoria": "lectura-repetida",
+      "descripcion": "La plantilla se lee del disco en cada llamada, incluida cada vuelta de renderizarLote."
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "estacion": "arquitectura",
+  "base": {
+    "archivos": [
+      "controladores/usuarios.js",
+      "docs/adr/0003-capa-http.md",
+      "servicios/usuarios.js"
+    ]
+  },
+  "cambio": {
+    "archivos": [
+      "controladores/usuarios.js",
+      "servicios/usuarios.js"
+    ]
+  },
+  "fallos": [
+    {
+      "archivo": "servicios/usuarios.js",
+      "lineas": [
+        3,
+        6
+      ],
+      "categoria": "violacion-adr",
+      "descripcion": "El servicio recibe y usa res, aunque el ADR 0003 reserva la capa HTTP a los controladores."
+    }
+  ]
+}

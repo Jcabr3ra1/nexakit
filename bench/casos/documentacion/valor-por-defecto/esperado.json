@@ -1,0 +1,25 @@
+{
+  "estacion": "documentacion",
+  "base": {
+    "archivos": [
+      "README.md",
+      "src/config.js"
+    ]
+  },
+  "cambio": {
+    "archivos": [
+      "src/config.js"
+    ]
+  },
+  "fallos": [
+    {
+      "archivo": "src/config.js",
+      "lineas": [
+        3,
+        3
+      ],
+      "categoria": "doc-contradice-codigo",
+      "descripcion": "El valor por defecto pasa a 10000 ms, pero el README sigue diciendo 30000."
+    }
+  ]
+}

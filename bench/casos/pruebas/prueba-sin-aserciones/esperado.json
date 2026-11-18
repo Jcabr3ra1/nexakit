@@ -1,0 +1,26 @@
+{
+  "estacion": "pruebas",
+  "base": {
+    "archivos": [
+      "src/fechas.js",
+      "test/fechas.test.js"
+    ]
+  },
+  "cambio": {
+    "archivos": [
+      "src/fechas.js",
+      "test/fines-de-semana.test.js"
+    ]
+  },
+  "fallos": [
+    {
+      "archivo": "test/fines-de-semana.test.js",
+      "lineas": [
+        5,
+        9
+      ],
+      "categoria": "prueba-vacia",
+      "descripcion": "La prueba solo comprueba que hay un booleano y nunca el valor esperado para un sábado o un domingo."
+    }
+  ]
+}

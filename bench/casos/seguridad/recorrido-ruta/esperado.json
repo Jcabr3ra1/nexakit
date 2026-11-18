@@ -1,0 +1,24 @@
+{
+  "estacion": "seguridad",
+  "base": {
+    "archivos": [
+      "servidor.js"
+    ]
+  },
+  "cambio": {
+    "archivos": [
+      "servidor.js"
+    ]
+  },
+  "fallos": [
+    {
+      "archivo": "servidor.js",
+      "lineas": [
+        8,
+        10
+      ],
+      "categoria": "recorrido-rutas",
+      "descripcion": "El nombre del archivo viene de la URL y se une a la raíz sin comprobar que el resultado siga dentro de ella."
+    }
+  ]
+}

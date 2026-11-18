@@ -1,0 +1,24 @@
+{
+  "estacion": "documentacion",
+  "base": {
+    "archivos": [
+      "src/usuarios.ts"
+    ]
+  },
+  "cambio": {
+    "archivos": [
+      "src/usuarios.ts"
+    ]
+  },
+  "fallos": [
+    {
+      "archivo": "src/usuarios.ts",
+      "lineas": [
+        8,
+        17
+      ],
+      "categoria": "doc-contradice-codigo",
+      "descripcion": "El comentario promete null si no existe y la función ahora lanza un error."
+    }
+  ]
+}
