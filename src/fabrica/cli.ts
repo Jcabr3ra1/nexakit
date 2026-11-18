@@ -114,6 +114,7 @@ function lineasEstado(e: ejecutor.EstadoRecorrido): string[] {
     lineas.push(`  - ${limpiar(x.estacion)}: ${limpiar(x.estado)}${nota === undefined ? '' : ` (${limpiar(nota)})`}`);
   }
   if (e.motivo !== undefined) lineas.push(`Motivo: ${limpiar(e.motivo)}`);
+  for (const a of e.avisos ?? []) lineas.push(`Aviso: ${limpiar(a)}`);
   if (e.escriturasDetectadas.length > 0) {
     lineas.push('Escrituras detectadas en el repo:', ...e.escriturasDetectadas.map((a) => `  - ${limpiar(a)}`));
   }

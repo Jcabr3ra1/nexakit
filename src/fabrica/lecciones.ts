@@ -349,12 +349,19 @@ export function efectividad(leccion: Leccion, eventos: readonly EventoRegistro[]
   return antes === 0 ? null : { antes, despues };
 }
 
-/** Veces que una estación debe repetir el mismo falso positivo en un repo para que se proponga una lección. */
+/** Recorridos distintos en los que una estación debe repetir el mismo falso positivo en un repo para que se proponga una lección. */
 export const UMBRAL_FALSOS = 2;
 /** Lecciones que entran como mucho en el encargo de una estación. */
 export const MAX_LECCIONES_ENCARGO = 5;
 
-/** Una estación, categoría y archivo cuyos hallazgos se verificaron como falsos `veces` veces en un repo. */
+/** Categoría de un hallazgo que puede citarse en una regla: una palabra corta, sin espacios ni signos. */
+const CATEGORIA_VALIDA = /^[\p{L}\p{N}_-]{1,32}$/u;
+export const esCategoriaValida = (categoria: string): boolean => CATEGORIA_VALIDA.test(categoria);
+
+/**
+ * Una estación, categoría y archivo cuyos hallazgos se verificaron como falsos en `veces` recorridos distintos de un
+ * repo. El archivo ya debe constar entre los del diff de esos recorridos (lo comprueba quien cuenta).
+ */
 export interface FalsoRepetido {
   estacion: NombreEstacion;
   categoria: string;
@@ -364,7 +371,9 @@ export interface FalsoRepetido {
 
 /**
  * Propone (nunca activa) una lección de `{ proyecto, estacion }` por cada falso positivo repetido. Salen del veredicto de
- * la persona, pero el archivo y la categoría los escribió el revisor: se limpian, y lo que no cabe se deja sin proponer.
+ * la persona, pero el archivo y la categoría los escribió el revisor y acaban en una regla que lee la persona: la
+ * categoría solo entra si es una palabra corta (`esCategoriaValida`), el archivo solo si ya está limpio, y ambos van en
+ * la regla entre comillas con `JSON.stringify`. Lo que no cumple o no cabe se deja sin proponer.
  * No duplica: un error ya asociado a una lección de esa estación y ese proyecto, sea cual sea su estado, no se vuelve a
  * proponer (lo que la persona decidió se respeta, aunque la cuenta haya subido). Devuelve las propuestas nuevas.
  */
@@ -374,17 +383,16 @@ export async function proponerPorFalsos(home: string, raiz: string, falsos: read
   const nuevas: Leccion[] = [];
   for (const f of falsos) {
     if (f.veces < UMBRAL_FALSOS) continue;
-    const archivo = limpiarTexto(f.archivo);
-    const categoria = limpiarTexto(f.categoria);
-    if (archivo === '' || categoria === '') continue;
+    const { archivo, categoria } = f;
+    if (!esCategoriaValida(categoria) || archivo === '' || limpiarTexto(archivo) !== archivo) continue;
     const claveError = `fabrica:${f.estacion}:${categoria}:${archivo}`;
-    const regla = `En ${archivo}, los hallazgos de categoría ${categoria} han resultado falsos positivos ${f.veces} veces; verifica dos veces antes de reportarlos`;
+    const regla = `En ${JSON.stringify(archivo)}, los hallazgos de categoría ${JSON.stringify(categoria)} han resultado falsos positivos ${f.veces} veces; verifica dos veces antes de reportarlos`;
     if (claveError.length > MAX_CLAVE || regla.length > MAX_REGLA) continue;
     const repetida = previas.some(
       (l) => l.claveError === claveError && l.ambito !== 'global' && l.ambito.proyecto === proyecto && 'estacion' in l.ambito && l.ambito.estacion === f.estacion,
     );
     if (repetida) continue;
-    const porque = `La persona verificó como falsos ${f.veces} hallazgos de la estación ${f.estacion} en este repo; conviene que la estación lo tenga en cuenta.`;
+    const porque = `La persona verificó como falsos hallazgos de la estación ${f.estacion} en ${f.veces} recorridos de este repo; conviene que la estación lo tenga en cuenta.`;
     const { leccion } = await registrar(home, { regla, porque, ambito: { proyecto, estacion: f.estacion }, origen: 'fabrica', claveError }, ahora);
     previas.push(leccion);
     nuevas.push(leccion);

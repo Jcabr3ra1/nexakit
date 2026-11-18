@@ -6,7 +6,7 @@ import type { EstadoRecorrido } from './ejecutor.js';
 import { calcularHuella, type Recorrido } from './enrutador.js';
 import { actualizar, cargar, guardar, revertirReal, type ClaveEvidencia, type Evidencia } from './evidencia.js';
 import { IA, NombreEstacion } from './esquemas.js';
-import { type FalsoRepetido, proponerPorFalsos, UMBRAL_FALSOS } from './lecciones.js';
+import { esCategoriaValida, type FalsoRepetido, proponerPorFalsos, UMBRAL_FALSOS } from './lecciones.js';
 import * as rastro from './rastro.js';
 import { limpiar, mensajeDe } from './sesion.js';
 
@@ -164,12 +164,17 @@ const deshacer = (ev: Evidencia, o: Aplicado): Evidencia =>
 const claveParaAviso = (clave: string): string => limpiar(clave).replace(/[^0-9A-Za-z_-]/gu, '?').slice(0, 64);
 
 /**
- * Falsos positivos de estaciones externas por estación, categoría y archivo a lo largo de los recorridos de este repo
- * (los `veredictos.json` de su rastro). Lo ilegible o con otra forma se salta: es contar de más o de menos, nunca fallar.
+ * Falsos positivos de estaciones externas por estación, categoría y archivo, contando RECORRIDOS distintos de este repo
+ * (los `veredictos.json` de su rastro): dos hallazgos falsos en un mismo recorrido cuentan una vez, porque un solo
+ * revisor podría inventarlos juntos. Solo cuentan los recorridos que guardaron los archivos de su diff, y solo si el
+ * archivo del hallazgo está entre ellos y la categoría es válida. Lo ilegible se salta: es contar de menos, nunca fallar.
  */
 function contarFalsos(home: string, repo: string): Map<string, FalsoRepetido> {
   const cuenta = new Map<string, FalsoRepetido>();
   for (const dir of rastro.carpetasDeRecorridos(home, repo)) {
+    const archivosDelDiff = rastro.leerArchivosDiff(dir);
+    if (archivosDelDiff === null) continue;
+    const delDiff = new Set(archivosDelDiff);
     let registro: EstadoRegistro | string;
     try {
       registro = leerRegistro(dir);
@@ -177,20 +182,26 @@ function contarFalsos(home: string, repo: string): Map<string, FalsoRepetido> {
       continue;
     }
     if (typeof registro === 'string') continue;
+    const enEsteRecorrido = new Map<string, FalsoRepetido>();
     for (const o of registro.origenes.values()) {
       if (o.verificado !== 'falso' || o.fila.ia === 'claude' || o.archivo === undefined || o.categoria === undefined) continue;
-      const clave = JSON.stringify([o.fila.estacion, o.categoria, o.archivo]);
+      if (!esCategoriaValida(o.categoria) || !delDiff.has(o.archivo)) continue;
+      enEsteRecorrido.set(claveFalso(o.fila.estacion, o.categoria, o.archivo), { estacion: o.fila.estacion, categoria: o.categoria, archivo: o.archivo, veces: 1 });
+    }
+    for (const [clave, f] of enEsteRecorrido) {
       const previo = cuenta.get(clave);
-      if (previo === undefined) cuenta.set(clave, { estacion: o.fila.estacion, categoria: o.categoria, archivo: o.archivo, veces: 1 });
+      if (previo === undefined) cuenta.set(clave, f);
       else previo.veces += 1;
     }
   }
   return cuenta;
 }
 
+const claveFalso = (estacion: NombreEstacion, categoria: string, archivo: string): string => JSON.stringify([estacion, categoria, archivo]);
+
 /**
  * Tras aplicar falsos de estaciones externas, propone una lección por cada estación, categoría y archivo que ya lleve
- * `UMBRAL_FALSOS` o más en este repo. Las propuestas esperan a que la persona las acepte. Devuelve cuántas se crearon.
+ * `UMBRAL_FALSOS` o más recorridos distintos en este repo. Las propuestas esperan a que la persona las acepte. Devuelve cuántas se crearon.
  */
 async function proponerLecciones(home: string, repo: string, raiz: string, tocados: ReadonlySet<string>): Promise<number> {
   const falsos = [...contarFalsos(home, repo)].filter(([clave, f]) => tocados.has(clave) && f.veces >= UMBRAL_FALSOS).map(([, f]) => f);
@@ -289,7 +300,7 @@ async function aprender(
       ev = sumar(ev, a.clave, v.verificado, conTokens ? (a.tokens ?? undefined) : undefined);
       if (conTokens) registro.tokens.add(origen.estacion);
       registro.origenes.set(origen.clave, { verificado: v.verificado, fila: a.clave, archivo: h.archivo, categoria: h.categoria });
-      if (v.verificado === 'falso' && a.clave.ia !== 'claude') falsosNuevos.add(JSON.stringify([origen.estacion, h.categoria, h.archivo]));
+      if (v.verificado === 'falso' && a.clave.ia !== 'claude') falsosNuevos.add(claveFalso(origen.estacion, h.categoria, h.archivo));
       nuevos += 1;
       cambio = true;
     }

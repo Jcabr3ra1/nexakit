@@ -305,6 +305,26 @@ export async function guardarVeredictos(dir: string, datos: unknown): Promise<vo
   await escribirReemplazando(ruta, json(datos));
 }
 
+/** Guarda `archivos.json`: las rutas del diff que se envió a los revisores (`0o600`, sin seguir enlaces). */
+export async function guardarArchivosDiff(dir: string, archivos: readonly string[]): Promise<void> {
+  const ruta = path.join(dir, 'archivos.json');
+  if (lstatSync(ruta, { throwIfNoEntry: false })?.isSymbolicLink()) {
+    throw new ErrorFabrica('El rastro no sigue enlaces: archivos.json es un enlace');
+  }
+  await escribirReemplazando(ruta, json(archivos));
+}
+
+/** Lee `archivos.json`. `null` si no consta, no es legible o no es una lista de textos: nada se da por revisado. */
+export function leerArchivosDiff(dir: string): string[] | null {
+  let dato: unknown;
+  try {
+    dato = leerJsonDelRecorrido(dir, 'archivos.json');
+  } catch {
+    return null;
+  }
+  return Array.isArray(dato) && dato.every((x) => typeof x === 'string') ? (dato as string[]) : null;
+}
+
 /** Guarda `consolidado.md` con `0o600`, con un temporal y `rename` para no seguir enlaces. Devuelve la ruta. */
 export async function guardarConsolidado(dir: string, texto: string): Promise<string> {
   const ruta = path.join(dir, 'consolidado.md');
