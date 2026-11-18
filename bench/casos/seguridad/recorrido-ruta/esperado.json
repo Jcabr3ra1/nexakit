@@ -14,11 +14,11 @@
     {
       "archivo": "servidor.js",
       "lineas": [
-        8,
+        9,
         10
       ],
       "categoria": "recorrido-rutas",
-      "descripcion": "El nombre del archivo viene de la URL y se une a la raíz sin comprobar que el resultado siga dentro de ella."
+      "descripcion": "El nombre del archivo viene de la URL y se une a la ra\u00edz sin comprobar que el resultado siga dentro de ella."
     }
   ]
 }
