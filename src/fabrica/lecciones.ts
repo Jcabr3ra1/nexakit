@@ -348,3 +348,56 @@ export function efectividad(leccion: Leccion, eventos: readonly EventoRegistro[]
   }
   return antes === 0 ? null : { antes, despues };
 }
+
+/** Veces que una estación debe repetir el mismo falso positivo en un repo para que se proponga una lección. */
+export const UMBRAL_FALSOS = 2;
+/** Lecciones que entran como mucho en el encargo de una estación. */
+export const MAX_LECCIONES_ENCARGO = 5;
+
+/** Una estación, categoría y archivo cuyos hallazgos se verificaron como falsos `veces` veces en un repo. */
+export interface FalsoRepetido {
+  estacion: NombreEstacion;
+  categoria: string;
+  archivo: string;
+  veces: number;
+}
+
+/**
+ * Propone (nunca activa) una lección de `{ proyecto, estacion }` por cada falso positivo repetido. Salen del veredicto de
+ * la persona, pero el archivo y la categoría los escribió el revisor: se limpian, y lo que no cabe se deja sin proponer.
+ * No duplica: un error ya asociado a una lección de esa estación y ese proyecto, sea cual sea su estado, no se vuelve a
+ * proponer (lo que la persona decidió se respeta, aunque la cuenta haya subido). Devuelve las propuestas nuevas.
+ */
+export async function proponerPorFalsos(home: string, raiz: string, falsos: readonly FalsoRepetido[], ahora: number = Date.now()): Promise<Leccion[]> {
+  const proyecto = await rutaDeProyecto(raiz);
+  const previas = await listar(home);
+  const nuevas: Leccion[] = [];
+  for (const f of falsos) {
+    if (f.veces < UMBRAL_FALSOS) continue;
+    const archivo = limpiarTexto(f.archivo);
+    const categoria = limpiarTexto(f.categoria);
+    if (archivo === '' || categoria === '') continue;
+    const claveError = `fabrica:${f.estacion}:${categoria}:${archivo}`;
+    const regla = `En ${archivo}, los hallazgos de categoría ${categoria} han resultado falsos positivos ${f.veces} veces; verifica dos veces antes de reportarlos`;
+    if (claveError.length > MAX_CLAVE || regla.length > MAX_REGLA) continue;
+    const repetida = previas.some(
+      (l) => l.claveError === claveError && l.ambito !== 'global' && l.ambito.proyecto === proyecto && 'estacion' in l.ambito && l.ambito.estacion === f.estacion,
+    );
+    if (repetida) continue;
+    const porque = `La persona verificó como falsos ${f.veces} hallazgos de la estación ${f.estacion} en este repo; conviene que la estación lo tenga en cuenta.`;
+    const { leccion } = await registrar(home, { regla, porque, ambito: { proyecto, estacion: f.estacion }, origen: 'fabrica', claveError }, ahora);
+    previas.push(leccion);
+    nuevas.push(leccion);
+  }
+  return nuevas;
+}
+
+/**
+ * Lecciones que van al encargo de una estación: las vigentes del proyecto (las de toda la estación o las de esa
+ * estación) y las globales que nacieron en la fábrica; las globales de la persona ya llegan por las instrucciones de la
+ * IA. De la más reciente a la más antigua y como mucho `MAX_LECCIONES_ENCARGO`.
+ */
+export async function paraEncargo(home: string, raiz: string, estacion: NombreEstacion): Promise<Leccion[]> {
+  const aplicables = await vigentes(home, { proyecto: raiz, estacion });
+  return aplicables.filter((l) => l.ambito !== 'global' || l.origen === 'fabrica').slice(0, MAX_LECCIONES_ENCARGO);
+}

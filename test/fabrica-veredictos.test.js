@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
@@ -10,6 +10,7 @@ import { claveDe, consolidadoMarkdown, hallazgosDe } from '../dist/fabrica/conso
 import { calcularHuella } from '../dist/fabrica/enrutador.js';
 import { actualizar, cargar, evidenciaVacia, guardar, revertirReal } from '../dist/fabrica/evidencia.js';
 import { crearServidorFabrica } from '../dist/fabrica/mcp.js';
+import { listar } from '../dist/fabrica/lecciones.js';
 import { nombreRepo } from '../dist/fabrica/rastro.js';
 import { aprenderDeVeredictos, MAX_VEREDICTOS_POR_ESTACION } from '../dist/fabrica/veredictos.js';
 
@@ -62,11 +63,18 @@ const estacionRecorrido = (f) => ({
  * Un rastro de recorrido terminado, escrito a mano: `recorrido.json` con su huella, `<estacion>.json` por cada
  * estación externa con sus hallazgos y tokens, y `estado.json`. Las estaciones de Claude solo constan en el recorrido.
  */
-async function rastroFalso({ externas = [[FILA_SEGURIDAD, [hallazgo('seguridad', 'src/a.js', 10)], 1200]], claude = [], tokens = true } = {}) {
-  const home = temporal('fabrica-veredictos-');
-  const raiz = temporal('fabrica-veredictos-raiz-');
+async function rastroFalso({
+  externas = [[FILA_SEGURIDAD, [hallazgo('seguridad', 'src/a.js', 10)], 1200]],
+  claude = [],
+  tokens = true,
+  // Para sumar otro recorrido al mismo repo y la misma carpeta personal.
+  de = undefined,
+  id = ID,
+} = {}) {
+  const home = de?.home ?? temporal('fabrica-veredictos-');
+  const raiz = de?.raiz ?? temporal('fabrica-veredictos-raiz-');
   const repo = await nombreRepo(raiz);
-  const dir = path.join(home, '.nexakit', 'fabrica', repo, ID);
+  const dir = path.join(home, '.nexakit', 'fabrica', repo, id);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const filas = [...externas.map(([f]) => f), ...claude];
   const datos = {
@@ -94,7 +102,7 @@ async function rastroFalso({ externas = [[FILA_SEGURIDAD, [hallazgo('seguridad',
     writeFileSync(path.join(dir, `${f.estacion}.json`), `${JSON.stringify(dato)}\n`);
   }
   const estado = {
-    id: ID,
+    id,
     dir,
     fase: 'terminado',
     estaciones: [...externas.map(([f]) => ({ estacion: f.estacion, estado: 'ok' })), ...claude.map((f) => ({ estacion: f.estacion, estado: 'claude' }))],
@@ -345,7 +353,7 @@ test('veredictos.json lleva 0o600, es JSON y guarda el veredicto y las filas apl
   assert.equal(statSync(ruta).mode & 0o777, 0o600);
   assert.deepEqual(JSON.parse(readFileSync(ruta, 'utf8')), {
     version: 1,
-    origenes: { [k]: { verificado: 'falso', fila: FILA_SEGURIDAD } },
+    origenes: { [k]: { verificado: 'falso', fila: FILA_SEGURIDAD, archivo: 'src/a.js', categoria: 'bug' } },
     tokens: ['seguridad'],
   });
   assert.equal(statSync(path.join(r.home, '.nexakit', 'fabrica', 'evidencia.json')).mode & 0o777, 0o600);
@@ -743,4 +751,86 @@ test('fabrica_resultado deshace lo contado sobre un hallazgo de Claude corregido
   const corregido = JSON.parse((await llamar(cliente, { id: ID, hallazgosClaude: [hallazgo('pruebas', 'test/a.test.js', 40)] })).texto);
   assert.equal(corregido.aprendizaje.revertidos, 1);
   assert.equal(filaDe((await cargar(r.home)).evidencia, FILA_PRUEBAS).alfa, 1);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Lecciones por falsos positivos repetidos
+
+const ID2 = 'fab-20261116-1200-abcd';
+const ID3 = 'fab-20261117-1200-abcd';
+const aprenderConRaiz = (r, veredictos, claude = []) =>
+  aprenderDeVeredictos({ home: r.home, repo: r.repo, raiz: r.raiz, estado: r.estado, hallazgos: hallazgosDelRastro(r, claude), veredictos });
+const falsoDe = (r, ...hs) => hs.map((h) => ({ clave: claveDe(h), verificado: 'falso' }));
+const lecciones = (r) => listar(r.home);
+const REGLA = 'En src/a.js, los hallazgos de categoría bug han resultado falsos positivos 2 veces; verifica dos veces antes de reportarlos';
+
+test('el mismo falso positivo de una estación externa en dos recorridos del repo propone una lección y no antes', async () => {
+  const h = hallazgo('seguridad', 'src/a.js', 10);
+  const r1 = await rastroFalso();
+  const res1 = await aprenderConRaiz(r1, falsoDe(r1, h));
+  assert.deepEqual(res1.avisos, []);
+  assert.deepEqual(await lecciones(r1), []);
+
+  const r2 = await rastroFalso({ de: r1, id: ID2 });
+  const res2 = await aprenderConRaiz(r2, falsoDe(r2, h));
+  assert.equal(res2.aplicados, 1);
+  assert.equal(res2.avisos.length, 1);
+  assert.match(res2.avisos[0], /propuso 1 lección.*nexakit lecciones/u);
+  const [l] = await lecciones(r1);
+  assert.deepEqual(l.ambito, { proyecto: realpathSync(r1.raiz), estacion: 'seguridad' });
+  assert.equal(l.origen, 'fabrica');
+  assert.equal(l.estado, 'propuesta');
+  assert.equal(l.regla, REGLA);
+  assert.equal(l.claveError, 'fabrica:seguridad:bug:src/a.js');
+
+  // Un tercer recorrido no duplica la propuesta; repetir el mismo veredicto tampoco.
+  const r3 = await rastroFalso({ de: r1, id: ID3 });
+  const res3 = await aprenderConRaiz(r3, falsoDe(r3, h));
+  assert.deepEqual(res3.avisos, []);
+  assert.equal((await lecciones(r1)).length, 1);
+  await aprenderConRaiz(r2, falsoDe(r2, h));
+  assert.equal((await lecciones(r1)).length, 1);
+});
+
+test('no proponen lección los falsos de estaciones de Claude, los reales, los dudosos, los de otro archivo ni los de otro repo', async () => {
+  const h = hallazgo('seguridad', 'src/a.js', 10);
+  const hClaude = hallazgo('pruebas', 'src/a.js', 10);
+  const rC1 = await rastroFalso({ externas: [], claude: [FILA_PRUEBAS] });
+  const rC2 = await rastroFalso({ externas: [], claude: [FILA_PRUEBAS], de: rC1, id: ID2 });
+  for (const r of [rC1, rC2]) await aprenderConRaiz(r, falsoDe(r, hClaude), [hClaude]);
+  assert.deepEqual(await lecciones(rC1), []);
+
+  const r1 = await rastroFalso();
+  const r2 = await rastroFalso({ de: r1, id: ID2 });
+  await aprenderConRaiz(r1, [{ clave: claveDe(h), verificado: 'real' }]);
+  await aprenderConRaiz(r2, [{ clave: claveDe(h), verificado: 'falso' }]);
+  assert.deepEqual(await lecciones(r1), [], 'un real y un falso no son dos falsos');
+  await aprenderConRaiz(r1, [{ clave: claveDe(h), verificado: 'dudoso' }]);
+  assert.deepEqual(await lecciones(r1), []);
+
+  // Mismo hallazgo en otro repo: no suma al de este.
+  const otro = await rastroFalso();
+  await aprenderConRaiz(otro, falsoDe(otro, h));
+  assert.deepEqual(await lecciones(otro), []);
+  // Otro archivo del mismo repo: tampoco.
+  const hb = hallazgo('seguridad', 'src/b.js', 3);
+  const r3 = await rastroFalso({ de: r1, id: ID3, externas: [[FILA_SEGURIDAD, [hb], 1200]] });
+  await aprenderConRaiz(r3, falsoDe(r3, hb));
+  assert.deepEqual(await lecciones(r1), []);
+});
+
+test('sin raíz no se propone ninguna lección, y un veredictos.json ilegible de otro recorrido no impide la cuenta', async () => {
+  const h = hallazgo('seguridad', 'src/a.js', 10);
+  const r1 = await rastroFalso();
+  const r2 = await rastroFalso({ de: r1, id: ID2 });
+  await aprender(r1, falsoDe(r1, h));
+  await aprender(r2, falsoDe(r2, h));
+  assert.deepEqual(await lecciones(r1), []);
+
+  const r3 = await rastroFalso({ de: r1, id: ID3 });
+  const roto = await rastroFalso({ de: r1, id: 'fab-20261118-1200-abcd' });
+  writeFileSync(path.join(roto.dir, 'veredictos.json'), '{no es json');
+  const res = await aprenderConRaiz(r3, falsoDe(r3, h));
+  assert.equal((await lecciones(r1)).length, 1);
+  assert.equal(res.avisos.length, 1);
 });

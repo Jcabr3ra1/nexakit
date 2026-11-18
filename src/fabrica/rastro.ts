@@ -344,6 +344,25 @@ export function leerEstado(home: string, id: string): unknown {
 }
 
 /**
+ * Carpetas de los recorridos de un repo, de la más antigua a la más reciente. Solo carpetas reales con un id válido:
+ * un enlace o un nombre ajeno se deja fuera. Vacío si el repo no tiene rastro.
+ */
+export function carpetasDeRecorridos(home: string, repo: string): string[] {
+  if (!PATRON_REPO.test(repo) || repo === '.' || repo === '..') return [];
+  const carpetaReal = (ruta: string): boolean => {
+    const info = lstatSync(ruta, { throwIfNoEntry: false });
+    return info !== undefined && info.isDirectory() && !info.isSymbolicLink();
+  };
+  const dirRepo = path.join(home, '.nexakit', 'fabrica', repo);
+  if (!carpetaReal(path.join(home, '.nexakit', 'fabrica')) || !carpetaReal(dirRepo)) return [];
+  return readdirSync(dirRepo)
+    .filter((id) => PATRON_ID.test(id))
+    .sort()
+    .map((id) => path.join(dirRepo, id))
+    .filter(carpetaReal);
+}
+
+/**
  * Borra los rastros sin actividad en los últimos `dias`. Nunca sigue enlaces: una
  * carpeta de repo o de recorrido que sea un enlace se deja tal cual. Devuelve los ids borrados.
  */

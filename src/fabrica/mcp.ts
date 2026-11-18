@@ -233,8 +233,9 @@ export function crearServidorFabrica(opciones: OpcionesServidorFabrica = {}): Se
         const hallazgos = hallazgosDe(e, claude);
         // Con hallazgos de Claude nuevos también se revisa lo ya contado: puede haber veredictos sobre hallazgos corregidos.
         if (veredictos === undefined && hallazgosClaude === undefined) return { id: e.id, fase: e.fase, consolidado, hallazgos };
-        const repo = await rastro.nombreRepo(await raizDelRepo(cwd()));
-        const aprendizaje = await aprenderDeVeredictos({ home, repo, estado: e, hallazgos, veredictos: veredictos ?? [] });
+        const raiz = await raizDelRepo(cwd());
+        const repo = await rastro.nombreRepo(raiz);
+        const aprendizaje = await aprenderDeVeredictos({ home, repo, raiz, estado: e, hallazgos, veredictos: veredictos ?? [] });
         const informar = veredictos !== undefined || aprendizaje.revertidos > 0 || aprendizaje.avisos.length > 0;
         return { id: e.id, fase: e.fase, consolidado, hallazgos, ...(informar ? { aprendizaje } : {}) };
       }),

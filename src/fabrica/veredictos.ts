@@ -6,6 +6,7 @@ import type { EstadoRecorrido } from './ejecutor.js';
 import { calcularHuella, type Recorrido } from './enrutador.js';
 import { actualizar, cargar, guardar, revertirReal, type ClaveEvidencia, type Evidencia } from './evidencia.js';
 import { IA, NombreEstacion } from './esquemas.js';
+import { type FalsoRepetido, proponerPorFalsos, UMBRAL_FALSOS } from './lecciones.js';
 import * as rastro from './rastro.js';
 import { limpiar, mensajeDe } from './sesion.js';
 
@@ -29,7 +30,9 @@ const ClaveFila = z.object({
   estacion: NombreEstacion,
 });
 
-const Origen = z.object({ verificado: z.enum(['real', 'falso']), fila: ClaveFila });
+// `archivo` y `categoria` del hallazgo (comunes a todo su grupo) permiten contar los falsos repetidos entre recorridos;
+// los registros anteriores no los llevan y esos veredictos no cuentan para las lecciones.
+const Origen = z.object({ verificado: z.enum(['real', 'falso']), fila: ClaveFila, archivo: z.string().optional(), categoria: z.string().optional() });
 type Aplicado = z.infer<typeof Origen>;
 
 /**
@@ -160,9 +163,45 @@ const deshacer = (ev: Evidencia, o: Aplicado): Evidencia =>
 /** Clave de una sola línea para un aviso: viene de la sesión y no se refleja tal cual. */
 const claveParaAviso = (clave: string): string => limpiar(clave).replace(/[^0-9A-Za-z_-]/gu, '?').slice(0, 64);
 
+/**
+ * Falsos positivos de estaciones externas por estación, categoría y archivo a lo largo de los recorridos de este repo
+ * (los `veredictos.json` de su rastro). Lo ilegible o con otra forma se salta: es contar de más o de menos, nunca fallar.
+ */
+function contarFalsos(home: string, repo: string): Map<string, FalsoRepetido> {
+  const cuenta = new Map<string, FalsoRepetido>();
+  for (const dir of rastro.carpetasDeRecorridos(home, repo)) {
+    let registro: EstadoRegistro | string;
+    try {
+      registro = leerRegistro(dir);
+    } catch {
+      continue;
+    }
+    if (typeof registro === 'string') continue;
+    for (const o of registro.origenes.values()) {
+      if (o.verificado !== 'falso' || o.fila.ia === 'claude' || o.archivo === undefined || o.categoria === undefined) continue;
+      const clave = JSON.stringify([o.fila.estacion, o.categoria, o.archivo]);
+      const previo = cuenta.get(clave);
+      if (previo === undefined) cuenta.set(clave, { estacion: o.fila.estacion, categoria: o.categoria, archivo: o.archivo, veces: 1 });
+      else previo.veces += 1;
+    }
+  }
+  return cuenta;
+}
+
+/**
+ * Tras aplicar falsos de estaciones externas, propone una lección por cada estación, categoría y archivo que ya lleve
+ * `UMBRAL_FALSOS` o más en este repo. Las propuestas esperan a que la persona las acepte. Devuelve cuántas se crearon.
+ */
+async function proponerLecciones(home: string, repo: string, raiz: string, tocados: ReadonlySet<string>): Promise<number> {
+  const falsos = [...contarFalsos(home, repo)].filter(([clave, f]) => tocados.has(clave) && f.veces >= UMBRAL_FALSOS).map(([, f]) => f);
+  if (falsos.length === 0) return 0;
+  return (await proponerPorFalsos(home, raiz, falsos)).length;
+}
+
 async function aprender(
   home: string,
   repo: string,
+  raiz: string | undefined,
   estado: EstadoRecorrido,
   hallazgos: HallazgoConsolidado[],
   veredictos: Veredicto[],
@@ -186,6 +225,8 @@ async function aprender(
   const resultado = vacio();
   let ev = cargada.evidencia;
   let cambio = false;
+  // Estación, categoría y archivo de los falsos de estaciones externas que este recorrido acaba de sumar.
+  const falsosNuevos = new Set<string>();
 
   // Los hallazgos de Claude pueden corregirse después de dar veredictos: lo contado sobre uno que ya no existe se
   // deshace, para que su sustituto no cuente encima de él. Los de las IA externas salen del rastro y no se tocan.
@@ -247,7 +288,8 @@ async function aprender(
       const conTokens = a.tokens !== null && !registro.tokens.has(origen.estacion);
       ev = sumar(ev, a.clave, v.verificado, conTokens ? (a.tokens ?? undefined) : undefined);
       if (conTokens) registro.tokens.add(origen.estacion);
-      registro.origenes.set(origen.clave, { verificado: v.verificado, fila: a.clave });
+      registro.origenes.set(origen.clave, { verificado: v.verificado, fila: a.clave, archivo: h.archivo, categoria: h.categoria });
+      if (v.verificado === 'falso' && a.clave.ia !== 'claude') falsosNuevos.add(JSON.stringify([origen.estacion, h.categoria, h.archivo]));
       nuevos += 1;
       cambio = true;
     }
@@ -267,6 +309,19 @@ async function aprender(
     else await rastro.guardarVeredictos(estado.dir, previo).catch(() => {});
     throw error;
   }
+  if (raiz !== undefined && falsosNuevos.size > 0) {
+    // Una lección que no se pudo proponer no deshace la evidencia ya guardada: se avisa y nada más.
+    try {
+      const creadas = await proponerLecciones(home, repo, raiz, falsosNuevos);
+      if (creadas > 0) {
+        resultado.avisos.push(
+          `Se ${creadas === 1 ? 'propuso 1 lección' : `propusieron ${creadas} lecciones`} por falsos positivos repetidos de una estación: revísalas con «nexakit lecciones» y acéptalas por su id si valen.`,
+        );
+      }
+    } catch (error) {
+      resultado.avisos.push(`No se pudieron proponer lecciones por falsos positivos: ${limpiar(mensajeDe(error))}`);
+    }
+  }
   return resultado;
 }
 
@@ -282,12 +337,14 @@ export function aprenderDeVeredictos(opciones: {
   home: string;
   /** Nombre del repo actual en el rastro (`nombreRepo(raiz)`): un recorrido de otro repo no puede mover la evidencia. */
   repo: string;
+  /** Raíz real del repo. Con ella, los falsos positivos repetidos de una estación proponen una lección; sin ella, ninguna. */
+  raiz?: string;
   estado: EstadoRecorrido;
   hallazgos: HallazgoConsolidado[];
   veredictos: Veredicto[];
 }): Promise<ResultadoAprendizaje> {
-  const { home, repo, estado, hallazgos, veredictos } = opciones;
-  const segura = cola.then(() => aprender(home, repo, estado, hallazgos, veredictos)).catch((error: unknown) => vacio([`No se pudo actualizar la evidencia: ${limpiar(mensajeDe(error))}`]));
+  const { home, repo, raiz, estado, hallazgos, veredictos } = opciones;
+  const segura = cola.then(() => aprender(home, repo, raiz, estado, hallazgos, veredictos)).catch((error: unknown) => vacio([`No se pudo actualizar la evidencia: ${limpiar(mensajeDe(error))}`]));
   cola = segura;
   return segura;
 }

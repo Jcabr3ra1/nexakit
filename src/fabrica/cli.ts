@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { parseArgs, type ParseArgsOptionsConfig } from 'node:util';
 import type { z } from 'zod';
-import { escaparMarkdown, escribirConsolidado, hallazgosDe, hallazgosGuardados } from './consolidar.js';
+import { escaparMarkdown, escribirConsolidado, type HallazgoConsolidado, hallazgosDe, hallazgosGuardados } from './consolidar.js';
 import * as ejecutor from './ejecutor.js';
 import type { CambioRecorrido, Recorrido } from './enrutador.js';
 import { ErrorEntorno, ErrorFabrica } from './errores.js';
@@ -281,6 +281,16 @@ async function ordenEstado(ctx: Contexto, id: string, json: boolean): Promise<nu
   return 0;
 }
 
+async function aprenderConVeredictos(
+  ctx: Contexto,
+  estado: ejecutor.EstadoRecorrido,
+  hallazgos: HallazgoConsolidado[],
+  veredictos: Veredicto[],
+): ReturnType<typeof aprenderDeVeredictos> {
+  const raiz = await raizDelRepo(ctx.cwd);
+  return aprenderDeVeredictos({ home: ctx.home, repo: await nombreRepo(raiz), raiz, estado, hallazgos, veredictos });
+}
+
 async function ordenResultado(ctx: Contexto, id: string, archivoVeredictos: string | undefined, json: boolean): Promise<number> {
   const veredictos = archivoVeredictos === undefined ? undefined : await leerVeredictos(archivoVeredictos);
   const e = ejecutor.estado(id, ctx.home);
@@ -293,9 +303,7 @@ async function ordenResultado(ctx: Contexto, id: string, archivoVeredictos: stri
   }
   const hallazgos = hallazgosDe(e, hallazgosGuardados(e.dir));
   const aprendizaje =
-    veredictos === undefined
-      ? undefined
-      : await aprenderDeVeredictos({ home: ctx.home, repo: await nombreRepo(await raizDelRepo(ctx.cwd)), estado: e, hallazgos, veredictos });
+    veredictos === undefined ? undefined : await aprenderConVeredictos(ctx, e, hallazgos, veredictos);
   if (json) await salida(ctx, JSON.stringify({ ...e, consolidado: ruta, hallazgos, ...(aprendizaje === undefined ? {} : { aprendizaje }) }, null, 2));
   else {
     await salida(ctx, limpiar(texto).trimEnd());

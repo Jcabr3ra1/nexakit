@@ -11,6 +11,8 @@ import {
   guardarPropuestas,
   idLeccion,
   listar,
+  paraEncargo,
+  proponerPorFalsos,
   proponerPorRepeticion,
   registrar,
   retirar,
@@ -393,6 +395,84 @@ test('el listado muestra las propuestas por repetición y si cada vigente redujo
   assert.equal(datos.propuestas.length, 0);
   assert.deepEqual(datos.vigentes.find((l) => l.id === id).efectividad, { antes: 3, despues: 1 });
   assert.equal(datos.vigentes.find((l) => l.id === propuesta.id).fecha, AHORA);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Falsos positivos repetidos de la fábrica
+
+const falso = (extra = {}) => ({ estacion: 'seguridad', categoria: 'bug', archivo: 'src/a.js', veces: 2, ...extra });
+const REGLA_FALSO = 'En src/a.js, los hallazgos de categoría bug han resultado falsos positivos 2 veces; verifica dos veces antes de reportarlos';
+
+test('proponerPorFalsos propone una lección de la estación y el repo, de origen fábrica y en propuesta', async () => {
+  const home = temporal();
+  const raiz = temporal();
+  const nuevas = await proponerPorFalsos(home, raiz, [falso()], AHORA);
+  assert.equal(nuevas.length, 1);
+  const [l] = nuevas;
+  assert.deepEqual(l.ambito, { proyecto: realpathSync(raiz), estacion: 'seguridad' });
+  assert.equal(l.origen, 'fabrica');
+  assert.equal(l.estado, 'propuesta');
+  assert.equal(l.regla, REGLA_FALSO);
+  assert.equal(l.claveError, 'fabrica:seguridad:bug:src/a.js');
+  assert.equal(l.fecha, AHORA);
+  assert.deepEqual(await listar(home), [l]);
+  // Una propuesta no se aplica a nada hasta que la persona la acepta.
+  assert.deepEqual(await vigentes(home, { proyecto: raiz, estacion: 'seguridad' }), []);
+  assert.deepEqual(await paraEncargo(home, raiz, 'seguridad'), []);
+});
+
+test('con menos de dos falsos no propone nada, y no duplica aunque la cuenta suba o la lección esté retirada', async () => {
+  const home = temporal();
+  const raiz = temporal();
+  assert.deepEqual(await proponerPorFalsos(home, raiz, [falso({ veces: 1 })], AHORA), []);
+  assert.deepEqual(await listar(home), []);
+
+  const [primera] = await proponerPorFalsos(home, raiz, [falso()], AHORA);
+  assert.deepEqual(await proponerPorFalsos(home, raiz, [falso()], AHORA + 1), []);
+  assert.deepEqual(await proponerPorFalsos(home, raiz, [falso({ veces: 3 })], AHORA + 2), []);
+  await retirar(home, primera.id, AHORA + 3);
+  assert.deepEqual(await proponerPorFalsos(home, raiz, [falso({ veces: 4 })], AHORA + 4), [], 'lo que la persona descartó se respeta');
+  assert.equal((await listar(home)).length, 1);
+
+  // Otra estación, otro archivo u otra categoría son otros errores; otro repo también.
+  const otras = await proponerPorFalsos(home, raiz, [falso({ estacion: 'codigo' }), falso({ archivo: 'src/b.js' }), falso({ categoria: 'estilo' })], AHORA + 5);
+  assert.equal(otras.length, 3);
+  const otroRepo = await proponerPorFalsos(home, temporal(), [falso()], AHORA + 6);
+  assert.equal(otroRepo.length, 1);
+});
+
+test('el archivo y la categoría del revisor se limpian y lo que no cabe en una regla se deja sin proponer', async () => {
+  const home = temporal();
+  const raiz = temporal();
+  const [sucia] = await proponerPorFalsos(home, raiz, [falso({ archivo: 'src/\u202ea.js\n', categoria: 'bug\u0000' })], AHORA);
+  assert.equal(sucia.regla, REGLA_FALSO);
+  assert.ok(!hayInvisibles(sucia.regla) && !hayInvisibles(sucia.claveError));
+  assert.deepEqual(await proponerPorFalsos(home, raiz, [falso({ archivo: `src/${'x'.repeat(300)}.js` })], AHORA), []);
+  assert.deepEqual(await proponerPorFalsos(home, raiz, [falso({ archivo: '   ' })], AHORA), []);
+  assert.equal((await listar(home)).length, 1);
+});
+
+test('paraEncargo devuelve las vigentes del repo y la estación y las globales de la fábrica, como mucho 5 y las más recientes', async () => {
+  const home = temporal();
+  const raiz = temporal();
+  const otro = temporal();
+  const dar = async (regla, ambito, origen, fecha, aceptada = true) => {
+    const { leccion } = await registrar(home, { regla, porque: 'x', ambito, origen }, fecha);
+    if (origen !== 'persona' && aceptada) await aceptar(home, leccion.id, fecha);
+    return leccion;
+  };
+  await dar('repo antigua', { proyecto: raiz }, 'persona', AHORA + 1);
+  await dar('estacion', { proyecto: raiz, estacion: 'seguridad' }, 'fabrica', AHORA + 2);
+  await dar('global fabrica', 'global', 'fabrica', AHORA + 3);
+  await dar('global persona', 'global', 'persona', AHORA + 4);
+  await dar('otra estacion', { proyecto: raiz, estacion: 'codigo' }, 'persona', AHORA + 5);
+  await dar('otro repo', { proyecto: otro, estacion: 'seguridad' }, 'persona', AHORA + 6);
+  await dar('sin aceptar', { proyecto: raiz, estacion: 'seguridad' }, 'fabrica', AHORA + 7, false);
+  assert.deepEqual((await paraEncargo(home, raiz, 'seguridad')).map((l) => l.regla), ['global fabrica', 'estacion', 'repo antigua']);
+
+  for (let i = 0; i < 6; i += 1) await dar(`extra ${i}`, { proyecto: raiz }, 'persona', AHORA + 100 + i);
+  const cinco = await paraEncargo(home, raiz, 'seguridad');
+  assert.deepEqual(cinco.map((l) => l.regla), ['extra 5', 'extra 4', 'extra 3', 'extra 2', 'extra 1']);
 });
 
 test('sin registro ni lecciones el listado no crea el almacén', async () => {
