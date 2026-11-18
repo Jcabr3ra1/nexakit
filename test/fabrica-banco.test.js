@@ -14,7 +14,7 @@ import {
   TOKENS_POR_LLAMADA,
 } from '../dist/fabrica/banco/ejecutar.js';
 import { cargarCasos } from '../dist/fabrica/banco/casos.js';
-import { evidenciaVacia, actualizar, cargar, cuantil05 } from '../dist/fabrica/evidencia.js';
+import { evidenciaVacia, actualizar, cargar, guardar, cuantil05 } from '../dist/fabrica/evidencia.js';
 import { aceptar, registrar } from '../dist/fabrica/lecciones.js';
 import { ErrorFabrica } from '../dist/fabrica/errores.js';
 
@@ -381,7 +381,8 @@ test('ejecutarBanco corre cada ejecución en un repo temporal aislado y suma la 
   const codex = conector('codex', async (e) => {
     const estado = execFileSync('git', ['status', '--porcelain'], { cwd: e.raiz, encoding: 'utf8' });
     const commits = execFileSync('git', ['rev-list', '--count', 'HEAD'], { cwd: e.raiz, encoding: 'utf8' }).trim();
-    visto = { encargo: e, estado, commits, archivos: archivosDe(e.raiz), respaldo: readFileSync(path.join(e.raiz, 'src/respaldo.ts'), 'utf8') };
+    const log = execFileSync('git', ['log', '--format=%an <%ae> | %cn <%ce> | %s'], { cwd: e.raiz, encoding: 'utf8' });
+    visto = { encargo: e, estado, commits, log, archivos: archivosDe(e.raiz), respaldo: readFileSync(path.join(e.raiz, 'src/respaldo.ts'), 'utf8') };
     return informe(e, [h('src/respaldo.ts', 12, 'inyección de órdenes')], { entrada: 800, salida: 200, total: 1000 });
   });
   const plan = planSeguridad();
@@ -391,6 +392,9 @@ test('ejecutarBanco corre cada ejecución en un repo temporal aislado y suma la 
 
   // El repo: la base en un commit y el cambio sin confirmar, sin rastro del nombre del caso ni de esperado.json.
   assert.equal(visto.commits, '1');
+  // Ni el autor ni el mensaje del commit dicen que es una medición (y no se cuela el autor del entorno).
+  assert.doesNotMatch(visto.log, /banco|bench|prueba|nexakit|medici|test|caso/iu);
+  assert.match(visto.log, /@example\.com/u);
   assert.match(visto.estado, /src\/respaldo\.ts/u);
   assert.deepEqual(visto.archivos, ['src/respaldo.ts']);
   const casoDir = cargarCasos().find((c) => c.nombre === 'inyeccion-orden').directorio;
@@ -420,6 +424,36 @@ test('ejecutarBanco corre cada ejecución en un repo temporal aislado y suma la 
     { ia: 'codex', esfuerzo: 'low', estacion: 'seguridad', alfa: 2, beta: 1, banco: 1, real: 0, tokensMedios: 1000 },
   );
   assert.ok(evidencia.catalogo.codex.includes('gpt-a'));
+});
+
+test('el banco no borra la evidencia que otro registra mientras corre', async () => {
+  const home = temporal('banco-home-');
+  const plan = planificarBanco({
+    fase: 2,
+    catalogos: CATALOGO_PRUEBA,
+    evidencia: medida(evidenciaVacia(), 'codex', 'gpt-a', 'low', 'seguridad', 1, 0, 500),
+    estaciones: ['seguridad'],
+  });
+  const externa = { ia: 'codex', modelo: 'gpt-otro', esfuerzo: 'high', estacion: 'codigo' };
+  let llamadas = 0;
+  const codex = conector('codex', async (e) => {
+    llamadas += 1;
+    // Entre la primera y la segunda ejecución, la persona registra un veredicto real (otro proceso guarda la evidencia).
+    if (llamadas === 2) {
+      const { evidencia } = await cargar(home);
+      await guardar(home, actualizar(evidencia, externa, { aciertos: 3, fallos: 1, fuente: 'real' }));
+    }
+    return informe(e, []);
+  });
+  const { ejecuciones } = await ejecutarBanco(plan, { huella: plan.huella, home, conectores: { codex } });
+  assert.ok(ejecuciones.every((e) => e.valida));
+  const { evidencia } = await cargar(home);
+  const real = evidencia.filas.find((f) => f.modelo === 'gpt-otro');
+  assert.ok(real !== undefined, 'la observación real sobrevive');
+  assert.deepEqual({ alfa: real.alfa, beta: real.beta, real: real.real }, { alfa: 7, beta: 3, real: 4 });
+  // Y las seis ejecuciones del banco siguen sumadas: 2 esfuerzos × 3 casos de seguridad.
+  const delBanco = evidencia.filas.filter((f) => f.modelo === 'gpt-a');
+  assert.equal(delBanco.reduce((n, f) => n + f.banco, 0), 6);
 });
 
 test('las rutas absolutas dentro del repo temporal se comparan como relativas', async () => {

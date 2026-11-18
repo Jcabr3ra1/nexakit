@@ -294,12 +294,12 @@ export interface OpcionesEjecutar {
 
 const mensajeDe = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
-function git(cwd: string, args: string[]): Promise<void> {
+function git(cwd: string, args: string[], env: NodeJS.ProcessEnv = {}): Promise<void> {
   return new Promise((resolve, reject) => {
     execFile(
       'git',
       ['-c', 'core.quotepath=off', '-c', 'commit.gpgsign=false', '-c', 'core.autocrlf=false', ...args],
-      { cwd, encoding: 'utf8', windowsHide: true },
+      { cwd, encoding: 'utf8', windowsHide: true, env: { ...process.env, ...env } },
       (error, _stdout, stderr) => {
         if (error) reject(new ErrorFabrica(`git ${args.find((a) => !a.startsWith('-') && !a.includes('=')) ?? ''} falló: ${String(stderr).trim()}`, { cause: error }));
         else resolve();
@@ -307,6 +307,9 @@ function git(cwd: string, args: string[]): Promise<void> {
     );
   });
 }
+
+/** Autor del commit de base del repo temporal. */
+const AUTOR = { nombre: 'Laura Gómez', correo: 'laura.gomez@example.com' } as const;
 
 /** Copia un archivo del caso al repo temporal: carpetas `0o700`, archivo nuevo `0o600` que no sigue enlaces. */
 async function copiar(origen: string, destino: string): Promise<void> {
@@ -317,24 +320,20 @@ async function copiar(origen: string, destino: string): Promise<void> {
 
 /**
  * Materializa el caso en `raiz`: la base en un commit y el cambio encima sin confirmar. Ni el nombre del caso ni
- * `esperado.json` llegan al repo: el mensaje del commit es neutro y la carpeta, aleatoria.
+ * `esperado.json` llegan al repo: el autor y el mensaje del commit son neutros y la carpeta, aleatoria.
  */
 async function prepararRepo(raiz: string, caso: CasoBanco): Promise<void> {
   await git(raiz, ['init', '-q']);
   for (const ruta of caso.base.archivos) await copiar(path.join(caso.directorio, 'base', ruta), path.join(raiz, ruta));
   if (caso.base.archivos.length > 0) await git(raiz, ['add', '-f', '--', ...caso.base.archivos]);
-  await git(raiz, [
-    '-c',
-    'user.name=nexakit',
-    '-c',
-    'user.email=banco@nexakit.invalid',
-    'commit',
-    '-q',
-    '--no-verify',
-    '--allow-empty',
-    '-m',
-    'base',
-  ]);
+  // Autor neutro y verosímil: con `git log` el revisor no debe saber que lo están midiendo. Va en el entorno, que manda
+  // sobre la configuración y sobre las variables de autor que tenga la persona.
+  await git(raiz, ['commit', '-q', '--no-verify', '--allow-empty', '-m', 'Versión inicial'], {
+    GIT_AUTHOR_NAME: AUTOR.nombre,
+    GIT_AUTHOR_EMAIL: AUTOR.correo,
+    GIT_COMMITTER_NAME: AUTOR.nombre,
+    GIT_COMMITTER_EMAIL: AUTOR.correo,
+  });
   for (const ruta of caso.cambio.archivos) await copiar(path.join(caso.directorio, 'cambio', ruta), path.join(raiz, ruta));
 }
 
@@ -459,22 +458,29 @@ export async function ejecutarBanco(plan: unknown, opciones: OpcionesEjecutar): 
   }
 
   const avisos: string[] = [];
-  const cargada = await cargar(home);
-  if (cargada.aviso !== null) avisos.push(cargada.aviso);
-  let evidencia = cargada.evidencia;
+  const avisar = (aviso: string | null): void => {
+    if (aviso !== null && !avisos.includes(aviso)) avisos.push(aviso);
+  };
+  // Se lee al empezar para avisar pronto si no se puede leer, y otra vez antes de cada guardado.
+  const inicial = await cargar(home);
+  avisar(inicial.aviso);
+  let evidencia = inicial.evidencia;
   const ejecuciones: EjecucionMedida[] = [];
   const total = aprobado.ejecuciones.length;
   for (const [indice, ej] of aprobado.ejecuciones.entries()) {
     const caso = casos.get(ej.caso) as CasoBanco;
     const medida = await medirUna(ej, caso, opciones, home);
     if (medida.valida && medida.observacion !== undefined) {
+      // El banco dura mucho: entre dos ejecuciones la persona puede registrar veredictos reales. Se suma sobre lo que
+      // hay ahora en disco, no sobre la copia del principio, para no borrarlos al guardar.
+      const actual = await cargar(home);
+      avisar(actual.aviso);
       evidencia = actualizar(
-        evidencia,
+        actual.evidencia,
         { ia: ej.ia, modelo: ej.modelo, esfuerzo: ej.esfuerzo, estacion: caso.estacion },
         { ...medida.observacion, tokens: medida.tokens, segundos: medida.segundos, fuente: 'banco' },
       );
-      const guardada = await guardar(home, evidencia);
-      if (guardada.aviso !== null) avisos.push(guardada.aviso);
+      avisar((await guardar(home, evidencia)).aviso);
     }
     ejecuciones.push(medida);
     opciones.alAvanzar?.(medida, indice, total);
