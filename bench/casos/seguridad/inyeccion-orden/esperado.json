@@ -14,11 +14,11 @@
     {
       "archivo": "src/respaldo.ts",
       "lineas": [
-        14,
-        14
+        12,
+        12
       ],
       "categoria": "inyeccion-ordenes",
-      "descripcion": "La ruta de origen y el prefijo llegan sin validar a una orden de shell construida con una plantilla de texto."
+      "descripcion": "La ruta de origen y la de destino llegan sin validar a una orden de shell construida con una plantilla de texto."
     }
   ]
 }

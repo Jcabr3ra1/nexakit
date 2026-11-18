@@ -19,8 +19,8 @@
         5,
         9
       ],
-      "categoria": "prueba-vacia",
-      "descripcion": "La prueba solo comprueba que hay un booleano y nunca el valor esperado para un sábado o un domingo."
+      "categoria": "aserciones-debiles",
+      "descripcion": "Las aserciones solo comprueban que el resultado está definido y es un booleano, no el valor esperado para un sábado o un domingo."
     }
   ]
 }
