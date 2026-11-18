@@ -9,7 +9,7 @@ import type { CambioRecorrido, Recorrido } from './enrutador.js';
 import { describirPlan, ejecutarBanco, planificarBanco, verificarPlanAprobado, type EjecucionMedida, type ResultadoBanco } from './banco/ejecutar.js';
 import { ErrorEntorno, ErrorFabrica } from './errores.js';
 import { cargar } from './evidencia.js';
-import { borrarPlanBanco, guardarPlanBanco, leerPlanBanco, nombreRepo } from './rastro.js';
+import { consumirPlanBanco, guardarPlanBanco, nombreRepo } from './rastro.js';
 import {
   cerrarConectores,
   consultarCatalogos,
@@ -62,7 +62,7 @@ estado y resultado consultan un recorrido por su id; cancelar lo interrumpe (Ctr
   consolidado.md: los reales y los falsos actualizan la evidencia de cada modelo que reportó el hallazgo.
 banco mide los modelos con casos con fallos sembrados y suma el resultado a la evidencia. planificar no ejecuta
 nada: muestra las llamadas, el coste estimado y la huella, y guarda el plan en ~/.nexakit/fabrica/banco-plan.json.
-ejecutar solo lanza ese plan guardado si la huella coincide, en primer plano, y lo borra al terminar. La fase 1 mide
+ejecutar solo lanza ese plan guardado si la huella coincide, en primer plano, y lo consume antes de empezar. La fase 1 mide
 cada modelo con su esfuerzo más bajo; la fase 2 (necesita la fase 1) mide los tres finalistas por estación.
 Códigos de salida: 0 bien, 1 fallo de estación o escritura detectada, 2 argumentos inválidos.
 `;
@@ -399,7 +399,8 @@ function resumirBanco(ejecuciones: readonly EjecucionMedida[]): ResumenEstacion[
 
 async function ordenBancoEjecutar(ctx: Contexto, huella: string, json: boolean): Promise<number> {
   // El plan solo llega del archivo que dejó `planificar`: nunca por argumentos ni por stdin.
-  const guardado = leerPlanBanco(ctx.home);
+  // Se consume antes de nada: una aprobación vale para una sola ejecución, aunque falle la verificación o se corte.
+  const guardado = await consumirPlanBanco(ctx.home);
   if (guardado === null) throw new ErrorFabrica('No hay un plan del banco guardado; planifícalo antes con «nexakit fabrica banco planificar»');
   const plan = verificarPlanAprobado(guardado, huella);
   const ias = [...new Set(plan.ejecuciones.map((e) => e.ia))];
@@ -419,7 +420,6 @@ async function ordenBancoEjecutar(ctx: Contexto, huella: string, json: boolean):
   } finally {
     await cerrarConectores(conectores);
   }
-  await borrarPlanBanco(ctx.home);
   const resumen = resumirBanco(resultado.ejecuciones);
   const invalidas = resumen.reduce((n, r) => n + r.invalidas, 0);
   if (json) await salida(ctx, JSON.stringify({ ...resultado, resumen }, null, 2));
@@ -429,7 +429,7 @@ async function ordenBancoEjecutar(ctx: Contexto, huella: string, json: boolean):
       await salida(ctx, `  ${enUnaLinea(r.estacion)}: ${r.aciertos} aciertos, ${r.fallos} fallos, ${r.invalidas} inválidas, ${r.tokens} tokens`);
     }
     for (const a of resultado.avisos) await aviso(ctx)(enUnaLinea(a));
-    await salida(ctx, 'La evidencia quedó actualizada. El plan se borró: para medir de nuevo hay que planificar otra vez.');
+    await salida(ctx, 'La evidencia quedó actualizada. El plan ya se consumió: para medir de nuevo hay que planificar otra vez.');
   }
   return invalidas > 0 ? 1 : 0;
 }

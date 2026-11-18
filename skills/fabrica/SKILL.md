@@ -30,7 +30,7 @@ El banco mide Codex y Antigravity con casos con fallos sembrados y suma el resul
 
 1. **Planificar.** Ejecuta `~/.nexakit/nexakit fabrica banco planificar [--fase 1|2] [--estacion e]`. No ejecuta nada: guarda el plan en `~/.nexakit/fabrica/banco-plan.json` y muestra las llamadas, los tokens estimados y la huella. Sin `--fase` es la 1.
 2. **Enseñar y esperar el sí.** Muestra a la persona el plan y el coste tal cual salen y pide su aprobación explícita. Un silencio, una duda o un sí a otra cosa no cuentan.
-3. **Ejecutar.** Solo con su sí, ejecuta `~/.nexakit/nexakit fabrica banco ejecutar --huella <huella>` con la huella del plan que ella vio. Corre en primer plano, con progreso, y al terminar da un resumen por estación (aciertos, fallos, inválidas y tokens) y borra el plan: para medir otra vez hay que planificar de nuevo. Si la huella no coincide o no hay plan, falla sin lanzar nada.
+3. **Ejecutar.** Solo con su sí, ejecuta `~/.nexakit/nexakit fabrica banco ejecutar --huella <huella>` con la huella del plan que ella vio. Corre en primer plano, con progreso, y al terminar da un resumen por estación (aciertos, fallos, inválidas y tokens) ; el plan se consume al empezar y vale para una sola ejecución: si falla o se corta, hay que planificar de nuevo y volver a pedir el sí. Si la huella no coincide o no hay plan, falla sin lanzar nada.
 4. **Fase 2.** Mide los tres finalistas de cada estación y necesita la evidencia de la fase 1. Tiene su propia aprobación: el sí de la fase 1 no vale para ella.
 
 Si algo falla o hay avisos, díselo sin ocultarlo. No hagas commit, push ni PR por tu cuenta.

@@ -560,8 +560,8 @@ test('banco planificar --json imprime solo JSON y la fase 2 sin evidencia pide a
 
 test('banco ejecutar sin plan, con otra huella o con el plan alterado falla sin crear conectores', async () => {
   const e = escenario();
-  // Un conector que no existe: si se intentara crear, la orden fallaría con otro mensaje.
-  e.env.NEXAKIT_FABRICA_CODEX = JSON.stringify(['/no/existe/codex']);
+  // «[» es un JSON inválido: crear el conector lanzaría un error de entorno distinto (código 2).
+  e.env.NEXAKIT_FABRICA_CODEX = '[';
   const falsa = 'a'.repeat(64);
   const sinPlan = await cli(['banco', 'ejecutar', '--huella', falsa], e);
   assert.equal(sinPlan.codigo, 1);
@@ -570,28 +570,50 @@ test('banco ejecutar sin plan, con otra huella o con el plan alterado falla sin 
   const ok = escenario();
   await cli(['banco', 'planificar', '--estacion', 'seguridad'], ok);
   const guardado = JSON.parse(readFileSync(rutaPlanBanco(ok.home), 'utf8'));
-  const otra = await cli(['banco', 'ejecutar', '--huella', falsa], { ...ok, env: { ...ok.env, NEXAKIT_FABRICA_CODEX: JSON.stringify(['/no/existe/codex']) } });
+  const roto = { ...ok, env: { ...ok.env, NEXAKIT_FABRICA_CODEX: '[' } };
+  const otra = await cli(['banco', 'ejecutar', '--huella', falsa], roto);
   assert.equal(otra.codigo, 1);
   assert.match(otra.err, /no es el que aprobaste/u);
 
-  guardado.ejecuciones[0].modelo = 'otro-modelo';
-  writeFileSync(rutaPlanBanco(ok.home), JSON.stringify(guardado));
-  const alterado = await cli(['banco', 'ejecutar', '--huella', guardado.huella], { ...ok, env: { ...ok.env, NEXAKIT_FABRICA_CODEX: JSON.stringify(['/no/existe/codex']) } });
-  assert.equal(alterado.codigo, 1);
-  assert.match(alterado.err, /no es el que aprobaste/u);
-  assert.ok(existsSync(rutaPlanBanco(ok.home)), 'un plan rechazado no se borra');
+  await cli(['banco', 'planificar', '--estacion', 'seguridad'], ok);
+  const alterado = JSON.parse(readFileSync(rutaPlanBanco(ok.home), 'utf8'));
+  alterado.ejecuciones[0].modelo = 'otro-modelo';
+  writeFileSync(rutaPlanBanco(ok.home), JSON.stringify(alterado));
+  const r = await cli(['banco', 'ejecutar', '--huella', guardado.huella], roto);
+  assert.equal(r.codigo, 1);
+  assert.match(r.err, /no es el que aprobaste/u);
+  assert.ok(!existsSync(rutaPlanBanco(ok.home)), 'un plan rechazado también se consume');
 });
 
-test('banco ejecutar corre el plan guardado, muestra el progreso y el resumen por estación, y borra el plan', async () => {
+test('una aprobación vale para una sola ejecución: un segundo banco ejecutar falla sin crear conectores', async () => {
+  const e = escenario();
+  const plan = JSON.parse((await cli(['banco', 'planificar', '--estacion', 'seguridad', '--json'], e)).out);
+  const primera = await cli(['banco', 'ejecutar', '--huella', plan.huella], e);
+  assert.equal(primera.codigo, 0, primera.err);
+  const segunda = await cli(['banco', 'ejecutar', '--huella', plan.huella], { ...e, env: { ...e.env, NEXAKIT_FABRICA_CODEX: '[' } });
+  assert.equal(segunda.codigo, 1);
+  assert.match(segunda.err, /No hay un plan del banco guardado/u);
+});
+
+test('banco ejecutar consume el plan aunque se lance dos veces a la vez: solo una corre', async () => {
+  const e = escenario();
+  const plan = JSON.parse((await cli(['banco', 'planificar', '--estacion', 'seguridad', '--json'], e)).out);
+  const [x, y] = await Promise.all([
+    cli(['banco', 'ejecutar', '--huella', plan.huella], e),
+    cli(['banco', 'ejecutar', '--huella', plan.huella], e),
+  ]);
+  assert.deepEqual([x.codigo, y.codigo].sort(), [0, 1]);
+});
+
+test('banco ejecutar corre el plan guardado, muestra el progreso y el resumen por estación, y consume el plan', async () => {
   const e = escenario();
   const plan = JSON.parse((await cli(['banco', 'planificar', '--estacion', 'seguridad', '--json'], e)).out);
   const { codigo, out, err } = await cli(['banco', 'ejecutar', '--huella', plan.huella], e);
-  assert.match(out, new RegExp(`\\[1/${plan.coste.llamadas}\\] seguridad/inyeccion-orden:`, 'u'), err);
+  assert.equal(codigo, 0, err);
+  assert.match(out, new RegExp(`\\[1/${plan.coste.llamadas}\\] seguridad/inyeccion-orden:`, 'u'));
   assert.match(out, /Resumen del banco, fase 1:/u);
   assert.match(out, /seguridad: \d+ aciertos, \d+ fallos, \d+ inválidas, \d+ tokens/u);
-  assert.ok([0, 1].includes(codigo), err);
-  assert.ok(!existsSync(rutaPlanBanco(e.home)), 'el plan ejecutado se borra');
-  // Sin plan no se puede volver a lanzar.
+  assert.ok(!existsSync(rutaPlanBanco(e.home)), 'el plan ejecutado se consume');
   const otra = await cli(['banco', 'ejecutar', '--huella', plan.huella], e);
   assert.equal(otra.codigo, 1);
   assert.match(otra.err, /No hay un plan del banco guardado/u);

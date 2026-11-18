@@ -17,7 +17,7 @@ La fábrica elige cada modelo con datos medidos, enseña por qué y aprende de l
 
 - Casos con fallos sembrados en `bench/casos/<estacion>/<caso>/` para seguridad, arquitectura, pruebas, rendimiento y documentación, con casos limpios para medir los falsos positivos.
 - `nexakit fabrica banco planificar [--fase 1|2] [--estacion e]` calcula las llamadas, los tokens estimados y la huella, y guarda el plan; no ejecuta nada. La fase 1 mide cada modelo con su esfuerzo más bajo; la fase 2 mide los tres finalistas por estación y necesita antes la fase 1.
-- `nexakit fabrica banco ejecutar --huella <huella>` solo corre el plan guardado si la huella coincide, en primer plano y con progreso, con la propia fábrica y en un repo temporal sin lecciones. Muestra un resumen por estación (aciertos, fallos, inválidas y tokens) y borra el plan. Gasta tokens: la skill `fabrica` lo propone solo si la persona lo pide y espera su sí explícito, también para la fase 2.
+- `nexakit fabrica banco ejecutar --huella <huella>` solo corre el plan guardado si la huella coincide, en primer plano y con progreso, con la propia fábrica y en un repo temporal sin lecciones. Consume el plan antes de empezar (una aprobación vale para una sola ejecución, aunque se corte) y muestra un resumen por estación (aciertos, fallos, inválidas y tokens). Gasta tokens: la skill `fabrica` lo propone solo si la persona lo pide y espera su sí explícito, también para la fase 2.
 
 ### Lecciones: aprender de las correcciones
 

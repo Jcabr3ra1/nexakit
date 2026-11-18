@@ -171,27 +171,36 @@ export async function guardarPlanBanco(home: string, plan: unknown): Promise<str
   return ruta;
 }
 
-/** Lee el plan guardado del banco sin seguir enlaces. `null` si no existe o no es un archivo normal. */
-export function leerPlanBanco(home: string): unknown {
+/**
+ * Consume el plan guardado del banco: lo mueve con un `rename` a un nombre propio (solo uno de dos procesos
+ * simultáneos lo consigue; el otro recibe `null`), lo lee sin seguir enlaces y borra la copia. `null` si no hay plan,
+ * no es un archivo normal o no se puede leer. Una aprobación vale para una sola ejecución.
+ */
+export async function consumirPlanBanco(home: string): Promise<unknown> {
   const base = path.join(home, '.nexakit', 'fabrica');
-  const carpeta = lstatSync(base, { throwIfNoEntry: false });
-  if (carpeta === undefined || !carpeta.isDirectory() || carpeta.isSymbolicLink()) return null;
-  const archivo = path.join(base, NOMBRE_PLAN_BANCO);
-  const info = lstatSync(archivo, { throwIfNoEntry: false });
-  if (info === undefined || !info.isFile() || info.size > 1024 * 1024) return null;
-  const fd = openSync(archivo, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  const carpeta = await lstatSiExiste(base);
+  if (carpeta === null || !carpeta.isDirectory() || carpeta.isSymbolicLink()) return null;
+  const origen = path.join(base, NOMBRE_PLAN_BANCO);
+  const propio = path.join(base, `.${NOMBRE_PLAN_BANCO}.${randomBytes(6).toString('hex')}.consumido`);
   try {
-    return JSON.parse(readFileSync(fd, 'utf8')) as unknown;
+    await rename(origen, propio);
+  } catch {
+    return null;
+  }
+  try {
+    const info = await lstat(propio);
+    if (!info.isFile() || info.size > 1024 * 1024) return null;
+    const fd = await open(propio, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    try {
+      return JSON.parse(await fd.readFile('utf8')) as unknown;
+    } finally {
+      await fd.close();
+    }
   } catch {
     return null;
   } finally {
-    closeSync(fd);
+    await unlink(propio).catch(() => {});
   }
-}
-
-/** Borra el plan guardado del banco (no sigue enlaces: `unlink` quita el enlace mismo). */
-export async function borrarPlanBanco(home: string): Promise<void> {
-  await unlink(path.join(home, '.nexakit', 'fabrica', NOMBRE_PLAN_BANCO)).catch(() => {});
 }
 
 /** Estado vivo de una estación del recorrido en curso, tal como lo muestra la barra. */
