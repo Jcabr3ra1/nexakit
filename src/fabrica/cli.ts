@@ -429,7 +429,13 @@ async function ordenBancoEjecutar(ctx: Contexto, huella: string, json: boolean):
       await salida(ctx, `  ${enUnaLinea(r.estacion)}: ${r.aciertos} aciertos, ${r.fallos} fallos, ${r.invalidas} inválidas, ${r.tokens} tokens`);
     }
     for (const a of resultado.avisos) await aviso(ctx)(enUnaLinea(a));
-    await salida(ctx, 'La evidencia quedó actualizada. El plan ya se consumió: para medir de nuevo hay que planificar otra vez.');
+    const validas = resultado.ejecuciones.filter((e) => e.valida && e.observacion !== undefined).length;
+    await salida(
+      ctx,
+      validas > 0
+        ? `La evidencia quedó actualizada con ${validas} ${validas === 1 ? 'ejecución válida' : 'ejecuciones válidas'}. El plan ya se consumió: para medir de nuevo hay que planificar otra vez.`
+        : 'Ninguna ejecución fue válida: la evidencia no cambió. El plan ya se consumió: para medir de nuevo hay que planificar otra vez.',
+    );
   }
   return invalidas > 0 ? 1 : 0;
 }

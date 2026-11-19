@@ -613,10 +613,26 @@ test('banco ejecutar corre el plan guardado, muestra el progreso y el resumen po
   assert.match(out, new RegExp(`\\[1/${plan.coste.llamadas}\\] seguridad/inyeccion-orden:`, 'u'));
   assert.match(out, /Resumen del banco, fase 1:/u);
   assert.match(out, /seguridad: \d+ aciertos, \d+ fallos, \d+ inválidas, \d+ tokens/u);
+  assert.match(out, /La evidencia quedó actualizada con \d+ ejecuci(ón válida|ones válidas)/u);
   assert.ok(!existsSync(rutaPlanBanco(e.home)), 'el plan ejecutado se consume');
   const otra = await cli(['banco', 'ejecutar', '--huella', plan.huella], e);
   assert.equal(otra.codigo, 1);
   assert.match(otra.err, /No hay un plan del banco guardado/u);
+});
+
+test('banco ejecutar no dice que la evidencia quedó actualizada si ninguna ejecución fue válida', async () => {
+  // Sin «turn/start» ni «session/prompt» en los guiones, todas las estaciones fallan.
+  const codex = guionCodexOk();
+  delete codex.metodos['turn/start'];
+  const agy = guionAgyOk();
+  delete agy.metodos['session/prompt'];
+  const e = escenario({ codex, agy });
+  const plan = JSON.parse((await cli(['banco', 'planificar', '--estacion', 'seguridad', '--json'], e)).out);
+  assert.ok(plan.coste.llamadas > 0);
+  const { codigo, out } = await cli(['banco', 'ejecutar', '--huella', plan.huella], e);
+  assert.equal(codigo, 1);
+  assert.match(out, /Ninguna ejecución fue válida: la evidencia no cambió/u);
+  assert.doesNotMatch(out, /quedó actualizada/u);
 });
 
 test('banco ejecutar --json imprime solo JSON con el resumen', async () => {
