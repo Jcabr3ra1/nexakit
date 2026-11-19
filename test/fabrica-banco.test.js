@@ -5,7 +5,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { gitConfigGlobalVacio } from '../test-support/git-aislado.js';
-import { medir, observacionDe, categoriasEquivalentes, CATEGORIAS_GENERICAS, TOPE_FALSOS_POSITIVOS } from '../dist/fabrica/banco/medir.js';
+import { medir, observacionDe, categoriasEquivalentes, normalizarCategoria, CATEGORIAS_GENERICAS, TOPE_FALSOS_POSITIVOS } from '../dist/fabrica/banco/medir.js';
 import { elegir, UMBRALES } from '../dist/fabrica/decision.js';
 import {
   planificarBanco,
@@ -101,6 +101,40 @@ test('medir: las categorías equivalentes aciertan, sin importar mayúsculas, ti
   }
   assert.equal(categoriasEquivalentes('recorrido-rutas', 'inyeccion-ordenes'), false);
   assert.equal(categoriasEquivalentes('rendimiento', 'lectura-repetida'), false);
+});
+
+test('medir: las categorías de los casos aceptan los nombres corrientes que usan los revisores', () => {
+  const casos = [
+    ['XSS reflejado', 'xss'],
+    ['cross-site scripting', 'xss'],
+    ['verificación TLS desactivada', 'tls-desactivado'],
+    ['man-in-the-middle', 'tls-desactivado'],
+    ['permisos inseguros', 'permisos-amplios'],
+    ['denegación de servicio', 'entrada-sin-limite'],
+    ['secreto-hardcodeado', 'secreto-expuesto'],
+    ['hardcoded secret', 'secreto-expuesto'],
+    ['datos sensibles en logs', 'secreto-expuesto'],
+    ['llamada de red real', 'dependencia-red'],
+    ['falta await', 'promesa-sin-esperar'],
+    ['prueba no determinista', 'aserciones-debiles'],
+    ['O(n²)', 'complejidad-cuadratica'],
+    ['búsqueda lineal en bucle', 'complejidad-cuadratica'],
+    ['filtro en memoria', 'consulta-sin-filtro'],
+    ['uso de memoria', 'memoria-desproporcionada'],
+    ['E/S síncrona', 'lectura-repetida'],
+    ['E/S síncrona', 'e-s-sincrona'],
+    ['trabajo redundante', 'trabajo-repetido'],
+  ];
+  for (const [delModelo, sembrada] of casos) {
+    assert.ok(categoriasEquivalentes(delModelo, sembrada), `${delModelo} ≈ ${sembrada}`);
+    assert.equal(medir([h('a.js', 1, delModelo)], [f('a.js', [1, 1], sembrada)]).aciertos, 1, delModelo);
+  }
+  // NFKD convierte el superíndice: «O(n²)» no se queda en «o-n».
+  assert.equal(normalizarCategoria('O(n²)'), 'o-n2');
+  // Las familias distintas siguen sin mezclarse.
+  for (const [a, b] of [['xss', 'recorrido-rutas'], ['complejidad-cuadratica', 'consulta-n-mas-uno'], ['promesa-sin-esperar', 'sin-prueba'], ['tls-desactivado', 'secreto-expuesto']]) {
+    assert.equal(categoriasEquivalentes(a, b), false, `${a} ≠ ${b}`);
+  }
 });
 
 test('medir: los hallazgos repetidos sobre el mismo fallo cuentan un acierto y ningún falso positivo', () => {

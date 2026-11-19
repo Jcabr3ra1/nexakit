@@ -3,7 +3,7 @@ import http from 'node:http';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-const RAIZ = path.resolve('subidas');
+const RAIZ = path.resolve('publico');
 const TOKEN = process.env.TOKEN_SUBIDAS ?? 'subidas-local';
 const NOMBRE_VALIDO = /^[\w-][\w.-]{0,99}$/;
 
@@ -71,7 +71,9 @@ export const servidor = http.createServer(async (req, res) => {
       return;
     }
     res.writeHead(405).end('Método no permitido');
-  } catch {
-    res.writeHead(404).end('No encontrado');
+  } catch (error) {
+    if (error?.code === 'ENOENT' || error?.code === 'EISDIR') res.writeHead(404).end('No encontrado');
+    else if (error instanceof URIError) res.writeHead(400).end('Ruta no válida');
+    else res.writeHead(500).end('Error interno');
   }
 });

@@ -17,3 +17,17 @@ export function totalPedido(pedido: Pedido): number {
 export function unidadesPedido(pedido: Pedido): number {
   return pedido.lineas.reduce((suma, l) => suma + l.cantidad, 0);
 }
+
+export interface ResumenPedidos {
+  pedidos: number;
+  unidades: number;
+  total: number;
+}
+
+export function resumenDePedidos(pedidos: Pedido[]): ResumenPedidos {
+  return {
+    pedidos: pedidos.length,
+    unidades: pedidos.reduce((suma, p) => suma + unidadesPedido(p), 0),
+    total: pedidos.reduce((suma, p) => suma + totalPedido(p), 0),
+  };
+}

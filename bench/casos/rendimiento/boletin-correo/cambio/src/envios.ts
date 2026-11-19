@@ -34,6 +34,7 @@ export async function enviarBoletin(db: Db, enviar: Enviar): Promise<number> {
   if (mensajes.length === 0) return 0;
 
   let enviados = 0;
+  // El proveedor de correo solo admite un envío simultáneo por cuenta.
   for (const mensaje of mensajes) {
     const id = await enviar(mensaje.para, mensaje.html);
     enviados += 1;

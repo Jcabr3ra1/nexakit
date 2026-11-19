@@ -23,7 +23,7 @@
     },
     {
       "archivo": "src/fechas.js",
-      "lineas": [11, 11],
+      "lineas": [10, 17],
       "categoria": "sin-prueba",
       "descripcion": "Ninguna prueba pasa festivos: no se comprueba que un festivo cuente como día no hábil."
     },

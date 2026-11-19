@@ -29,7 +29,7 @@
     },
     {
       "archivo": "src/envios.ts",
-      "lineas": [40, 40],
+      "lineas": [41, 41],
       "categoria": "e-s-sincrona",
       "descripcion": "Escribe el registro con appendFileSync después de cada envío, lo que bloquea el bucle de eventos una vez por mensaje."
     }

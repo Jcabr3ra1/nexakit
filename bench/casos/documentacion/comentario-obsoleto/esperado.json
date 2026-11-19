@@ -5,7 +5,7 @@
   "fallos": [
     {
       "archivo": "src/usuarios.ts",
-      "lineas": [12, 13],
+      "lineas": [4, 13],
       "categoria": "doc-contradice-codigo",
       "descripcion": "El id pasa a ser un UUID de texto, pero el comentario y el README siguen diciendo que es numérico y consecutivo desde 1."
     },

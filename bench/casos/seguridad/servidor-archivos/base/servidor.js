@@ -2,7 +2,7 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-const RAIZ = path.resolve('subidas');
+const RAIZ = path.resolve('publico');
 const PERMITIDOS = new Set(['condiciones.pdf', 'tarifas.pdf']);
 
 export const servidor = http.createServer(async (req, res) => {

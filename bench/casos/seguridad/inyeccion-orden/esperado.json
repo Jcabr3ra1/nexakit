@@ -5,7 +5,7 @@
   "fallos": [
     {
       "archivo": "src/respaldo.ts",
-      "lineas": [14, 14],
+      "lineas": [4, 14],
       "categoria": "inyeccion-ordenes",
       "descripcion": "La ruta de origen y la de destino llegan sin validar a una orden de shell construida con una plantilla de texto."
     },
