@@ -22,6 +22,7 @@ La fábrica elige cada modelo con datos medidos, enseña por qué y aprende de l
 ### Lecciones: aprender de las correcciones
 
 - Se reconocen las quejas repetidas de la persona como correcciones.
+- La nota de corrección pide registrar la lección con `~/.nexakit/nexakit lecciones registrar`, así llega al almacén común y no solo a la memoria de Claude; registrarla resuelve la corrección pendiente.
 - Almacén común de lecciones y `nexakit lecciones registrar|aceptar|retirar`: una lección solo entra con aprobación explícita.
 - Un bloque de lecciones en `CLAUDE.md`, `AGENTS.md` y `GEMINI.md` las comparte con Claude, Codex y Antigravity.
 - La fábrica aplica las lecciones del repo a los encargos de las estaciones, tratadas como datos que un revisor no puede manipular.
