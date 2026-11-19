@@ -10,7 +10,7 @@ La fábrica elige cada modelo con datos medidos, enseña por qué y aprende de l
 - Evidencia por modelo y estación (`~/.nexakit/fabrica/evidencia.json`): aciertos y fallos medidos, tokens y tiempo. Caduca a los 30 días o cuando aparece un modelo nuevo en el catálogo; en ambos casos solo se avisa, nunca se relanza nada solo.
 - Decisión por riesgo: el enrutador elige el modelo más barato que basta, comparando el cuantil del 5 % de la calidad medida con el umbral del riesgo (bajo 0,6, medio 0,75, alto 0,85). Sin datos, manda la tabla manual y avisa de que conviene medir.
 - Cada estación de la propuesta explica por qué se eligió su modelo y con qué calidad medida.
-- `elegir-modelo` usa la misma evidencia, y reconoce los modelos `hydrogen` y `carbon`.
+- `elegir-modelo` usa la misma evidencia con el mismo criterio que el enrutador (el cuantil del 5 %, sin las filas de Claude), y reconoce los modelos `hydrogen` y `carbon`.
 - Aprendizaje por veredictos: `nexakit fabrica resultado --id <id> --veredictos <archivo.json>` suma a la evidencia los hallazgos que la persona o Claude verificaron como reales o falsos, con tope por estación y sin contar dos veces el mismo.
 
 ### Banco de pruebas de modelos
