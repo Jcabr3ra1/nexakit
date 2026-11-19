@@ -472,15 +472,17 @@ test('ejecutarBanco corre cada ejecución en un repo temporal aislado y suma la 
   assert.equal(resultado.ejecuciones.length, 1);
   const [ej] = resultado.ejecuciones;
   assert.equal(ej.valida, true);
-  assert.deepEqual(ej.medicion, { aciertos: 1, fallosNoEncontrados: 0, falsosPositivos: 0 });
-  assert.deepEqual(ej.observacion, { aciertos: 1, fallos: 0 });
+  // El hallazgo encuentra uno de los fallos sembrados del caso; los demás cuentan como no encontrados.
+  const sembrados = cargarCasos().find((c) => c.nombre === 'inyeccion-orden').fallos.length;
+  assert.deepEqual(ej.medicion, { aciertos: 1, fallosNoEncontrados: sembrados - 1, falsosPositivos: 0 });
+  assert.deepEqual(ej.observacion, { aciertos: 1, fallos: sembrados - 1 });
   assert.equal(ej.tokens, 1000);
 
   const { evidencia } = await cargar(home);
   const fila = evidencia.filas.find((x) => x.modelo === 'gpt-a');
   assert.deepEqual(
     { ia: fila.ia, esfuerzo: fila.esfuerzo, estacion: fila.estacion, alfa: fila.alfa, beta: fila.beta, banco: fila.banco, real: fila.real, tokensMedios: fila.tokensMedios },
-    { ia: 'codex', esfuerzo: 'low', estacion: 'seguridad', alfa: 2, beta: 1, banco: 1, real: 0, tokensMedios: 1000 },
+    { ia: 'codex', esfuerzo: 'low', estacion: 'seguridad', alfa: 2, beta: sembrados, banco: sembrados, real: 0, tokensMedios: 1000 },
   );
   assert.ok(evidencia.catalogo.codex.includes('gpt-a'));
 });
@@ -510,9 +512,11 @@ test('el banco no borra la evidencia que otro registra mientras corre', async ()
   const real = evidencia.filas.find((f) => f.modelo === 'gpt-otro');
   assert.ok(real !== undefined, 'la observación real sobrevive');
   assert.deepEqual({ alfa: real.alfa, beta: real.beta, real: real.real }, { alfa: 7, beta: 3, real: 4 });
-  // Y las seis ejecuciones del banco siguen sumadas: 2 esfuerzos × 3 casos de seguridad.
+  // Y las seis ejecuciones del banco siguen sumadas (2 esfuerzos × 3 casos de seguridad): sin hallazgos, cada caso con
+  // fallo suma sus fallos no encontrados y el limpio, un acierto.
+  const porEsfuerzo = cargarCasos().filter((c) => c.estacion === 'seguridad').reduce((n, c) => n + Math.max(c.fallos.length, 1), 0);
   const delBanco = evidencia.filas.filter((f) => f.modelo === 'gpt-a');
-  assert.equal(delBanco.reduce((n, f) => n + f.banco, 0), 6);
+  assert.equal(delBanco.reduce((n, f) => n + f.banco, 0), 2 * porEsfuerzo);
 });
 
 test('las rutas absolutas dentro del repo temporal se comparan como relativas', async () => {
@@ -520,7 +524,8 @@ test('las rutas absolutas dentro del repo temporal se comparan como relativas', 
   const codex = conector('codex', async (e) => informe(e, [h(path.join(e.raiz, 'src', 'respaldo.ts'), 12, 'inyeccion-ordenes')]));
   const plan = planSeguridad();
   const { ejecuciones } = await ejecutarBanco(plan, { huella: plan.huella, home, conectores: { codex } });
-  assert.deepEqual(ejecuciones[0].medicion, { aciertos: 1, fallosNoEncontrados: 0, falsosPositivos: 0 });
+  const sembrados = cargarCasos().find((c) => c.nombre === 'inyeccion-orden').fallos.length;
+  assert.deepEqual(ejecuciones[0].medicion, { aciertos: 1, fallosNoEncontrados: sembrados - 1, falsosPositivos: 0 });
 });
 
 test('las escrituras detectadas invalidan la medición de esa ejecución y no tocan la evidencia', async () => {
@@ -566,7 +571,8 @@ test('una ejecución fallida no se registra; sin tokens informados, la media de 
   assert.ok(altos.every((e) => e.valida === false && /fallida/u.test(e.motivo)));
   const medios = ejecuciones.filter((e) => e.esfuerzo === 'medium');
   assert.ok(medios.every((e) => e.valida && e.tokens === undefined));
-  // Dos casos con fallo sin encontrar (2 fallos) y uno limpio sin hallazgos (1 acierto).
+  // Los fallos sin encontrar de los dos casos con fallo, y el limpio sin hallazgos (1 acierto).
+  const noEncontrados = cargarCasos().filter((c) => c.estacion === 'seguridad').reduce((n, c) => n + c.fallos.length, 0);
   const limpio = medios.find((e) => e.caso === 'seguridad/limpio-validacion');
   assert.deepEqual(limpio.observacion, { aciertos: 1, fallos: 0 });
 
@@ -575,7 +581,7 @@ test('una ejecución fallida no se registra; sin tokens informados, la media de 
   const [fila] = evidencia.filas;
   assert.deepEqual(
     { esfuerzo: fila.esfuerzo, alfa: fila.alfa, beta: fila.beta, banco: fila.banco, tokensMedios: fila.tokensMedios },
-    { esfuerzo: 'medium', alfa: 2, beta: 3, banco: 3, tokensMedios: 0 },
+    { esfuerzo: 'medium', alfa: 2, beta: 1 + noEncontrados, banco: 1 + noEncontrados, tokensMedios: 0 },
   );
 });
 

@@ -1,0 +1,48 @@
+{
+  "estacion": "arquitectura",
+  "base": {
+    "archivos": [
+      "controladores/usuarios.js",
+      "db.js",
+      "docs/adr/0003-capas.md",
+      "errores.js",
+      "repositorios/usuarios.js",
+      "servicios/usuarios.js"
+    ]
+  },
+  "cambio": {
+    "archivos": ["controladores/usuarios.js", "repositorios/usuarios.js", "servicios/perfil.js"]
+  },
+  "fallos": [
+    {
+      "archivo": "controladores/usuarios.js",
+      "lineas": [2, 11],
+      "categoria": "violacion-adr",
+      "descripcion": "El controlador importa y llama directamente al repositorio, saltándose la capa de servicios que exige el ADR 0003."
+    },
+    {
+      "archivo": "controladores/usuarios.js",
+      "lineas": [36, 38],
+      "categoria": "violacion-adr",
+      "descripcion": "El controlador repite la regla de qué correo es válido, que es de negocio y ya vive en servicios/usuarios.js."
+    },
+    {
+      "archivo": "servicios/perfil.js",
+      "lineas": [1, 10],
+      "categoria": "violacion-adr",
+      "descripcion": "El servicio importa db.js y lanza la consulta UPDATE él mismo, cuando solo los repositorios pueden usar la base de datos."
+    },
+    {
+      "archivo": "repositorios/usuarios.js",
+      "lineas": [2, 5],
+      "categoria": "violacion-adr",
+      "descripcion": "El repositorio importa de servicios/: la dependencia va al revés y crea un ciclo entre las dos capas."
+    },
+    {
+      "archivo": "repositorios/usuarios.js",
+      "lineas": [15, 15],
+      "categoria": "violacion-adr",
+      "descripcion": "El repositorio decide el límite de proyectos según el dominio del correo, una regla de negocio que corresponde a los servicios."
+    }
+  ]
+}

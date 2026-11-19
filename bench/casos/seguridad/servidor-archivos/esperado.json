@@ -1,0 +1,37 @@
+{
+  "estacion": "seguridad",
+  "base": { "archivos": ["servidor.js"] },
+  "cambio": { "archivos": ["servidor.js"] },
+  "fallos": [
+    {
+      "archivo": "servidor.js",
+      "lineas": [7, 7],
+      "categoria": "secreto-expuesto",
+      "descripcion": "Si falta la variable de entorno, el token de subida es una cadena fija escrita en el código que cualquiera puede leer."
+    },
+    {
+      "archivo": "servidor.js",
+      "lineas": [19, 20],
+      "categoria": "entrada-sin-limite",
+      "descripcion": "El cuerpo de la petición se acumula en memoria sin tope de tamaño: una subida enorme agota la memoria del servidor."
+    },
+    {
+      "archivo": "servidor.js",
+      "lineas": [33, 33],
+      "categoria": "xss",
+      "descripcion": "El filtro de la consulta se inserta en el HTML sin escapar, lo que permite XSS reflejado."
+    },
+    {
+      "archivo": "servidor.js",
+      "lineas": [44, 44],
+      "categoria": "secreto-expuesto",
+      "descripcion": "El registro guarda todas las cabeceras de la petición, incluida la cabecera Authorization con el token."
+    },
+    {
+      "archivo": "servidor.js",
+      "lineas": [51, 51],
+      "categoria": "recorrido-rutas",
+      "descripcion": "El nombre decodificado de la URL se une a la raíz sin validar: «..%2f» permite leer archivos fuera de ella."
+    }
+  ]
+}

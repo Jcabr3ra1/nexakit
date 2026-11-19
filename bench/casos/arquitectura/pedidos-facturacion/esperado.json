@@ -1,0 +1,48 @@
+{
+  "estacion": "arquitectura",
+  "base": {
+    "archivos": [
+      "docs/adr/0001-capas.md",
+      "src/aplicacion/confirmar.ts",
+      "src/dominio/pedido.ts",
+      "src/dominio/puertos.ts",
+      "src/infra/db.ts",
+      "src/main.ts"
+    ]
+  },
+  "cambio": {
+    "archivos": ["src/aplicacion/facturar.ts", "src/dominio/informe.ts", "src/dominio/pedido.ts", "src/infra/db.ts"]
+  },
+  "fallos": [
+    {
+      "archivo": "src/dominio/informe.ts",
+      "lineas": [1, 6],
+      "categoria": "violacion-adr",
+      "descripcion": "El dominio importa y usa la clase concreta de src/infra, al revés de lo que fija el ADR 0001."
+    },
+    {
+      "archivo": "src/dominio/pedido.ts",
+      "lineas": [13, 21],
+      "categoria": "violacion-adr",
+      "descripcion": "El dominio lee la tasa de IVA del entorno, cuando el ADR exige que lo reciba por parámetro."
+    },
+    {
+      "archivo": "src/infra/db.ts",
+      "lineas": [15, 21],
+      "categoria": "violacion-adr",
+      "descripcion": "El repositorio decide un descuento y recalcula el total del pedido: reglas de negocio dentro de infra y repetidas fuera del dominio."
+    },
+    {
+      "archivo": "src/aplicacion/facturar.ts",
+      "lineas": [2, 4],
+      "categoria": "violacion-adr",
+      "descripcion": "El caso de uso importa e instancia su propio repositorio de infra en lugar de recibir el puerto por parámetro desde main.ts."
+    },
+    {
+      "archivo": "src/aplicacion/facturar.ts",
+      "lineas": [17, 17],
+      "categoria": "violacion-adr",
+      "descripcion": "El IVA se recalcula con una tasa fija en la aplicación en vez de usar ivaPedido del dominio: la regla queda duplicada."
+    }
+  ]
+}

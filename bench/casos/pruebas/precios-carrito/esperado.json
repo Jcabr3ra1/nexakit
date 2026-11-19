@@ -1,0 +1,37 @@
+{
+  "estacion": "pruebas",
+  "base": { "archivos": ["src/precio.ts", "test/precio.test.js"] },
+  "cambio": { "archivos": ["src/precio.ts", "test/precio.test.js"] },
+  "fallos": [
+    {
+      "archivo": "src/precio.ts",
+      "lineas": [6, 6],
+      "categoria": "sin-prueba",
+      "descripcion": "El tramo de 50 unidades o más de conDescuento no tiene prueba."
+    },
+    {
+      "archivo": "src/precio.ts",
+      "lineas": [19, 19],
+      "categoria": "sin-prueba",
+      "descripcion": "Los cupones de importe fijo, y su tope en cero, no tienen prueba."
+    },
+    {
+      "archivo": "test/precio.test.js",
+      "lineas": [15, 19],
+      "categoria": "aserciones-debiles",
+      "descripcion": "La aserción está dentro del catch: si aplicarCupon no lanza con un cupón caducado, la prueba pasa igual."
+    },
+    {
+      "archivo": "test/precio.test.js",
+      "lineas": [29, 30],
+      "categoria": "aserciones-debiles",
+      "descripcion": "El valor esperado se calcula con la misma fórmula que totalCarrito, así que la prueba no fallaría aunque la fórmula estuviera mal."
+    },
+    {
+      "archivo": "test/precio.test.js",
+      "lineas": [39, 41],
+      "categoria": "promesa-sin-esperar",
+      "descripcion": "La prueba no espera la promesa de costeEnvio: termina antes de que se ejecute la aserción."
+    }
+  ]
+}

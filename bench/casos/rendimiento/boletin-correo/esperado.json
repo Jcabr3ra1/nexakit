@@ -1,0 +1,37 @@
+{
+  "estacion": "rendimiento",
+  "base": { "archivos": ["src/correo.html", "src/plantilla.ts"] },
+  "cambio": { "archivos": ["src/envios.ts", "src/plantilla.ts"] },
+  "fallos": [
+    {
+      "archivo": "src/plantilla.ts",
+      "lineas": [4, 4],
+      "categoria": "lectura-repetida",
+      "descripcion": "La plantilla se lee del disco de forma síncrona en cada llamada, una vez por destinatario, en lugar de leerla una sola vez."
+    },
+    {
+      "archivo": "src/envios.ts",
+      "lineas": [16, 16],
+      "categoria": "complejidad-cuadratica",
+      "descripcion": "Quita los repetidos con findIndex dentro de filter: coste cuadrático en el número de suscriptores, cuando bastaría un Set."
+    },
+    {
+      "archivo": "src/envios.ts",
+      "lineas": [24, 24],
+      "categoria": "consulta-n-mas-uno",
+      "descripcion": "Consulta la tabla de bajas una vez por suscriptor en lugar de traer todas las bajas en una sola consulta."
+    },
+    {
+      "archivo": "src/envios.ts",
+      "lineas": [33, 33],
+      "categoria": "memoria-desproporcionada",
+      "descripcion": "Renderiza y guarda en memoria el HTML de todos los mensajes antes de enviar el primero; con muchos suscriptores la memoria crece sin tope."
+    },
+    {
+      "archivo": "src/envios.ts",
+      "lineas": [40, 40],
+      "categoria": "e-s-sincrona",
+      "descripcion": "Escribe el registro con appendFileSync después de cada envío, lo que bloquea el bucle de eventos una vez por mensaje."
+    }
+  ]
+}

@@ -1,24 +1,37 @@
 {
   "estacion": "seguridad",
-  "base": {
-    "archivos": [
-      "src/respaldo.ts"
-    ]
-  },
-  "cambio": {
-    "archivos": [
-      "src/respaldo.ts"
-    ]
-  },
+  "base": { "archivos": ["src/respaldo.ts"] },
+  "cambio": { "archivos": ["src/respaldo.ts"] },
   "fallos": [
     {
       "archivo": "src/respaldo.ts",
-      "lineas": [
-        12,
-        12
-      ],
+      "lineas": [14, 14],
       "categoria": "inyeccion-ordenes",
       "descripcion": "La ruta de origen y la de destino llegan sin validar a una orden de shell construida con una plantilla de texto."
+    },
+    {
+      "archivo": "src/respaldo.ts",
+      "lineas": [23, 23],
+      "categoria": "tls-desactivado",
+      "descripcion": "Desactiva la verificación de certificados TLS para todo el proceso antes de subir el respaldo."
+    },
+    {
+      "archivo": "src/respaldo.ts",
+      "lineas": [30, 30],
+      "categoria": "secreto-expuesto",
+      "descripcion": "El mensaje de error incluye el token del servidor remoto, que acaba en los registros."
+    },
+    {
+      "archivo": "src/respaldo.ts",
+      "lineas": [39, 39],
+      "categoria": "permisos-amplios",
+      "descripcion": "El respaldo descargado se escribe con modo 0o666: cualquier usuario del sistema puede leerlo y modificarlo."
+    },
+    {
+      "archivo": "src/respaldo.ts",
+      "lineas": [47, 49],
+      "categoria": "recorrido-rutas",
+      "descripcion": "Los nombres que devuelve el servidor se unen a la carpeta local sin validar y se borran de forma recursiva: un «../» borra fuera de ella."
     }
   ]
 }

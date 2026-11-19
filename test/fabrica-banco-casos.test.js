@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { cargarCasos, validarCaso } from '../dist/fabrica/banco/casos.js';
+import { cargarCasos, SEPARACION_MINIMA, validarCaso } from '../dist/fabrica/banco/casos.js';
 import { NOMBRES_ESTACION } from '../dist/fabrica/esquemas.js';
 import { ErrorFabrica } from '../dist/fabrica/errores.js';
 import { fileSymlinkSkipReason } from '../testing/symlink-capability.js';
@@ -44,6 +44,44 @@ test('todos los casos del banco validan y cubren las estaciones externas', () =>
   for (const c of casos) assert.ok(NOMBRES_ESTACION.includes(c.estacion));
   const claves = casos.map((c) => `${c.estacion}/${c.nombre}`);
   assert.deepEqual(claves, [...claves].sort());
+});
+
+test('cada caso con fallo siembra al menos 5 fallos de su estación', () => {
+  // Con 2 casos de 5 fallos y 1 limpio, una medición perfecta da Beta(12, 1): su cuantil del 5 % (0,779) supera el
+  // umbral del riesgo medio (0,75). Con 1 fallo por caso se quedaría en Beta(4, 1), con 0,47.
+  const conFallos = cargarCasos().filter((c) => c.fallos.length > 0);
+  assert.ok(conFallos.length >= 10);
+  for (const c of conFallos) assert.ok(c.fallos.length >= 5, `${c.estacion}/${c.nombre} tiene ${c.fallos.length} fallos`);
+});
+
+/** Archivo de 40 líneas para probar la separación entre fallos. */
+const CUARENTA = Array.from({ length: 40 }, (_, i) => `const v${i + 1} = ${i + 1};`).join('\n') + '\n';
+const fallo = (lineas, archivo = 'a.js') => ({ archivo, lineas, categoria: 'inyeccion', descripcion: 'd' });
+const conFallos = (fallos, archivos = ['a.js']) =>
+  crearCaso(valido({ base: { archivos }, cambio: { archivos }, fallos }), {
+    base: Object.fromEntries(archivos.map((a) => [a, CUARENTA])),
+    cambio: Object.fromEntries(archivos.map((a) => [a, CUARENTA])),
+  }).dir;
+
+test('los fallos del mismo archivo deben separarse al menos 7 líneas', () => {
+  assert.equal(SEPARACION_MINIMA, 7);
+  // Del final de uno al principio del siguiente hay 7 líneas: con margen ±3 ningún hallazgo casa con los dos.
+  assert.deepEqual(validarCaso(conFallos([fallo([2, 4]), fallo([11, 12]), fallo([19, 19])])), []);
+  // 6 líneas ya no bastan, también si los fallos vienen desordenados.
+  assert.match(validarCaso(conFallos([fallo([10, 10]), fallo([2, 4])])).join('\n'), /fallos\[0\] y fallos\[1\].*separarse al menos 7/u);
+  // Ni los rangos que se solapan o se contienen.
+  for (const par of [[[2, 8], [5, 9]], [[2, 20], [6, 7]]]) {
+    assert.match(validarCaso(conFallos(par.map((l) => fallo(l)))).join('\n'), /separarse/u, JSON.stringify(par));
+  }
+});
+
+test('la separación solo cuenta dentro del mismo archivo', () => {
+  assert.deepEqual(validarCaso(conFallos([fallo([3, 3], 'a.js'), fallo([3, 4], 'b.js')], ['a.js', 'b.js'])), []);
+});
+
+test('un fallo repetido se rechaza', () => {
+  const errores = validarCaso(conFallos([fallo([5, 6]), fallo([20, 20]), { ...fallo([5, 6]), categoria: 'otra' }]));
+  assert.match(errores.join('\n'), /fallos\[2\] repite el archivo y las líneas de fallos\[0\]/u);
 });
 
 test('un caso limpio tiene fallos vacíos', () => {

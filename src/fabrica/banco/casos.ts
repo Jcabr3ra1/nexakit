@@ -3,6 +3,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import { ErrorFabrica } from '../errores.js';
 import { NOMBRES_ESTACION, type NombreEstacion } from '../esquemas.js';
+import { MARGEN_LINEAS } from './medir.js';
 
 /** Raíz de los casos del banco: `bench/casos` en la raíz del paquete. */
 export const RAIZ_CASOS = path.resolve(import.meta.dirname, '../../../bench/casos');
@@ -76,6 +77,40 @@ function contarLineas(texto: string): number {
   return partes.length;
 }
 
+/** Líneas mínimas entre dos fallos del mismo archivo: así ningún hallazgo cae en el margen de los dos a la vez. */
+export const SEPARACION_MINIMA = 2 * MARGEN_LINEAS + 1;
+
+/**
+ * Errores de fallos repetidos o demasiado juntos dentro del mismo archivo. Entre el final de un fallo y el principio del
+ * siguiente debe haber al menos `SEPARACION_MINIMA` líneas; si no, un hallazgo podría casar con los dos.
+ */
+function erroresDeSeparacion(fallos: readonly FalloSembrado[]): string[] {
+  const errores: string[] = [];
+  const ordenados = fallos
+    .map((fallo, i) => ({ fallo, i }))
+    .sort(
+      (x, y) =>
+        x.fallo.archivo.localeCompare(y.fallo.archivo) ||
+        x.fallo.lineas[0] - y.fallo.lineas[0] ||
+        x.fallo.lineas[1] - y.fallo.lineas[1],
+    );
+  for (const [k, { fallo: actual, i: j }] of ordenados.entries()) {
+    const previo = ordenados[k - 1];
+    if (previo === undefined || previo.fallo.archivo !== actual.archivo) continue;
+    const { fallo: anterior, i } = previo;
+    const [a, b] = [Math.min(i, j), Math.max(i, j)];
+    if (anterior.lineas[0] === actual.lineas[0] && anterior.lineas[1] === actual.lineas[1]) {
+      errores.push(`fallos[${b}] repite el archivo y las líneas de fallos[${a}]`);
+    } else if (actual.lineas[0] - anterior.lineas[1] < SEPARACION_MINIMA) {
+      errores.push(
+        `fallos[${a}] y fallos[${b}] de «${actual.archivo}» deben separarse al menos ${SEPARACION_MINIMA} líneas ` +
+          `(uno acaba en la ${anterior.lineas[1]} y el otro empieza en la ${actual.lineas[0]})`,
+      );
+    }
+  }
+  return errores;
+}
+
 function leerCaso(directorio: string): { caso?: CasoBanco; errores: string[] } {
   const nombre = path.basename(directorio);
   const estacionCarpeta = path.basename(path.dirname(directorio));
@@ -146,6 +181,7 @@ function leerCaso(directorio: string): { caso?: CasoBanco; errores: string[] } {
         fallar(`${etiqueta}: las líneas [${desde}, ${hasta}] no caben en «${fallo.archivo}» (tiene ${total})`);
       }
     }
+    for (const error of erroresDeSeparacion(esperado.fallos)) fallar(error);
   }
   if (errores.length > 0 || !conocida) return { errores };
   return {

@@ -1,0 +1,23 @@
+{
+  "estacion": "arquitectura",
+  "base": {
+    "archivos": [
+      "docs/adr/0001-capas.md",
+      "src/aplicacion/confirmar.ts",
+      "src/dominio/pedido.ts",
+      "src/dominio/puertos.ts",
+      "src/infra/db.ts",
+      "src/main.ts"
+    ]
+  },
+  "cambio": {
+    "archivos": [
+      "src/aplicacion/resumen.ts",
+      "src/dominio/pedido.ts",
+      "src/dominio/puertos.ts",
+      "src/infra/db.ts",
+      "src/main.ts"
+    ]
+  },
+  "fallos": []
+}
