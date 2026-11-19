@@ -16,6 +16,7 @@ La fábrica elige cada modelo con datos medidos, enseña por qué y aprende de l
 ### Banco de pruebas de modelos
 
 - Casos con fallos sembrados en `bench/casos/<estacion>/<caso>/` para seguridad, arquitectura, pruebas, rendimiento y documentación, con casos limpios para medir los falsos positivos.
+- La medición cuenta por fallo sembrado, no por caso: cada fallo encontrado es un acierto y cada fallo no encontrado o falso positivo es un fallo, con un tope de 3 falsos positivos por ejecución. Un hallazgo en el archivo y las líneas del fallo también acierta si su categoría es el nombre de la estación o una genérica («general», «otro», «error», «bug»...).
 - `nexakit fabrica banco planificar [--fase 1|2] [--estacion e]` calcula las llamadas, los tokens estimados y la huella, y guarda el plan; no ejecuta nada. La fase 1 mide cada modelo con su esfuerzo más bajo; la fase 2 mide los tres finalistas por estación y necesita antes la fase 1.
 - `nexakit fabrica banco ejecutar --huella <huella>` solo corre el plan guardado si la huella coincide, en primer plano y con progreso, con la propia fábrica y en un repo temporal sin lecciones. Consume el plan antes de empezar (una aprobación vale para una sola ejecución, aunque se corte) y muestra un resumen por estación (aciertos, fallos, inválidas y tokens). Gasta tokens: la skill `fabrica` lo propone solo si la persona lo pide y espera su sí explícito, también para la fase 2.
 
