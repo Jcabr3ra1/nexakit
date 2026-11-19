@@ -678,13 +678,22 @@ test('los tokens de una estación entran una sola vez por recorrido, no una por 
   const lista = hallazgosDelRastro(r);
   await aprender(r, lista.map((h) => ({ clave: h.clave, verificado: 'real' })));
   const despues = filaDe((await cargar(r.home)).evidencia, FILA_SEGURIDAD);
-  const previas = antes.banco + antes.real;
-  // Una muestra de 1200 con una observación: no tres.
-  assert.ok(Math.abs(despues.tokensMedios - (antes.tokensMedios * previas + 1200) / (previas + 1)) < 1e-9);
+  // Una muestra de 1200 más, no tres: la media es por llamada.
+  assert.equal(despues.muestrasTokens, antes.muestrasTokens + 1);
+  assert.ok(Math.abs(despues.tokensMedios - (antes.tokensMedios * antes.muestrasTokens + 1200) / (antes.muestrasTokens + 1)) < 1e-9);
   assert.equal(despues.real, 3);
   // Repetir en otra llamada tampoco los vuelve a meter.
   await aprender(r, lista.map((h) => ({ clave: h.clave, verificado: 'falso' })));
   assert.equal(filaDe((await cargar(r.home)).evidencia, FILA_SEGURIDAD).tokensMedios, despues.tokensMedios);
+});
+
+test('unos tokens en 0 en el rastro no son una muestra: no bajan la media de la fila', async () => {
+  const r = await rastroFalso({ externas: [[FILA_SEGURIDAD, [hallazgo('seguridad', 'src/a.js', 10)], 0]] });
+  await evidenciaDelBanco(r.home, [FILA_SEGURIDAD]);
+  await aprender(r, [{ clave: clave(hallazgo('seguridad', 'src/a.js', 10))[0], verificado: 'real' }]);
+  const fila = filaDe((await cargar(r.home)).evidencia, FILA_SEGURIDAD);
+  assert.equal(fila.real, 1);
+  assert.deepEqual({ tokens: fila.tokensMedios, muestras: fila.muestrasTokens }, { tokens: 5000, muestras: 1 });
 });
 
 test('sin tokens en el rastro una fila nueva queda con coste desconocido (0), y el primer coste conocido la sustituye', async () => {

@@ -43,6 +43,12 @@ const Fila = z.object({
   banco: Contador,
   /** Observaciones reales verificadas (sin ponderar). */
   real: Contador,
+  /**
+   * Llamadas que entraron en `tokensMedios` y en `segundosMedios`. Son opcionales (0 si faltan): una observación cuenta
+   * fallos y aciertos, no llamadas, así que las medias no se ponderan por observaciones.
+   */
+  muestrasTokens: Contador.optional(),
+  muestrasSegundos: Contador.optional(),
 });
 
 const claveDeFila = (f: { ia: string; modelo: string; esfuerzo: string | null; estacion: string }): string =>
@@ -73,9 +79,9 @@ const EsquemaClave = z.object({ ia: IA, modelo: z.string().min(1), esfuerzo: z.s
 export interface ObservacionEvidencia {
   aciertos: number;
   fallos: number;
-  /** Tokens medios por observación de este lote; sin él, la media de la fila no se toca. */
+  /** Tokens de la llamada que dio esta observación; sin él, la media de la fila no se toca. */
   tokens?: number | undefined;
-  /** Segundos medios por observación de este lote; sin él, la media de la fila no se toca. */
+  /** Segundos de la llamada que dio esta observación; sin él, la media de la fila no se toca. */
   segundos?: number | undefined;
   fuente: FuenteEvidencia;
   /** Hora de la medición; por defecto, ahora. Solo la usa la fuente `banco`. */
@@ -202,8 +208,10 @@ export function cuantil05(alfa: number, beta: number): number {
 /**
  * Devuelve una evidencia nueva con la observación sumada a su fila (se crea con Beta(1,1) si no existe);
  * la recibida no se toca. Los aciertos suman a `alfa` y los fallos a `beta`, con peso 2 si la fuente es `real`.
- * `tokensMedios` y `segundosMedios` son medias ponderadas por el número de observaciones (sin el peso de la fuente);
- * si no se pasan, quedan como estaban (0 en una fila nueva: coste sin medir).
+ * `tokensMedios` y `segundosMedios` son medias por llamada: cada observación con `tokens` (o `segundos`) es una
+ * muestra más, sin importar cuántos aciertos y fallos traiga, y se cuentan en `muestrasTokens` y `muestrasSegundos`.
+ * Si no se pasan o son 0, quedan como estaban (0 en una fila nueva: coste sin medir). Una media en 0 es «sin medir» y
+ * la primera muestra la sustituye; una media de antes sin contador cuenta como una sola muestra.
  * Solo una medición del `banco` registra el modelo en el catálogo medido y renueva `actualizada`.
  */
 export function actualizar(ev: Evidencia, clave: ClaveEvidencia, observacion: ObservacionEvidencia): Evidencia {
@@ -218,20 +226,28 @@ export function actualizar(ev: Evidencia, clave: ClaveEvidencia, observacion: Ob
 
   const idClave = claveDeFila(k.data);
   const anterior = ev.filas.find((f) => claveDeFila(f) === idClave);
-  const previas = anterior === undefined ? 0 : anterior.banco + anterior.real;
   const peso = fuente === 'real' ? PESO_REAL : 1;
-  // Una media en 0 es «sin medir» (ver `decision.ts`): la primera medida la sustituye en vez de mezclarse con ceros.
-  const media = (antes: number, ahora: number | undefined): number =>
-    ahora === undefined ? antes : previas === 0 || antes === 0 ? ahora : (antes * previas + ahora * n) / (previas + n);
+  // Media por llamada. Una media en 0 es «sin medir» (ver `decision.ts`): la primera muestra la sustituye en vez de
+  // mezclarse con ceros, y una media sin contador (de antes de que existiera) pesa como una sola muestra.
+  const media = (antes: number, muestras: number | undefined, ahora: number | undefined): { media: number; muestras: number } => {
+    const k = antes > 0 ? Math.max(1, muestras ?? 0) : 0;
+    // Un coste en 0 tampoco es una muestra: es «sin medir», y mezclarlo bajaría la media.
+    if (ahora === undefined || !(ahora > 0)) return { media: antes, muestras: k };
+    return { media: k === 0 ? ahora : (antes * k + ahora) / (k + 1), muestras: k + 1 };
+  };
+  const tokensFila = media(anterior?.tokensMedios ?? 0, anterior?.muestrasTokens, tokens);
+  const segundosFila = media(anterior?.segundosMedios ?? 0, anterior?.muestrasSegundos, segundos);
 
   const fila: FilaEvidencia = {
     ...k.data,
     alfa: (anterior?.alfa ?? 1) + aciertos * peso,
     beta: (anterior?.beta ?? 1) + fallos * peso,
-    tokensMedios: media(anterior?.tokensMedios ?? 0, tokens),
-    segundosMedios: media(anterior?.segundosMedios ?? 0, segundos),
+    tokensMedios: tokensFila.media,
+    segundosMedios: segundosFila.media,
     banco: (anterior?.banco ?? 0) + (fuente === 'banco' ? n : 0),
     real: (anterior?.real ?? 0) + (fuente === 'real' ? n : 0),
+    muestrasTokens: tokensFila.muestras,
+    muestrasSegundos: segundosFila.muestras,
   };
   const filas = anterior === undefined ? [...ev.filas, fila] : ev.filas.map((f) => (f === anterior ? fila : f));
 

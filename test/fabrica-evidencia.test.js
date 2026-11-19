@@ -153,6 +153,8 @@ test('actualizar: una fila nueva parte de Beta(1,1) y el banco suma 1 por observ
     segundosMedios: 20,
     banco: 10,
     real: 0,
+    muestrasTokens: 1,
+    muestrasSegundos: 1,
   });
 });
 
@@ -175,12 +177,36 @@ test('actualizar: banco y real se acumulan sobre la misma fila', () => {
   assert.equal(ev.filas[0].real, 2);
 });
 
-test('actualizar: tokens y segundos son medias ponderadas por el número de observaciones', () => {
+test('actualizar: tokens y segundos son medias por llamada, no por observación', () => {
   let ev = actualizar(evidenciaVacia(AHORA), clave(), datos({ aciertos: 3, fallos: 1, tokens: 1000, segundos: 10 }));
   ev = actualizar(ev, clave(), datos({ aciertos: 1, fallos: 0, tokens: 2000, segundos: 30, fuente: 'real' }));
-  // (4·1000 + 1·2000) / 5 y (4·10 + 1·30) / 5; el peso 2 de la fuente real no cuenta para la media.
-  assert.equal(ev.filas[0].tokensMedios, 1200);
-  assert.equal(ev.filas[0].segundosMedios, 14);
+  // Dos llamadas: (1000 + 2000) / 2 y (10 + 30) / 2, sin importar cuántos aciertos y fallos trajo cada una.
+  assert.equal(ev.filas[0].tokensMedios, 1500);
+  assert.equal(ev.filas[0].segundosMedios, 20);
+  assert.equal(ev.filas[0].muestrasTokens, 2);
+  // Una observación sin tokens no es una muestra.
+  ev = actualizar(ev, clave(), datos({ aciertos: 5, fallos: 0 }));
+  assert.equal(ev.filas[0].tokensMedios, 1500);
+  assert.equal(ev.filas[0].muestrasTokens, 2);
+  ev = actualizar(ev, clave(), datos({ aciertos: 1, fallos: 0, tokens: 3000 }));
+  assert.equal(ev.filas[0].tokensMedios, 2000);
+  assert.equal(ev.filas[0].muestrasTokens, 3);
+});
+
+test('actualizar: la primera medida que sustituye un 0 no hereda el peso de las observaciones previas', () => {
+  // Veinte veredictos sin tokens y luego dos medidas: la media es la de esas dos llamadas.
+  let ev = actualizar(evidenciaVacia(AHORA), clave(), datos({ aciertos: 20, fallos: 0, fuente: 'real' }));
+  assert.equal(ev.filas[0].tokensMedios, 0);
+  ev = actualizar(ev, clave(), datos({ aciertos: 1, fallos: 0, tokens: 10_000 }));
+  ev = actualizar(ev, clave(), datos({ aciertos: 1, fallos: 0, tokens: 50_000 }));
+  assert.equal(ev.filas[0].tokensMedios, 30_000);
+  assert.equal(ev.filas[0].muestrasTokens, 2);
+});
+
+test('actualizar: una fila guardada sin contador de muestras pesa como una sola muestra', () => {
+  const vieja = { ...clave(), alfa: 11, beta: 1, tokensMedios: 1000, segundosMedios: 10, banco: 10, real: 0 };
+  const ev = actualizar({ ...evidenciaVacia(AHORA), filas: [vieja] }, clave(), datos({ aciertos: 1, fallos: 0, tokens: 3000, segundos: 30 }));
+  assert.deepEqual([ev.filas[0].tokensMedios, ev.filas[0].muestrasTokens, ev.filas[0].segundosMedios], [2000, 2, 20]);
 });
 
 test('actualizar: una fila se identifica por (ia, modelo, esfuerzo, estación); Antigravity usa esfuerzo null', () => {

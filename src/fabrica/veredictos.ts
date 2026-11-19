@@ -143,7 +143,7 @@ function atribuir(dir: string, estacion: NombreEstacion, recorrido: Map<NombreEs
     return `${estacion}: el encargo del rastro no coincide con el recorrido aprobado`;
   }
   const total: unknown = dato?.resultado?.tokens?.total;
-  const tokens = typeof total === 'number' && Number.isFinite(total) && total >= 0 ? total : null;
+  const tokens = typeof total === 'number' && Number.isFinite(total) && total > 0 ? total : null;
   return { clave: { ia: e.ia, modelo: e.modelo, esfuerzo: e.esfuerzo, estacion }, tokens };
 }
 
