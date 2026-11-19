@@ -19,6 +19,11 @@ export interface Medicion {
 
 export interface OpcionesMedir {
   /**
+   * Estación del caso. Un hallazgo cuya categoría es el nombre de la estación («seguridad») o una genérica (ver
+   * `CATEGORIAS_GENERICAS`) también vale si su archivo y su línea casan: el revisor escribe la categoría libre.
+   */
+  estacion?: string;
+  /**
    * Documentos del caso (README, guías...). Un fallo de documentación se ancla en el código que cambió, pero la
    * contradicción está en un documento; un hallazgo sobre uno de estos documentos, con categoría equivalente, también
    * lo encuentra, sin mirar la línea (la del documento no se conoce).
@@ -156,6 +161,26 @@ const EQUIVALENCIAS: Readonly<Record<string, readonly string[]>> = {
   ],
 };
 
+/**
+ * Categorías que no nombran un fallo concreto. Con ellas (o con el nombre de la estación) un hallazgo encuentra un
+ * fallo si casan el archivo y la línea: el revisor escribe la categoría libre y sin vocabulario común.
+ */
+export const CATEGORIAS_GENERICAS: readonly string[] = [
+  'general',
+  'otro',
+  'otros',
+  'error',
+  'errores',
+  'bug',
+  'bugs',
+  'fallo',
+  'fallos',
+  'defecto',
+  'problema',
+  'hallazgo',
+  'issue',
+];
+
 /** Palabras que no distinguen una categoría de otra. */
 const VACIAS = new Set(['de', 'del', 'la', 'las', 'el', 'los', 'en', 'por', 'un', 'una', 'que', 'of', 'the', 'in']);
 
@@ -200,8 +225,18 @@ export function normalizarRuta(ruta: string): string {
   return r;
 }
 
-function casa(h: HallazgoMedible, f: FalloMedible, documentos: ReadonlySet<string>): boolean {
-  if (!categoriasEquivalentes(h.categoria, f.categoria)) return false;
+/** Formas normalizadas de las categorías genéricas. */
+const GENERICAS = new Set(CATEGORIAS_GENERICAS.map(normalizarCategoria));
+
+/** `true` si la categoría del hallazgo vale para el fallo: equivalente, genérica o el nombre de la estación. */
+function categoriaAceptada(categoria: string, fallo: string, estacion: string | undefined): boolean {
+  if (categoriasEquivalentes(categoria, fallo)) return true;
+  const normal = normalizarCategoria(categoria);
+  return GENERICAS.has(normal) || (estacion !== undefined && normal !== '' && normal === normalizarCategoria(estacion));
+}
+
+function casa(h: HallazgoMedible, f: FalloMedible, documentos: ReadonlySet<string>, estacion: string | undefined): boolean {
+  if (!categoriaAceptada(h.categoria, f.categoria, estacion)) return false;
   const archivo = normalizarRuta(h.archivo);
   if (archivo === normalizarRuta(f.archivo)) {
     if (h.linea === null || !Number.isFinite(h.linea)) return false;
@@ -213,8 +248,8 @@ function casa(h: HallazgoMedible, f: FalloMedible, documentos: ReadonlySet<strin
 
 /**
  * Compara los hallazgos de un revisor con los fallos sembrados de un caso. Un hallazgo encuentra un fallo si habla del
- * mismo archivo, su línea cae en el rango del fallo con `MARGEN_LINEAS` de margen y su categoría es la misma o una
- * equivalente. Cada fallo casa con un hallazgo como mucho (se busca el emparejamiento con más aciertos); los hallazgos
+ * mismo archivo, su línea cae en el rango del fallo con `MARGEN_LINEAS` de margen y su categoría es la misma, una
+ * equivalente, una genérica o el nombre de la estación (`opciones.estacion`). Cada fallo casa con un hallazgo como mucho (se busca el emparejamiento con más aciertos); los hallazgos
  * de más sobre un fallo ya encontrado no son falsos positivos. Es pura.
  */
 export function medir(
@@ -223,7 +258,7 @@ export function medir(
   opciones: OpcionesMedir = {},
 ): Medicion {
   const documentos = new Set((opciones.documentos ?? []).map(normalizarRuta));
-  const compatibles = hallazgos.map((h) => fallos.flatMap((f, j) => (casa(h, f, documentos) ? [j] : [])));
+  const compatibles = hallazgos.map((h) => fallos.flatMap((f, j) => (casa(h, f, documentos, opciones.estacion) ? [j] : [])));
 
   // Emparejamiento máximo por caminos de aumento (los casos son pequeños).
   const duenoDe: Array<number | undefined> = fallos.map(() => undefined);
@@ -247,11 +282,19 @@ export function medir(
 }
 
 /**
- * Observación para la evidencia: aciertos son los fallos encontrados y fallos, los no encontrados más los falsos
- * positivos. Un caso limpio (`sembrados` 0) sin hallazgos cuenta un acierto: no inventar fallos también es acertar.
+ * Falsos positivos que cuentan como fallo en una ejecución, como mucho. Un revisor ruidoso que suelta veinte hallazgos
+ * inventados en un solo caso no debe hundir la Beta por ese caso: con 3, un caso limpio con ruido pesa lo mismo que
+ * no encontrar los fallos de tres casos, que ya es un castigo claro.
+ */
+export const TOPE_FALSOS_POSITIVOS = 3;
+
+/**
+ * Observación para la evidencia, por fallo y por hallazgo, no por caso: cada fallo sembrado encontrado es un acierto, y
+ * cada fallo no encontrado y cada falso positivo (hasta `TOPE_FALSOS_POSITIVOS`) es un fallo. Un caso limpio
+ * (`sembrados` 0) sin hallazgos cuenta un acierto: no inventar fallos también es acertar.
  */
 export function observacionDe(m: Medicion, sembrados: number): { aciertos: number; fallos: number } {
-  const fallos = m.fallosNoEncontrados + m.falsosPositivos;
+  const fallos = m.fallosNoEncontrados + Math.min(m.falsosPositivos, TOPE_FALSOS_POSITIVOS);
   if (sembrados === 0 && fallos === 0) return { aciertos: 1, fallos: 0 };
   return { aciertos: m.aciertos, fallos };
 }

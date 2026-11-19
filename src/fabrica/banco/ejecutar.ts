@@ -416,7 +416,7 @@ async function medirUna(ej: EjecucionBanco, caso: CasoBanco, opciones: OpcionesE
     };
     const hallazgos = informe.data.hallazgos.map((h) => ({ ...h, archivo: relativa(h.archivo) }));
     const documentos = [...new Set([...caso.base.archivos, ...caso.cambio.archivos])].filter((r) => RE_DOCUMENTO.test(r));
-    const medicion = medir(hallazgos, caso.fallos, { documentos });
+    const medicion = medir(hallazgos, caso.fallos, { documentos, estacion: caso.estacion });
     const total = resultado?.tokens?.total;
     const tokens = typeof total === 'number' && Number.isFinite(total) && total > 0 ? total : undefined;
     return {

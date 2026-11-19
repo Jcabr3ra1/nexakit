@@ -1,11 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { gitConfigGlobalVacio } from '../test-support/git-aislado.js';
-import { medir, observacionDe, categoriasEquivalentes } from '../dist/fabrica/banco/medir.js';
+import { medir, observacionDe, categoriasEquivalentes, CATEGORIAS_GENERICAS, TOPE_FALSOS_POSITIVOS } from '../dist/fabrica/banco/medir.js';
+import { elegir, UMBRALES } from '../dist/fabrica/decision.js';
 import {
   planificarBanco,
   describirPlan,
@@ -141,11 +142,33 @@ test('medir: un fallo de documentación también lo encuentra un hallazgo sobre 
   assert.equal(medir([h('README.md', 1, 'sin-prueba')], [f('src/a.js', [1, 1], 'sin-prueba')], { documentos: ['README.md'] }).aciertos, 0);
 });
 
+test('medir: el nombre de la estación o una categoría genérica aciertan si casan el archivo y la línea', () => {
+  const fallo = [f('src/a.js', [10, 10], 'inyeccion-ordenes')];
+  for (const categoria of ['seguridad', 'Seguridad', ...CATEGORIAS_GENERICAS, 'Bug', 'General']) {
+    assert.deepEqual(medir([h('src/a.js', 11, categoria)], fallo, { estacion: 'seguridad' }), { aciertos: 1, fallosNoEncontrados: 0, falsosPositivos: 0 }, categoria);
+  }
+  assert.ok(['general', 'otro', 'error', 'bug'].every((c) => CATEGORIAS_GENERICAS.includes(c)));
+  // El nombre de otra estación no vale, ni la estación sin declararla, ni una genérica fuera del archivo o las líneas.
+  assert.equal(medir([h('src/a.js', 10, 'rendimiento')], fallo, { estacion: 'seguridad' }).aciertos, 0);
+  assert.equal(medir([h('src/a.js', 10, 'seguridad')], fallo).aciertos, 0);
+  assert.deepEqual(medir([h('src/a.js', 30, 'bug')], fallo, { estacion: 'seguridad' }), { aciertos: 0, fallosNoEncontrados: 1, falsosPositivos: 1 });
+  assert.equal(medir([h('src/b.js', 10, 'general')], fallo, { estacion: 'seguridad' }).aciertos, 0);
+});
+
 test('observacionDe: aciertos son los fallos encontrados y fallos, los no encontrados más los falsos positivos', () => {
   assert.deepEqual(observacionDe({ aciertos: 2, fallosNoEncontrados: 1, falsosPositivos: 3 }, 3), { aciertos: 2, fallos: 4 });
   // Un caso limpio sin hallazgos cuenta un acierto; con hallazgos, cada uno es un fallo.
   assert.deepEqual(observacionDe({ aciertos: 0, fallosNoEncontrados: 0, falsosPositivos: 0 }, 0), { aciertos: 1, fallos: 0 });
   assert.deepEqual(observacionDe({ aciertos: 0, fallosNoEncontrados: 0, falsosPositivos: 2 }, 0), { aciertos: 0, fallos: 2 });
+});
+
+test('observacionDe: cuenta por fallo sembrado, no por caso, y los falsos positivos tienen tope por ejecución', () => {
+  // Un caso con tres fallos sembrados, todos encontrados, da tres aciertos.
+  assert.deepEqual(observacionDe({ aciertos: 3, fallosNoEncontrados: 0, falsosPositivos: 0 }, 3), { aciertos: 3, fallos: 0 });
+  assert.equal(TOPE_FALSOS_POSITIVOS, 3);
+  // Un revisor ruidoso no hunde la Beta con un solo caso: los falsos positivos cuentan como mucho el tope.
+  assert.deepEqual(observacionDe({ aciertos: 1, fallosNoEncontrados: 1, falsosPositivos: 20 }, 2), { aciertos: 1, fallos: 1 + TOPE_FALSOS_POSITIVOS });
+  assert.deepEqual(observacionDe({ aciertos: 0, fallosNoEncontrados: 0, falsosPositivos: 9 }, 0), { aciertos: 0, fallos: TOPE_FALSOS_POSITIVOS });
 });
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -529,3 +552,61 @@ test('un modelo que ya no está en el catálogo vivo invalida su ejecución', as
   const { evidencia } = await cargar(home);
   assert.deepEqual(evidencia.filas, []);
 });
+
+/** Banco propio en `raiz`: dos casos de rendimiento con tres fallos sembrados cada uno y uno limpio. */
+function bancoConVariosFallos() {
+  const raiz = temporal('banco-casos-');
+  const lineas = (marca) => Array.from({ length: 30 }, (_, i) => `export const v${i + 1} = ${marca};`).join('\n') + '\n';
+  const crear = (nombre, fallos) => {
+    const dir = path.join(raiz, 'rendimiento', nombre);
+    for (const carpeta of ['base', 'cambio']) mkdirSync(path.join(dir, carpeta, 'src'), { recursive: true });
+    writeFileSync(path.join(dir, 'base', 'src', 'a.js'), lineas('0'));
+    writeFileSync(path.join(dir, 'cambio', 'src', 'a.js'), lineas(fallos.length > 0 ? `"SEMBRADO ${fallos.join(' ')}"` : '1'));
+    writeFileSync(path.join(dir, 'esperado.json'), JSON.stringify({
+      estacion: 'rendimiento',
+      base: { archivos: ['src/a.js'] },
+      cambio: { archivos: ['src/a.js'] },
+      fallos: fallos.map((l) => ({ archivo: 'src/a.js', lineas: [l, l], categoria: 'lectura-repetida', descripcion: 'fallo sembrado' })),
+    }));
+  };
+  crear('caso-a', [3, 12, 21]);
+  crear('caso-b', [5, 15, 25]);
+  crear('limpio', []);
+  return raiz;
+}
+
+test('con medidas buenas en la fase 2, un par medido supera el umbral y gana al que no se ha medido', async () => {
+  const home = temporal('banco-home-');
+  const raizCasos = bancoConVariosFallos();
+  assert.equal(cargarCasos(raizCasos).length, 3);
+  // Un revisor perfecto: encuentra cada fallo sembrado y, en el caso limpio, no inventa nada. Escribe como categoría
+  // el nombre de la estación, que también vale.
+  const codex = conector('codex', async (e) => {
+    const sembrado = /SEMBRADO ([\d ]+)/u.exec(readFileSync(path.join(e.raiz, 'src', 'a.js'), 'utf8'));
+    if (sembrado === null) return informe(e, [], { entrada: 400, salida: 100, total: 500 });
+    const fallos = sembrado[1].split(' ').map(Number);
+    return informe(e, fallos.map((l) => h('src/a.js', l, 'Rendimiento')), { entrada: 800, salida: 200, total: 1000 });
+  });
+  const fase1 = medida(evidenciaVacia(), 'codex', 'gpt-a', 'low', 'rendimiento', 3, 0, 1000);
+  await guardar(home, fase1);
+  const plan = planificarBanco({ fase: 2, catalogos: CATALOGO_PRUEBA, evidencia: fase1, estaciones: ['rendimiento'], raizCasos });
+  assert.equal(plan.ejecuciones.length, 2 * 3);
+  const { ejecuciones } = await ejecutarBanco(plan, { huella: plan.huella, home, conectores: { codex }, raizCasos });
+  assert.ok(ejecuciones.every((e) => e.valida), JSON.stringify(ejecuciones.map((e) => e.motivo)));
+
+  const { evidencia } = await cargar(home);
+  const fila = evidencia.filas.find((x) => x.modelo === 'gpt-a' && x.esfuerzo === 'medium');
+  // Cada fallo sembrado encontrado es un acierto: 3 + 3 + 1 (el limpio) en una sola fase 2.
+  assert.deepEqual({ alfa: fila.alfa, beta: fila.beta, banco: fila.banco }, { alfa: 8, beta: 1, banco: 7 });
+  assert.ok(cuantil05(fila.alfa, fila.beta) >= UMBRALES.bajo);
+  // Los tokens son la media por llamada (1000, 1000 y 500), no por observación.
+  assert.equal(fila.tokensMedios, 2500 / 3);
+  assert.equal(fila.muestrasTokens, 3);
+
+  const sinMedir = { ia: 'codex', modelo: 'gpt-sin-medir', esfuerzo: 'high' };
+  const medido = { ia: 'codex', modelo: 'gpt-a', esfuerzo: 'medium' };
+  const decision = elegir({ estacion: 'rendimiento', riesgo: 'bajo', candidatos: [sinMedir, medido], evidencia });
+  assert.deepEqual(decision.eleccion, medido);
+  assert.equal(decision.alcanzaUmbral, true);
+});
+
