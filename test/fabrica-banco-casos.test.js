@@ -6,6 +6,9 @@ import path from 'node:path';
 import { cargarCasos, validarCaso } from '../dist/fabrica/banco/casos.js';
 import { NOMBRES_ESTACION } from '../dist/fabrica/esquemas.js';
 import { ErrorFabrica } from '../dist/fabrica/errores.js';
+import { fileSymlinkSkipReason } from '../testing/symlink-capability.js';
+
+const SIN_ENLACES = process.platform === 'win32' || fileSymlinkSkipReason();
 
 const EXTERNAS = ['seguridad', 'arquitectura', 'pruebas', 'rendimiento', 'documentacion'];
 
@@ -74,7 +77,7 @@ test('rechaza rutas absolutas, con .. y archivos inexistentes', () => {
   }
 });
 
-test('rechaza enlaces simbólicos', () => {
+test('rechaza enlaces simbólicos', { skip: SIN_ENLACES }, () => {
   const { dir } = crearCaso(valido({ fallos: [] }));
   writeFileSync(path.join(dir, 'secreto.txt'), 'x');
   symlinkSync(path.join(dir, 'secreto.txt'), path.join(dir, 'cambio', 'enlace.js'));

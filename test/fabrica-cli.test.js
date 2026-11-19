@@ -540,7 +540,7 @@ test('banco planificar muestra el plan con su coste y la orden exacta, y lo guar
   const plan = JSON.parse(readFileSync(ruta, 'utf8'));
   assert.equal(plan.fase, 1);
   assert.ok(out.includes(`nexakit fabrica banco ejecutar --huella ${plan.huella}`));
-  assert.equal(statSync(ruta).mode & 0o777, 0o600);
+  if (process.platform !== 'win32') assert.equal(statSync(ruta).mode & 0o777, 0o600);
 });
 
 test('banco planificar --json imprime solo JSON y la fase 2 sin evidencia pide antes la fase 1', async () => {

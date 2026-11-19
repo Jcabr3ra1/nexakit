@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { fileSymlinkSkipReason } from '../testing/symlink-capability.js';
 
+const SIN_ENLACES = process.platform === 'win32' || fileSymlinkSkipReason();
 const barraUrl = new URL('../src/antigravity-barra.js', import.meta.url);
 const mod = async () => import(barraUrl);
 
@@ -142,10 +144,12 @@ test('Antigravity pinta las estaciones de la fábrica y lee activo.json sin segu
     assert.equal(leerActivoDeFabrica(home), null, 'más de 64 KiB');
     writeFileSync(join(base, 'activo.json'), '{roto');
     assert.equal(leerActivoDeFabrica(home), null, 'inválido');
-    rmSync(join(base, 'activo.json'));
-    writeFileSync(join(home, 'otro.json'), JSON.stringify(activo));
-    symlinkSync(join(home, 'otro.json'), join(base, 'activo.json'));
-    assert.equal(leerActivoDeFabrica(home), null, 'enlace simbólico');
+    if (!SIN_ENLACES) {
+      rmSync(join(base, 'activo.json'));
+      writeFileSync(join(home, 'otro.json'), JSON.stringify(activo));
+      symlinkSync(join(home, 'otro.json'), join(base, 'activo.json'));
+      assert.equal(leerActivoDeFabrica(home), null, 'enlace simbólico');
+    }
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

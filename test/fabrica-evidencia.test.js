@@ -270,8 +270,8 @@ test('guardar y cargar ida y vuelta, con carpeta 0o700 y archivo 0o600', async (
   const home = temporal();
   const ev = actualizar(evidenciaVacia(AHORA), clave(), datos({ aciertos: 8, fallos: 2, tokens: 1000, segundos: 20, ahora: AHORA }));
   await guardar(home, ev);
-  assert.equal(modo(carpeta(home)), 0o700);
-  assert.equal(modo(archivo(home)), 0o600);
+  if (process.platform !== 'win32') assert.equal(modo(carpeta(home)), 0o700);
+  if (process.platform !== 'win32') assert.equal(modo(archivo(home)), 0o600);
   const { evidencia, aviso } = await cargar(home);
   assert.equal(aviso, null);
   assert.deepEqual(evidencia, ev);
@@ -369,7 +369,7 @@ test('guardar reemplaza el archivo y corrige un modo flojo', async () => {
   chmodSync(archivo(home), 0o644);
   const ev = actualizar(evidenciaVacia(AHORA), clave(), datos({ aciertos: 1, tokens: 1, segundos: 1 }));
   await guardar(home, ev);
-  assert.equal(modo(archivo(home)), 0o600);
+  if (process.platform !== 'win32') assert.equal(modo(archivo(home)), 0o600);
   assert.deepEqual((await cargar(home)).evidencia, ev);
 });
 
@@ -453,11 +453,11 @@ test('guardar conserva un JSON truncado como evidencia.json.corrupto-<fecha> (0o
 
   const copia = path.join(carpeta(home), 'evidencia.json.corrupto-20261115T120000Z');
   assert.equal(readFileSync(copia, 'utf8'), truncado);
-  assert.equal(modo(copia), 0o600);
+  if (process.platform !== 'win32') assert.equal(modo(copia), 0o600);
   assert.match(aviso, /JSON corrupto/u);
   assert.match(aviso, /evidencia\.json\.corrupto-20261115T120000Z/u);
   assert.deepEqual((await cargar(home)).evidencia, nueva);
-  assert.equal(modo(archivo(home)), 0o600);
+  if (process.platform !== 'win32') assert.equal(modo(archivo(home)), 0o600);
 });
 
 test('guardar con un archivo legible no crea copia ni aviso', async () => {

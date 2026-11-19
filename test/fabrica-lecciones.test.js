@@ -41,9 +41,9 @@ test('registrar una lección de la persona la deja vigente, con carpeta 0o700 y 
   assert.equal(leccion.ambito, 'global');
   assert.equal(leccion.fecha, AHORA);
   assert.equal(leccion.usos, 0);
-  assert.equal(modo(carpeta(home)), 0o700);
+  if (process.platform !== 'win32') assert.equal(modo(carpeta(home)), 0o700);
   assert.deepEqual(archivos(home), [`${leccion.id}.json`]);
-  assert.equal(modo(path.join(carpeta(home), `${leccion.id}.json`)), 0o600);
+  if (process.platform !== 'win32') assert.equal(modo(path.join(carpeta(home), `${leccion.id}.json`)), 0o600);
   assert.deepEqual(JSON.parse(readFileSync(path.join(carpeta(home), `${leccion.id}.json`), 'utf8')), leccion);
   assert.deepEqual(await listar(home), [leccion]);
 });
@@ -91,7 +91,7 @@ test('aceptar pasa una propuesta a vigente y retirar la deja retirada; ambos con
   assert.equal(retirada.estado, 'retirada');
   assert.deepEqual(await vigentes(home), []);
   assert.equal((await listar(home))[0].estado, 'retirada', 'se conserva en el almacén');
-  assert.equal(modo(path.join(carpeta(home), `${leccion.id}.json`)), 0o600);
+  if (process.platform !== 'win32') assert.equal(modo(path.join(carpeta(home), `${leccion.id}.json`)), 0o600);
   await assert.rejects(aceptar(home, leccion.id), /retirada/u);
 });
 
