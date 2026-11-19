@@ -317,6 +317,42 @@ test('fase 2 sin evidencia de banco de una estación: no hay finalistas y lo avi
   assert.ok(plan.avisos.some((a) => /seguridad/u.test(a) && /fase 1/u.test(a)));
 });
 
+const IDS_ANTIGRAVITY = [
+  'gemini-4-neon-high', 'gemini-4-neon-xhigh', 'gemini-4-neon-medium', 'gemini-4-neon-low',
+  'gemini-4-argon-medium', 'gemini-4-argon-high', 'gemini-4-argon-low',
+  'gemini-4-hydrogen-high', 'gemini-4-hydrogen-xhigh', 'gemini-4-hydrogen-medium', 'gemini-4-hydrogen-low',
+  'gemini-pro-orchestrator-neon', 'gemini-pro-orchestrator-g1-pro',
+  'gemini-3.8-flash-high', 'gemini-3.8-flash-medium', 'gemini-3.8-flash-low',
+  'claude-opus-5-5-low', 'claude-opus-5-5-medium', 'claude-opus-5-5-high',
+  'claude-sonnet-5-5-low', 'claude-sonnet-5-5-medium', 'claude-sonnet-5-5-high',
+  'gpt-oss-120b-medium',
+];
+const CATALOGOS_REALES = { antigravity: IDS_ANTIGRAVITY.map((modelo) => ({ modelo, esfuerzos: [] })) };
+
+test('fase 1: en antigravity solo la variante más baja de cada modelo base, con el catálogo real', () => {
+  const plan = planificarBanco({ fase: 1, catalogos: CATALOGOS_REALES, evidencia: evidenciaVacia(), estaciones: ['seguridad'] });
+  assert.deepEqual(
+    plan.ejecuciones.map((e) => e.modelo),
+    [
+      'gemini-4-neon-low', 'gemini-4-argon-low', 'gemini-4-hydrogen-low', 'gemini-pro-orchestrator-neon',
+      'gemini-pro-orchestrator-g1-pro', 'gemini-3.8-flash-low', 'claude-opus-5-5-low', 'claude-sonnet-5-5-low',
+      'gpt-oss-120b-medium',
+    ],
+  );
+  assert.ok(plan.ejecuciones.every((e) => e.ia === 'antigravity' && e.esfuerzo === null));
+  assert.equal(plan.coste.llamadas, 9);
+});
+
+test('fase 2: un finalista de antigravity pasa con las variantes medium y high de su base', () => {
+  let ev = medida(evidenciaVacia(), 'antigravity', 'gemini-4-neon-low', null, 'seguridad', 9, 1, 100);
+  ev = medida(ev, 'antigravity', 'gemini-pro-orchestrator-neon', null, 'seguridad', 8, 2, 100);
+  ev = medida(ev, 'antigravity', 'gpt-oss-120b-medium', null, 'seguridad', 7, 3, 100);
+  const plan = planificarBanco({ fase: 2, catalogos: CATALOGOS_REALES, evidencia: ev, estaciones: ['seguridad'] });
+  const modelos = [...new Set(plan.ejecuciones.map((e) => e.modelo))];
+  assert.deepEqual(modelos, ['gemini-4-neon-medium', 'gemini-4-neon-high', 'gpt-oss-120b-medium']);
+  assert.ok(plan.avisos.some((a) => /gemini-pro-orchestrator-neon/u.test(a) && /antigravity/u.test(a)));
+});
+
 // ---------------------------------------------------------------------------------------------------------------
 // ejecutarBanco
 // ---------------------------------------------------------------------------------------------------------------

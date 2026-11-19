@@ -78,6 +78,29 @@ function tokensDe(ev: Evidencia, ej: EjecucionBanco, estacion: NombreEstacion): 
   return fila !== undefined && fila.tokensMedios > 0 ? Math.round(fila.tokensMedios) : TOKENS_POR_LLAMADA;
 }
 
+const SUFIJO_ESFUERZO = new RegExp(`^(.+)-(${ESCALA_ESFUERZOS.join('|')})$`, 'u');
+
+/**
+ * Modelo base de un id de Antigravity, donde el esfuerzo va dentro del id: el id sin un sufijo final de la escala
+ * (`gemini-4-neon-low` → `gemini-4-neon`). Un id sin ese sufijo es su propia base.
+ */
+export function baseAntigravity(id: string): { base: string; esfuerzo: string | null } {
+  const m = SUFIJO_ESFUERZO.exec(id);
+  return m === null ? { base: id, esfuerzo: null } : { base: m[1] as string, esfuerzo: m[2] as string };
+}
+
+/** Ids de Antigravity agrupados por modelo base, en el orden del catálogo; cada grupo, de menor a mayor esfuerzo. */
+function basesAntigravity(catalogos: Catalogos): Map<string, Array<{ id: string; esfuerzo: string | null }>> {
+  const bases = new Map<string, Array<{ id: string; esfuerzo: string | null }>>();
+  for (const { modelo } of modelosVivos(catalogos, 'antigravity')) {
+    const { base, esfuerzo } = baseAntigravity(modelo);
+    bases.set(base, [...(bases.get(base) ?? []), { id: modelo, esfuerzo }]);
+  }
+  const rango = (e: string | null): number => (e === null ? -1 : rangoEsfuerzo(e));
+  for (const variantes of bases.values()) variantes.sort((a, b) => rango(a.esfuerzo) - rango(b.esfuerzo));
+  return bases;
+}
+
 /** Modelos vivos de una IA del banco, sin repetidos y en el orden del catálogo. */
 function modelosVivos(catalogos: Catalogos, ia: IaBanco): Array<{ modelo: string; esfuerzos: string[] }> {
   const vistos = new Set<string>();
@@ -91,7 +114,8 @@ function modelosVivos(catalogos: Catalogos, ia: IaBanco): Array<{ modelo: string
 /**
  * Los `FINALISTAS` mejores pares (IA, modelo) de una estación según la evidencia del banco: el cuantil del 5 % más
  * alto y, en empate, el que gasta menos tokens (sin tokens medidos va detrás). Solo cuentan filas con observaciones
- * del banco y modelos que siguen en el catálogo vivo; de cada modelo vale su mejor fila.
+ * del banco y modelos que siguen en el catálogo vivo; de cada modelo vale su mejor fila. En Antigravity el modelo
+ * devuelto es el base (sin el esfuerzo del id), aunque la evidencia se guarde por id completo.
  */
 function finalistas(ev: Evidencia, estacion: NombreEstacion, catalogos: Catalogos): Array<{ ia: IaBanco; modelo: string }> {
   const filas = ev.filas.filter(
@@ -115,8 +139,9 @@ function finalistas(ev: Evidencia, estacion: NombreEstacion, catalogos: Catalogo
   const elegidos: Array<{ ia: IaBanco; modelo: string }> = [];
   for (const { fila } of puntuadas) {
     if (elegidos.length === FINALISTAS) break;
-    if (elegidos.some((e) => e.ia === fila.ia && e.modelo === fila.modelo)) continue;
-    elegidos.push({ ia: fila.ia, modelo: fila.modelo });
+    const modelo = fila.ia === 'antigravity' ? baseAntigravity(fila.modelo).base : fila.modelo;
+    if (elegidos.some((e) => e.ia === fila.ia && e.modelo === modelo)) continue;
+    elegidos.push({ ia: fila.ia, modelo });
   }
   return elegidos;
 }
@@ -133,9 +158,11 @@ export interface EntradaPlanificar {
 }
 
 /**
- * Planifica una fase del banco sin ejecutar nada. Fase 1: cada modelo vivo con su esfuerzo más bajo (sin esfuerzo en
- * Antigravity) sobre el primer caso con fallos de cada estación. Fase 2: los tres finalistas de cada estación según la
- * evidencia del banco, con esfuerzo medio y alto si el catálogo los tiene, sobre todos los casos de la estación.
+ * Planifica una fase del banco sin ejecutar nada. Fase 1: cada modelo vivo con su esfuerzo más bajo sobre el primer
+ * caso con fallos de cada estación; en Antigravity, la variante más baja de cada modelo base (el id sin su sufijo de
+ * esfuerzo), no todos los ids. Fase 2: los tres finalistas de cada estación según la evidencia del banco, con esfuerzo
+ * medio y alto si el catálogo los tiene (en Antigravity, los ids `-medium` y `-high` de su base), sobre todos los
+ * casos de la estación.
  * El coste estima las llamadas y los tokens con los datos previos; la huella cubre fase, ejecuciones y coste.
  */
 export function planificarBanco(entrada: EntradaPlanificar): PlanBanco {
@@ -167,17 +194,19 @@ export function planificarBanco(entrada: EntradaPlanificar): PlanBanco {
         continue;
       }
       for (const ia of IAS_BANCO) {
-        for (const { modelo, esfuerzos } of modelosVivos(catalogos, ia)) {
-          let esfuerzo: string | null = null;
-          if (ia === 'codex') {
-            const minimo = ordenarEsfuerzos(esfuerzos)[0];
-            if (minimo === undefined) {
-              avisar(`${modelo} de codex no declara esfuerzos en el catálogo: no se mide`);
-              continue;
-            }
-            esfuerzo = minimo;
+        if (ia === 'antigravity') {
+          for (const variantes of basesAntigravity(catalogos).values()) {
+            ejecuciones.push({ caso: idCaso(caso), ia, modelo: (variantes[0] as { id: string }).id, esfuerzo: null });
           }
-          ejecuciones.push({ caso: idCaso(caso), ia, modelo, esfuerzo });
+          continue;
+        }
+        for (const { modelo, esfuerzos } of modelosVivos(catalogos, ia)) {
+          const minimo = ordenarEsfuerzos(esfuerzos)[0];
+          if (minimo === undefined) {
+            avisar(`${modelo} de codex no declara esfuerzos en el catálogo: no se mide`);
+            continue;
+          }
+          ejecuciones.push({ caso: idCaso(caso), ia, modelo, esfuerzo: minimo });
         }
       }
       continue;
@@ -188,17 +217,21 @@ export function planificarBanco(entrada: EntradaPlanificar): PlanBanco {
       continue;
     }
     for (const { ia, modelo } of elegidos) {
-      let esfuerzos: Array<string | null> = [null];
+      // Cada variante es una ejecución: en codex, el esfuerzo medio o alto; en antigravity, el id medium o high de la base.
+      let variantes: Array<{ id: string; esfuerzo: string | null }>;
       if (ia === 'codex') {
         const admite = modelosVivos(catalogos, ia).find((m) => m.modelo === modelo)?.esfuerzos ?? [];
-        esfuerzos = ESFUERZOS_FASE2.filter((e) => admite.includes(e));
-        if (esfuerzos.length === 0) {
-          avisar(`${estacion}: el finalista ${modelo} de codex no admite esfuerzo medio ni alto; no pasa a la fase 2`);
-          continue;
-        }
+        variantes = ESFUERZOS_FASE2.filter((e) => admite.includes(e)).map((e) => ({ id: modelo, esfuerzo: e }));
+      } else {
+        const deBase = basesAntigravity(catalogos).get(modelo) ?? [];
+        variantes = ESFUERZOS_FASE2.flatMap((e) => deBase.filter((v) => v.esfuerzo === e)).map((v) => ({ id: v.id, esfuerzo: null }));
       }
-      for (const esfuerzo of esfuerzos) {
-        for (const caso of deEstacion) ejecuciones.push({ caso: idCaso(caso), ia, modelo, esfuerzo });
+      if (variantes.length === 0) {
+        avisar(`${estacion}: el finalista ${modelo} de ${ia} no admite esfuerzo medio ni alto; no pasa a la fase 2`);
+        continue;
+      }
+      for (const { id, esfuerzo } of variantes) {
+        for (const caso of deEstacion) ejecuciones.push({ caso: idCaso(caso), ia, modelo: id, esfuerzo });
       }
     }
   }
