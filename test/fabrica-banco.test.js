@@ -610,3 +610,32 @@ test('con medidas buenas en la fase 2, un par medido supera el umbral y gana al 
   assert.equal(decision.alcanzaUmbral, true);
 });
 
+test('si no se puede borrar el repo temporal, el banco avisa, conserva la medición y sigue', { skip: process.platform === 'win32' || process.getuid?.() === 0 }, async () => {
+  const home = temporal('banco-home-');
+  const bloqueadas = [];
+  const codex = conector('codex', async (e) => {
+    // Una carpeta sin permiso de escritura con un archivo dentro: el borrado recursivo falla con EACCES.
+    const bloqueada = path.join(e.raiz, 'bloqueada');
+    mkdirSync(bloqueada);
+    writeFileSync(path.join(bloqueada, 'x.txt'), 'x\n');
+    chmodSync(bloqueada, 0o500);
+    bloqueadas.push(bloqueada);
+    return informe(e, [h('src/respaldo.ts', 12, 'inyeccion-ordenes')]);
+  });
+  try {
+    const plan = planificarBanco({
+      fase: 2,
+      catalogos: CATALOGO_PRUEBA,
+      evidencia: medida(evidenciaVacia(), 'codex', 'gpt-a', 'low', 'seguridad', 1, 0, 500),
+      estaciones: ['seguridad'],
+    });
+    const resultado = await ejecutarBanco(plan, { huella: plan.huella, home, conectores: { codex } });
+    assert.equal(resultado.ejecuciones.length, plan.ejecuciones.length, 'el banco no se corta');
+    assert.ok(resultado.avisos.some((a) => /No se pudo borrar el repo temporal/u.test(a)), resultado.avisos.join('\n'));
+  } finally {
+    for (const b of bloqueadas) {
+      chmodSync(b, 0o700);
+      rmSync(path.dirname(b), { recursive: true, force: true });
+    }
+  }
+});

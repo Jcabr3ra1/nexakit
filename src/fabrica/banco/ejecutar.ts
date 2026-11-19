@@ -373,8 +373,17 @@ async function recorridoDe(raiz: string, estacion: NombreEstacion, ej: Ejecucion
 
 const RE_DOCUMENTO = /^docs\/|\.md$/iu;
 
-/** Una ejecución del plan en su propio repo temporal, que se borra al terminar. No toca la evidencia. */
-async function medirUna(ej: EjecucionBanco, caso: CasoBanco, opciones: OpcionesEjecutar, home: string): Promise<EjecucionMedida> {
+/**
+ * Una ejecución del plan en su propio repo temporal, que se borra al terminar. No toca la evidencia. Si el repo no se
+ * puede borrar (en Windows, un proceso que aún lo tiene abierto), se avisa con `avisar` y la medición se conserva.
+ */
+async function medirUna(
+  ej: EjecucionBanco,
+  caso: CasoBanco,
+  opciones: OpcionesEjecutar,
+  home: string,
+  avisar: (aviso: string) => void,
+): Promise<EjecucionMedida> {
   const invalida = (motivo: string, extra: Partial<EjecucionMedida> = {}): EjecucionMedida => ({ ...ej, ...extra, valida: false, motivo });
   const raiz = await mkdtemp(path.join(os.tmpdir(), 'nexakit-banco-'));
   try {
@@ -431,7 +440,10 @@ async function medirUna(ej: EjecucionBanco, caso: CasoBanco, opciones: OpcionesE
   } catch (error) {
     return invalida(`no se pudo medir: ${mensajeDe(error)}`);
   } finally {
-    await rm(raiz, { recursive: true, force: true });
+    // Un fallo al borrar no puede tapar el resultado ni cortar el banco: el plan ya se consumió.
+    await rm(raiz, { recursive: true, force: true }).catch((error: unknown) => {
+      avisar(`No se pudo borrar el repo temporal ${raiz} (${mensajeDe(error)}); bórralo a mano cuando termine el banco.`);
+    });
   }
 }
 
@@ -477,7 +489,7 @@ export async function ejecutarBanco(plan: unknown, opciones: OpcionesEjecutar): 
   const total = aprobado.ejecuciones.length;
   for (const [indice, ej] of aprobado.ejecuciones.entries()) {
     const caso = casos.get(ej.caso) as CasoBanco;
-    const medida = await medirUna(ej, caso, opciones, home);
+    const medida = await medirUna(ej, caso, opciones, home, avisar);
     if (medida.valida && medida.observacion !== undefined) {
       // El banco dura mucho: entre dos ejecuciones la persona puede registrar veredictos reales. Se suma sobre lo que
       // hay ahora en disco, no sobre la copia del principio, para no borrarlos al guardar.
