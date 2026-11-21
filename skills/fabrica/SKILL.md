@@ -26,7 +26,7 @@ El servidor MCP `nexakit-fabrica` ofrece `fabrica_proponer`, `fabrica_lanzar`, `
 
 ## Banco de pruebas de modelos (solo si la persona lo pide)
 
-El banco mide Codex y Antigravity con casos con fallos sembrados y suma el resultado a la evidencia que usa el enrutador. Gasta tokens: nunca lo lances por tu cuenta, ni siquiera cuando un aviso de evidencia lo sugiera.
+El banco mide Codex y Antigravity con casos con fallos sembrados y suma el resultado a la evidencia que usa el enrutador. Un hallazgo acierta si señala el archivo y la línea de un fallo sembrado (con 3 líneas de margen); la categoría que escriba el revisor no cuenta. Gasta tokens: nunca lo lances por tu cuenta, ni siquiera cuando un aviso de evidencia lo sugiera.
 
 1. **Planificar.** Ejecuta `~/.nexakit/nexakit fabrica banco planificar [--fase 1|2] [--estacion e]`. No ejecuta nada: guarda el plan en `~/.nexakit/fabrica/banco-plan.json` y muestra las llamadas, los tokens estimados y la huella. Sin `--fase` es la 1: mide cada modelo con su esfuerzo más bajo; en Antigravity, donde el esfuerzo va dentro del id, solo la variante más baja de cada modelo base.
 2. **Enseñar y esperar el sí.** Muestra a la persona el plan y el coste tal cual salen y pide su aprobación explícita. Un silencio, una duda o un sí a otra cosa no cuentan.

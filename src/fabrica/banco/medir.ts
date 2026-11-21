@@ -4,9 +4,9 @@ import type { FalloSembrado } from './casos.js';
 /** Líneas de margen por cada lado del rango de un fallo sembrado. */
 export const MARGEN_LINEAS = 3;
 
-/** Lo que `medir` usa de un hallazgo del revisor. */
-export type HallazgoMedible = Pick<Hallazgo, 'archivo' | 'linea' | 'categoria'>;
-/** Lo que `medir` usa de un fallo sembrado. */
+/** Lo que `medir` usa de un hallazgo del revisor: el archivo y la línea, no la categoría. */
+export type HallazgoMedible = Pick<Hallazgo, 'archivo' | 'linea'>;
+/** Lo que `medir` usa de un fallo sembrado: su categoría solo dice si es de documentación. */
 export type FalloMedible = Pick<FalloSembrado, 'archivo' | 'lineas' | 'categoria'>;
 
 export interface Medicion {
@@ -19,407 +19,15 @@ export interface Medicion {
 
 export interface OpcionesMedir {
   /**
-   * Estación del caso. Un hallazgo cuya categoría es el nombre de la estación («seguridad») o una genérica (ver
-   * `CATEGORIAS_GENERICAS`) también vale si su archivo y su línea casan: el revisor escribe la categoría libre.
-   */
-  estacion?: string;
-  /**
    * Documentos del caso (README, guías...). Un fallo de documentación se ancla en el código que cambió, pero la
-   * contradicción está en un documento; un hallazgo sobre uno de estos documentos, con categoría equivalente, también
-   * lo encuentra, sin mirar la línea (la del documento no se conoce).
+   * contradicción está en un documento; un hallazgo sobre uno de estos documentos también lo encuentra, sin mirar la
+   * línea (la del documento no se conoce).
    */
   documentos?: readonly string[];
 }
 
-/**
- * Categorías de los casos del banco y sus sinónimos razonables. Se comparan normalizadas (ver `normalizarCategoria`),
- * así que basta una forma de cada una: sin tildes, sin mayúsculas y sin «de», «la»...
- */
-const EQUIVALENCIAS: Readonly<Record<string, readonly string[]>> = {
-  'inyeccion-ordenes': [
-    'inyeccion-comandos',
-    'inyeccion-orden',
-    'inyeccion-comando',
-    'inyeccion-shell',
-    'command-injection',
-    'os-command-injection',
-    'shell-injection',
-    'ejecucion-ordenes',
-    'ejecucion-comandos',
-    'ejecucion-arbitraria',
-    'rce',
-  ],
-  'recorrido-rutas': [
-    'recorrido-ruta',
-    'path-traversal',
-    'directory-traversal',
-    'traversal',
-    'inyeccion-rutas',
-    'inyeccion-ruta',
-    'ruta-sin-validar',
-    'rutas-sin-validar',
-    'acceso-fuera-raiz',
-  ],
-  'secreto-expuesto': [
-    'secreto-log',
-    'secretos-log',
-    'secreto-registro',
-    'secretos-expuestos',
-    'credenciales-expuestas',
-    'fuga-secretos',
-    'token-expuesto',
-    'secret-leak',
-    'secret-in-log',
-    'secreto-hardcodeado',
-    'secretos-hardcodeados',
-    'secreto-codigo',
-    'secreto-fijo',
-    'token-hardcodeado',
-    'token-fijo',
-    'token-por-defecto',
-    'credencial-por-defecto',
-    'credenciales-por-defecto',
-    'credenciales-hardcodeadas',
-    'credenciales-codigo',
-    'hardcoded-secret',
-    'hardcoded-credentials',
-    'default-credentials',
-    'datos-sensibles-logs',
-    'datos-sensibles-registro',
-    'informacion-sensible-logs',
-    'token-logs',
-    'token-error',
-    'sensitive-data-logging',
-    'sensitive-data-exposure',
-    'information-disclosure',
-    'fuga-informacion',
-  ],
-  xss: [
-    'cross-site-scripting',
-    'xss-reflejado',
-    'xss-reflejada',
-    'reflected-xss',
-    'xss-reflected',
-    'inyeccion-html',
-    'html-injection',
-    'html-sin-escapar',
-    'salida-sin-escapar',
-    'sin-escapar',
-    'falta-escape',
-    'inyeccion-script',
-    'script-injection',
-  ],
-  'tls-desactivado': [
-    'tls-deshabilitado',
-    'tls-inseguro',
-    'verificacion-tls-desactivada',
-    'verificacion-certificados-desactivada',
-    'validacion-certificados-desactivada',
-    'certificado-sin-verificar',
-    'certificados-sin-verificar',
-    'ssl-desactivado',
-    'insecure-tls',
-    'tls-verification-disabled',
-    'certificate-validation-disabled',
-    'improper-certificate-validation',
-    'node-tls-reject-unauthorized',
-    'mitm',
-    'man-in-the-middle',
-  ],
-  'permisos-amplios': [
-    'permisos-inseguros',
-    'permisos-excesivos',
-    'permisos-incorrectos',
-    'permisos-archivo',
-    'permisos-archivos',
-    'world-writable',
-    'world-readable',
-    'insecure-permissions',
-    'insecure-file-permissions',
-    'incorrect-permissions',
-  ],
-  'entrada-sin-limite': [
-    'cuerpo-sin-limite',
-    'sin-limite-tamano',
-    'tamano-sin-limite',
-    'falta-limite-tamano',
-    'limite-tamano',
-    'denegacion-servicio',
-    'dos',
-    'agotamiento-memoria',
-    'memory-exhaustion',
-    'resource-exhaustion',
-    'uncontrolled-resource-consumption',
-    'unbounded-body',
-    'unbounded-input',
-  ],
-  'violacion-adr': [
-    'incumple-adr',
-    'adr',
-    'decision-incumplida',
-    'violacion-decision',
-    'violacion-capas',
-    'dependencia-entre-capas',
-    'dependencia-capas',
-    'dependencia-invertida',
-    'acoplamiento-capas',
-    'limites-modulos',
-    'limite-modulos',
-    'architecture-violation',
-    'layering-violation',
-  ],
-  'sin-prueba': [
-    'sin-pruebas',
-    'falta-prueba',
-    'faltan-pruebas',
-    'falta-pruebas',
-    'prueba-faltante',
-    'pruebas-faltantes',
-    'sin-cobertura',
-    'cobertura',
-    'cobertura-insuficiente',
-    'codigo-sin-prueba',
-    'codigo-sin-pruebas',
-    'missing-test',
-    'missing-tests',
-    'untested',
-  ],
-  'aserciones-debiles': [
-    'asercion-debil',
-    'prueba-debil',
-    'pruebas-debiles',
-    'sin-aserciones',
-    'prueba-sin-aserciones',
-    'prueba-no-comprueba-nada',
-    'prueba-inutil',
-    'prueba-vacia',
-    'prueba-trivial',
-    'weak-assertion',
-    'weak-assertions',
-    'prueba-no-determinista',
-    'no-determinista',
-    'prueba-fragil',
-    'prueba-inestable',
-    'flaky',
-    'flaky-test',
-    'dependencia-fecha-actual',
-    'depende-fecha-actual',
-    'prueba-tautologica',
-    'asercion-tautologica',
-    'tautologia',
-    'asercion-catch',
-  ],
-  'dependencia-red': [
-    'red-real',
-    'llamada-red',
-    'llamada-red-real',
-    'acceso-red',
-    'prueba-red',
-    'prueba-con-red',
-    'dependencia-externa',
-    'servicio-externo',
-    'api-externa',
-    'api-real',
-    'sin-mock',
-    'falta-mock',
-    'sin-simular',
-    'fetch-sin-simular',
-    'prueba-no-aislada',
-    'network-dependency',
-    'external-dependency',
-    'network-call',
-  ],
-  'promesa-sin-esperar': [
-    'promesa-no-esperada',
-    'falta-await',
-    'sin-await',
-    'await-faltante',
-    'promesa-flotante',
-    'promesa-ignorada',
-    'missing-await',
-    'floating-promise',
-    'unawaited-promise',
-    'prueba-asincrona-sin-esperar',
-  ],
-  'consulta-n-mas-uno': [
-    'n-mas-uno',
-    'n-mas-1',
-    'consulta-n-mas-1',
-    'consultas-n-mas-uno',
-    'consultas-n-mas-1',
-    'consulta-elemento',
-    'consulta-bucle',
-    'consultas-bucle',
-    'consultas-repetidas',
-    'n-plus-one',
-    'n-plus-1',
-  ],
-  'lectura-repetida': [
-    'lecturas-repetidas',
-    'lectura-bucle',
-    'lectura-redundante',
-    'e-s-repetida',
-    'es-repetida',
-    'io-repetida',
-    'e-s-redundante',
-    'falta-cache',
-    'sin-cache',
-    'repeated-read',
-    'redundant-io',
-    'e-s-sincrona',
-    'es-sincrona',
-    'io-sincrona',
-    'e-s-bloqueante',
-    'io-bloqueante',
-    'escritura-sincrona',
-    'lectura-sincrona',
-    'llamada-sincrona',
-    'bloqueo-bucle-eventos',
-    'bloquea-bucle-eventos',
-    'bloqueo-event-loop',
-    'sync-io',
-    'blocking-io',
-    'synchronous-io',
-    'trabajo-repetido',
-    'trabajo-redundante',
-    'calculo-repetido',
-    'computo-redundante',
-    'creacion-repetida',
-    'instanciacion-repetida',
-    'objeto-por-iteracion',
-    'invariante-bucle',
-    'loop-invariant',
-    'redundant-work',
-    'repeated-work',
-  ],
-  'complejidad-cuadratica': [
-    'cuadratica',
-    'complejidad',
-    'complejidad-algoritmica',
-    'o-n2',
-    'o-n-2',
-    'o-n-m',
-    'o-n-x-m',
-    'busqueda-lineal',
-    'busqueda-lineal-bucle',
-    'find-bucle',
-    'bucle-anidado',
-    'bucles-anidados',
-    'algoritmo-ineficiente',
-    'quadratic',
-    'quadratic-complexity',
-    'nested-loop',
-  ],
-  'consulta-sin-filtro': [
-    'memoria-desproporcionada',
-    'filtro-memoria',
-    'filtrado-memoria',
-    'consulta-sin-where',
-    'sin-where',
-    'select-sin-where',
-    'consulta-completa',
-    'carga-tabla-completa',
-    'full-table-scan',
-    'over-fetching',
-    'overfetching',
-    'consulta-sin-limite',
-    'sin-paginacion',
-    'falta-paginacion',
-    'memoria',
-    'uso-memoria',
-    'consumo-memoria',
-    'memoria-sin-limite',
-    'memoria-ilimitada',
-    'acumulacion-memoria',
-    'todo-memoria',
-    'sin-streaming',
-    'unbounded-memory',
-    'excessive-memory',
-    'memory-usage',
-  ],
-  'doc-contradice-codigo': [
-    'documentacion',
-    'documentacion-desactualizada',
-    'documentacion-obsoleta',
-    'documentacion-incorrecta',
-    'documentacion-inconsistente',
-    'doc-obsoleta',
-    'doc-desactualizada',
-    'docs-desactualizadas',
-    'inconsistencia-documentacion',
-    'comentario-obsoleto',
-    'comentario-desactualizado',
-    'comentario-incorrecto',
-    'informacion-obsoleta',
-    'readme-desactualizado',
-    'outdated-docs',
-    'stale-docs',
-  ],
-};
-
-/**
- * Categorías que no nombran un fallo concreto. Con ellas (o con el nombre de la estación) un hallazgo encuentra un
- * fallo si casan el archivo y la línea: el revisor escribe la categoría libre y sin vocabulario común.
- */
-export const CATEGORIAS_GENERICAS: readonly string[] = [
-  'general',
-  'otro',
-  'otros',
-  'error',
-  'errores',
-  'bug',
-  'bugs',
-  'fallo',
-  'fallos',
-  'defecto',
-  'problema',
-  'hallazgo',
-  'issue',
-];
-
-/** Palabras que no distinguen una categoría de otra. */
-const VACIAS = new Set(['de', 'del', 'la', 'las', 'el', 'los', 'en', 'por', 'un', 'una', 'que', 'of', 'the', 'in']);
-
-/**
- * Forma comparable de una categoría: sin tildes ni mayúsculas, «+» como «mas», cualquier otro signo como separador y
- * sin palabras vacías. «Inyección de órdenes» y «inyeccion_ordenes» dan lo mismo. NFKD convierte además los
- * superíndices en dígitos, así que «O(n²)» queda como «o-n2».
- */
-export function normalizarCategoria(categoria: string): string {
-  return categoria
-    .normalize('NFKD')
-    .replace(/\p{M}/gu, '')
-    .toLowerCase()
-    .replace(/\+/gu, ' mas ')
-    .split(/[^a-z0-9]+/u)
-    .filter((t) => t !== '' && !VACIAS.has(t))
-    .join('-');
-}
-
-/** De la forma normalizada a la categoría canónica de la tabla. */
-const CANONICA = new Map<string, string>();
-for (const [canonica, sinonimos] of Object.entries(EQUIVALENCIAS)) {
-  for (const nombre of [canonica, ...sinonimos]) {
-    const normal = normalizarCategoria(nombre);
-    const previa = CANONICA.get(normal);
-    // Un sinónimo en dos familias haría que una dependiera del orden de la tabla: es un error de la tabla.
-    if (previa !== undefined && previa !== canonica) throw new Error(`«${nombre}» está en ${previa} y en ${canonica}`);
-    CANONICA.set(normal, canonica);
-  }
-}
-
-const canonica = (categoria: string): string => {
-  const normal = normalizarCategoria(categoria);
-  return CANONICA.get(normal) ?? normal;
-};
-
-/** `true` si las dos categorías son la misma o equivalentes según la tabla. */
-export function categoriasEquivalentes(a: string, b: string): boolean {
-  const ca = canonica(a);
-  return ca !== '' && ca === canonica(b);
-}
-
-const DOCUMENTACION = 'doc-contradice-codigo';
+/** Categoría de los fallos de documentación en `esperado.json`: los únicos que admite un hallazgo en un documento. */
+export const CATEGORIA_DOCUMENTACION = 'doc-contradice-codigo';
 
 /** Ruta comparable: barras normales y sin «./» al principio. */
 export function normalizarRuta(ruta: string): string {
@@ -428,32 +36,22 @@ export function normalizarRuta(ruta: string): string {
   return r;
 }
 
-/** Formas normalizadas de las categorías genéricas. */
-const GENERICAS = new Set(CATEGORIAS_GENERICAS.map(normalizarCategoria));
-
-/** `true` si la categoría del hallazgo vale para el fallo: equivalente, genérica o el nombre de la estación. */
-function categoriaAceptada(categoria: string, fallo: string, estacion: string | undefined): boolean {
-  if (categoriasEquivalentes(categoria, fallo)) return true;
-  const normal = normalizarCategoria(categoria);
-  return GENERICAS.has(normal) || (estacion !== undefined && normal !== '' && normal === normalizarCategoria(estacion));
-}
-
-function casa(h: HallazgoMedible, f: FalloMedible, documentos: ReadonlySet<string>, estacion: string | undefined): boolean {
-  if (!categoriaAceptada(h.categoria, f.categoria, estacion)) return false;
+function casa(h: HallazgoMedible, f: FalloMedible, documentos: ReadonlySet<string>): boolean {
   const archivo = normalizarRuta(h.archivo);
   if (archivo === normalizarRuta(f.archivo)) {
     if (h.linea === null || !Number.isFinite(h.linea)) return false;
     const [desde, hasta] = f.lineas;
     return h.linea >= desde - MARGEN_LINEAS && h.linea <= hasta + MARGEN_LINEAS;
   }
-  return canonica(f.categoria) === DOCUMENTACION && documentos.has(archivo);
+  return f.categoria === CATEGORIA_DOCUMENTACION && documentos.has(archivo);
 }
 
 /**
  * Compara los hallazgos de un revisor con los fallos sembrados de un caso. Un hallazgo encuentra un fallo si habla del
- * mismo archivo, su línea cae en el rango del fallo con `MARGEN_LINEAS` de margen y su categoría es la misma, una
- * equivalente, una genérica o el nombre de la estación (`opciones.estacion`). Cada fallo casa con un hallazgo como mucho (se busca el emparejamiento con más aciertos); los hallazgos
- * de más sobre un fallo ya encontrado no son falsos positivos. Es pura.
+ * mismo archivo y su línea cae en el rango del fallo con `MARGEN_LINEAS` de margen. La categoría que escribe el
+ * revisor no cuenta: la escribe con sus palabras («Dependencia circular», «JSDoc obsoleto»...) y la estación ya acota
+ * el tipo de fallo. Cada fallo casa con un hallazgo como mucho (se busca el emparejamiento con más aciertos); los
+ * hallazgos de más sobre un fallo ya encontrado no son falsos positivos. Es pura.
  */
 export function medir(
   hallazgos: readonly HallazgoMedible[],
@@ -461,7 +59,7 @@ export function medir(
   opciones: OpcionesMedir = {},
 ): Medicion {
   const documentos = new Set((opciones.documentos ?? []).map(normalizarRuta));
-  const compatibles = hallazgos.map((h) => fallos.flatMap((f, j) => (casa(h, f, documentos, opciones.estacion) ? [j] : [])));
+  const compatibles = hallazgos.map((h) => fallos.flatMap((f, j) => (casa(h, f, documentos) ? [j] : [])));
 
   // Emparejamiento máximo por caminos de aumento (los casos son pequeños).
   const duenoDe: Array<number | undefined> = fallos.map(() => undefined);

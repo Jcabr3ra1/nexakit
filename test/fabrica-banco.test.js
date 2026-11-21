@@ -5,7 +5,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { gitConfigGlobalVacio } from '../test-support/git-aislado.js';
-import { medir, observacionDe, categoriasEquivalentes, normalizarCategoria, CATEGORIAS_GENERICAS, TOPE_FALSOS_POSITIVOS } from '../dist/fabrica/banco/medir.js';
+import { medir, observacionDe, TOPE_FALSOS_POSITIVOS } from '../dist/fabrica/banco/medir.js';
 import { elegir, UMBRALES } from '../dist/fabrica/decision.js';
 import {
   planificarBanco,
@@ -51,7 +51,7 @@ const f = (archivo, lineas, categoria) => ({ archivo, lineas, categoria, descrip
 // medir
 // ---------------------------------------------------------------------------------------------------------------
 
-test('medir: un hallazgo en el archivo, las líneas y la categoría del fallo es un acierto', () => {
+test('medir: un hallazgo en el archivo y las líneas del fallo es un acierto', () => {
   const r = medir([h('src/a.js', 12, 'inyeccion-ordenes')], [f('src/a.js', [12, 12], 'inyeccion-ordenes')]);
   assert.deepEqual(r, { aciertos: 1, fallosNoEncontrados: 0, falsosPositivos: 0 });
 });
@@ -66,11 +66,34 @@ test('medir: el rango admite 3 líneas de margen por cada lado y no más', () =>
   }
 });
 
-test('medir: otro archivo, una línea nula o una categoría distinta no aciertan y cuentan como falso positivo', () => {
+test('medir: otro archivo o una línea nula no aciertan y cuentan como falso positivo', () => {
   const fallo = [f('src/a.js', [5, 5], 'inyeccion-ordenes')];
-  for (const hallazgo of [h('src/b.js', 5, 'inyeccion-ordenes'), h('src/a.js', null, 'inyeccion-ordenes'), h('src/a.js', 5, 'consulta-n-mas-uno')]) {
+  for (const hallazgo of [h('src/b.js', 5, 'inyeccion-ordenes'), h('src/a.js', null, 'inyeccion-ordenes')]) {
     assert.deepEqual(medir([hallazgo], fallo), { aciertos: 0, fallosNoEncontrados: 1, falsosPositivos: 1 });
   }
+});
+
+test('medir: la categoría que escribe el revisor no cuenta; casan el archivo y la línea', () => {
+  const fallo = [f('src/a.js', [10, 10], 'inyeccion-ordenes')];
+  for (const categoria of ['inyeccion-ordenes', 'Inyección de órdenes', 'consulta-n-mas-uno', 'Dependencia circular', 'seguridad', 'rendimiento', 'general', '']) {
+    assert.deepEqual(medir([h('src/a.js', 11, categoria)], fallo), { aciertos: 1, fallosNoEncontrados: 0, falsosPositivos: 0 }, categoria);
+    // Tampoco la salva fuera del archivo o de las líneas.
+    assert.deepEqual(medir([h('src/a.js', 30, categoria)], fallo), { aciertos: 0, fallosNoEncontrados: 1, falsosPositivos: 1 }, categoria);
+  }
+  // La estación ya no hace falta: `medir` no la mira.
+  assert.deepEqual(medir([h('src/a.js', 10, 'otra cosa')], fallo, { estacion: 'rendimiento' }), { aciertos: 1, fallosNoEncontrados: 0, falsosPositivos: 0 });
+});
+
+test('medir: el ejemplo real de arquitectura con categorías propias del revisor cuenta sus aciertos', () => {
+  // gpt-6-sol en arquitectura/alta-usuarios (fase 1): acertó archivo y línea con categorías libres y se le contaban 0.
+  const caso = cargarCasos().find((c) => c.estacion === 'arquitectura' && c.nombre === 'alta-usuarios');
+  const hallazgos = [
+    h('repositorios/usuarios.js', 2, 'Dependencia circular'),
+    h('repositorios/usuarios.js', 14, 'Responsabilidad de módulo'),
+    h('servicios/perfil.js', 1, 'Límite de persistencia'),
+  ];
+  assert.equal(caso.fallos.length, 5);
+  assert.deepEqual(medir(hallazgos, caso.fallos), { aciertos: 3, fallosNoEncontrados: 2, falsosPositivos: 0 });
 });
 
 test('medir: las rutas con «./» o barras invertidas se comparan normalizadas', () => {
@@ -79,77 +102,19 @@ test('medir: las rutas con «./» o barras invertidas se comparan normalizadas',
   assert.equal(medir([h('src\\a.js', 5, 'sin-prueba')], fallo).aciertos, 1);
 });
 
-test('medir: las categorías equivalentes aciertan, sin importar mayúsculas, tildes, espacios ni «de»', () => {
-  const casos = [
-    ['Inyección de órdenes', 'inyeccion-ordenes'],
-    ['command injection', 'inyeccion-ordenes'],
-    ['Path traversal', 'recorrido-rutas'],
-    ['recorrido_de_rutas', 'recorrido-rutas'],
-    ['N+1', 'consulta-n-mas-uno'],
-    ['consultas en bucle', 'consulta-n-mas-uno'],
-    ['E/S repetida', 'lectura-repetida'],
-    ['documentación desactualizada', 'doc-contradice-codigo'],
-    ['comentario obsoleto', 'doc-contradice-codigo'],
-    ['falta de pruebas', 'sin-prueba'],
-    ['prueba sin aserciones', 'aserciones-debiles'],
-    ['Violación de ADR', 'violacion-adr'],
-    ['violación de capas', 'violacion-adr'],
-  ];
-  for (const [delModelo, sembrada] of casos) {
-    assert.ok(categoriasEquivalentes(delModelo, sembrada), `${delModelo} ≈ ${sembrada}`);
-    assert.equal(medir([h('a.js', 1, delModelo)], [f('a.js', [1, 1], sembrada)]).aciertos, 1, delModelo);
-  }
-  assert.equal(categoriasEquivalentes('recorrido-rutas', 'inyeccion-ordenes'), false);
-  assert.equal(categoriasEquivalentes('rendimiento', 'lectura-repetida'), false);
-});
-
-test('medir: las categorías de los casos aceptan los nombres corrientes que usan los revisores', () => {
-  const casos = [
-    ['XSS reflejado', 'xss'],
-    ['cross-site scripting', 'xss'],
-    ['verificación TLS desactivada', 'tls-desactivado'],
-    ['man-in-the-middle', 'tls-desactivado'],
-    ['permisos inseguros', 'permisos-amplios'],
-    ['denegación de servicio', 'entrada-sin-limite'],
-    ['secreto-hardcodeado', 'secreto-expuesto'],
-    ['hardcoded secret', 'secreto-expuesto'],
-    ['datos sensibles en logs', 'secreto-expuesto'],
-    ['llamada de red real', 'dependencia-red'],
-    ['falta await', 'promesa-sin-esperar'],
-    ['prueba no determinista', 'aserciones-debiles'],
-    ['O(n²)', 'complejidad-cuadratica'],
-    ['búsqueda lineal en bucle', 'complejidad-cuadratica'],
-    ['filtro en memoria', 'consulta-sin-filtro'],
-    ['uso de memoria', 'memoria-desproporcionada'],
-    ['E/S síncrona', 'lectura-repetida'],
-    ['E/S síncrona', 'e-s-sincrona'],
-    ['trabajo redundante', 'trabajo-repetido'],
-  ];
-  for (const [delModelo, sembrada] of casos) {
-    assert.ok(categoriasEquivalentes(delModelo, sembrada), `${delModelo} ≈ ${sembrada}`);
-    assert.equal(medir([h('a.js', 1, delModelo)], [f('a.js', [1, 1], sembrada)]).aciertos, 1, delModelo);
-  }
-  // NFKD convierte el superíndice: «O(n²)» no se queda en «o-n».
-  assert.equal(normalizarCategoria('O(n²)'), 'o-n2');
-  // Las familias distintas siguen sin mezclarse.
-  for (const [a, b] of [['xss', 'recorrido-rutas'], ['complejidad-cuadratica', 'consulta-n-mas-uno'], ['promesa-sin-esperar', 'sin-prueba'], ['tls-desactivado', 'secreto-expuesto']]) {
-    assert.equal(categoriasEquivalentes(a, b), false, `${a} ≠ ${b}`);
-  }
-});
-
 test('medir: los hallazgos repetidos sobre el mismo fallo cuentan un acierto y ningún falso positivo', () => {
   const r = medir(
-    [h('src/a.js', 12, 'inyeccion-ordenes'), h('src/a.js', 13, 'inyección de órdenes'), h('src/a.js', 11, 'command injection')],
+    [h('src/a.js', 12, 'inyeccion-ordenes'), h('src/a.js', 13, 'shell'), h('src/a.js', 11, 'JSDoc obsoleto')],
     [f('src/a.js', [12, 12], 'inyeccion-ordenes')],
   );
   assert.deepEqual(r, { aciertos: 1, fallosNoEncontrados: 0, falsosPositivos: 0 });
 });
 
 test('medir: un solo hallazgo no cubre dos fallos, y el emparejamiento busca el máximo de aciertos', () => {
-  const fallos = [f('a.js', [10, 10], 'sin-prueba'), f('a.js', [14, 14], 'sin-prueba')];
+  const fallos = [f('a.js', [10, 10], 'sin-prueba'), f('a.js', [14, 14], 'aserciones-debiles')];
   assert.deepEqual(medir([h('a.js', 12, 'sin-prueba')], fallos), { aciertos: 1, fallosNoEncontrados: 1, falsosPositivos: 0 });
   // El primero casa con los dos fallos y el segundo solo con el primero: el máximo es 2.
-  assert.deepEqual(medir([h('a.js', 12, 'sin-prueba'), h('a.js', 8, 'sin-prueba')], fallos), {
+  assert.deepEqual(medir([h('a.js', 12, 'x'), h('a.js', 8, 'y')], fallos), {
     aciertos: 2,
     fallosNoEncontrados: 0,
     falsosPositivos: 0,
@@ -158,7 +123,7 @@ test('medir: un solo hallazgo no cubre dos fallos, y el emparejamiento busca el 
 
 test('medir: mezcla de aciertos, fallos no encontrados y falsos positivos', () => {
   const r = medir(
-    [h('a.js', 3, 'sin-prueba'), h('b.js', 40, 'aserciones-debiles'), h('c.js', 1, 'sin-prueba')],
+    [h('a.js', 3, 'otra'), h('b.js', 40, 'aserciones-debiles'), h('c.js', 1, 'sin-prueba')],
     [f('a.js', [2, 4], 'sin-prueba'), f('b.js', [5, 9], 'aserciones-debiles')],
   );
   assert.deepEqual(r, { aciertos: 1, fallosNoEncontrados: 1, falsosPositivos: 2 });
@@ -166,27 +131,16 @@ test('medir: mezcla de aciertos, fallos no encontrados y falsos positivos', () =
 
 test('medir: un fallo de documentación también lo encuentra un hallazgo sobre un documento del caso', () => {
   const fallo = [f('src/config.js', [3, 3], 'doc-contradice-codigo')];
-  const enReadme = h('README.md', 7, 'documentación desactualizada');
+  const enReadme = h('README.md', 7, 'JSDoc obsoleto');
   assert.equal(medir([enReadme], fallo).aciertos, 0, 'sin documentos declarados no casa');
   assert.deepEqual(medir([enReadme], fallo, { documentos: ['README.md'] }), { aciertos: 1, fallosNoEncontrados: 0, falsosPositivos: 0 });
-  // La línea del README no se conoce: también vale sin línea. Pero no con otra categoría.
+  // La línea del README no se conoce: también vale sin línea, y con cualquier categoría.
   assert.equal(medir([h('README.md', null, 'doc-contradice-codigo')], fallo, { documentos: ['README.md'] }).aciertos, 1);
-  assert.equal(medir([h('README.md', 3, 'inyeccion-ordenes')], fallo, { documentos: ['README.md'] }).aciertos, 0);
+  assert.equal(medir([h('./README.md', 3, 'otra cosa')], fallo, { documentos: ['README.md'] }).aciertos, 1);
+  // Uno a uno también aquí: dos hallazgos en el README no cubren un solo fallo dos veces ni son falsos positivos.
+  assert.deepEqual(medir([enReadme, h('README.md', 9, 'x')], fallo, { documentos: ['README.md'] }), { aciertos: 1, fallosNoEncontrados: 0, falsosPositivos: 0 });
   // Solo vale para fallos de documentación.
   assert.equal(medir([h('README.md', 1, 'sin-prueba')], [f('src/a.js', [1, 1], 'sin-prueba')], { documentos: ['README.md'] }).aciertos, 0);
-});
-
-test('medir: el nombre de la estación o una categoría genérica aciertan si casan el archivo y la línea', () => {
-  const fallo = [f('src/a.js', [10, 10], 'inyeccion-ordenes')];
-  for (const categoria of ['seguridad', 'Seguridad', ...CATEGORIAS_GENERICAS, 'Bug', 'General']) {
-    assert.deepEqual(medir([h('src/a.js', 11, categoria)], fallo, { estacion: 'seguridad' }), { aciertos: 1, fallosNoEncontrados: 0, falsosPositivos: 0 }, categoria);
-  }
-  assert.ok(['general', 'otro', 'error', 'bug'].every((c) => CATEGORIAS_GENERICAS.includes(c)));
-  // El nombre de otra estación no vale, ni la estación sin declararla, ni una genérica fuera del archivo o las líneas.
-  assert.equal(medir([h('src/a.js', 10, 'rendimiento')], fallo, { estacion: 'seguridad' }).aciertos, 0);
-  assert.equal(medir([h('src/a.js', 10, 'seguridad')], fallo).aciertos, 0);
-  assert.deepEqual(medir([h('src/a.js', 30, 'bug')], fallo, { estacion: 'seguridad' }), { aciertos: 0, fallosNoEncontrados: 1, falsosPositivos: 1 });
-  assert.equal(medir([h('src/b.js', 10, 'general')], fallo, { estacion: 'seguridad' }).aciertos, 0);
 });
 
 test('observacionDe: aciertos son los fallos encontrados y fallos, los no encontrados más los falsos positivos', () => {
@@ -655,8 +609,8 @@ test('con medidas buenas en la fase 2, un par medido supera el umbral y gana al 
   const home = temporal('banco-home-');
   const raizCasos = bancoConVariosFallos();
   assert.equal(cargarCasos(raizCasos).length, 3);
-  // Un revisor perfecto: encuentra cada fallo sembrado y, en el caso limpio, no inventa nada. Escribe como categoría
-  // el nombre de la estación, que también vale.
+  // Un revisor perfecto: encuentra cada fallo sembrado y, en el caso limpio, no inventa nada. La categoría
+  // que escribe (el nombre de la estación) no cuenta: casan el archivo y la línea.
   const codex = conector('codex', async (e) => {
     const sembrado = /SEMBRADO ([\d ]+)/u.exec(readFileSync(path.join(e.raiz, 'src', 'a.js'), 'utf8'));
     if (sembrado === null) return informe(e, [], { entrada: 400, salida: 100, total: 500 });
