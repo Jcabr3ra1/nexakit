@@ -7,30 +7,35 @@
       "archivo": "src/config.js",
       "lineas": [3, 3],
       "categoria": "doc-contradice-codigo",
+      "claves": ["10000", "30000", "tiempo-espera", "timeout", "espera"],
       "descripcion": "El tiempo de espera por defecto pasa a 10000 ms, pero la tabla del README sigue diciendo 30000."
     },
     {
       "archivo": "src/config.js",
       "lineas": [12, 13],
       "categoria": "doc-contradice-codigo",
+      "claves": ["reportes-servidor", "reportes-url", "variable", "entorno"],
       "descripcion": "La variable de entorno pasa a llamarse REPORTES_SERVIDOR, pero el README y su ejemplo siguen usando REPORTES_URL."
     },
     {
       "archivo": "src/cli.js",
       "lineas": [12, 15],
       "categoria": "doc-contradice-codigo",
+      "claves": ["sin-comprimir", "comprim", "bandera", "opcion", "flag"],
       "descripcion": "La bandera nueva --sin-comprimir no está documentada, y el README sigue diciendo que el reporte siempre se comprime."
     },
     {
       "archivo": "src/cli.js",
       "lineas": [22, 24],
       "categoria": "doc-contradice-codigo",
+      "claves": ["subir", "enviar", "orden", "comando", "ejemplo"],
       "descripcion": "La orden pasa a llamarse «subir», pero el ejemplo del README sigue usando «enviar», que ahora falla."
     },
     {
       "archivo": "src/cli.js",
       "lineas": [32, 34],
       "categoria": "doc-contradice-codigo",
+      "claves": ["codigo-salida", "exit", "salida", "codigo-3", "codigo-1"],
       "descripcion": "Si el envío falla, la orden termina con el código 3, pero el README dice que termina con el código 1."
     }
   ]

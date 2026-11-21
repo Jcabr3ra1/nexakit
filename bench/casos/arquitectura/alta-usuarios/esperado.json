@@ -18,30 +18,35 @@
       "archivo": "controladores/usuarios.js",
       "lineas": [2, 11],
       "categoria": "violacion-adr",
+      "claves": ["repositorio", "capa", "adr", "salto", "acceso-directo", "servicios"],
       "descripcion": "El controlador importa y llama directamente al repositorio, saltándose la capa de servicios que exige el ADR 0003."
     },
     {
       "archivo": "controladores/usuarios.js",
       "lineas": [36, 38],
       "categoria": "violacion-adr",
+      "claves": ["correo", "duplic", "regla", "negocio", "validacion", "repite"],
       "descripcion": "El controlador repite la regla de qué correo es válido, que es de negocio y ya vive en servicios/usuarios.js."
     },
     {
       "archivo": "servicios/perfil.js",
       "lineas": [1, 10],
       "categoria": "violacion-adr",
+      "claves": ["db", "sql", "persistencia", "repositorio", "base-datos", "acceso-datos", "update"],
       "descripcion": "El servicio importa db.js y lanza la consulta UPDATE él mismo, cuando solo los repositorios pueden usar la base de datos."
     },
     {
       "archivo": "repositorios/usuarios.js",
       "lineas": [2, 5],
       "categoria": "violacion-adr",
+      "claves": ["circular", "ciclo", "ciclic", "servicio", "invert", "direccion", "dependencia"],
       "descripcion": "El repositorio importa de servicios/: la dependencia va al revés y crea un ciclo entre las dos capas."
     },
     {
       "archivo": "repositorios/usuarios.js",
       "lineas": [15, 15],
       "categoria": "violacion-adr",
+      "claves": ["negocio", "limite", "dominio", "edu", "proyectos", "regla"],
       "descripcion": "El repositorio decide el límite de proyectos según el dominio del correo, una regla de negocio que corresponde a los servicios."
     }
   ]

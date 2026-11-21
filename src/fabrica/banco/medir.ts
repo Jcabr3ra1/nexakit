@@ -4,10 +4,10 @@ import type { FalloSembrado } from './casos.js';
 /** Líneas de margen por cada lado del rango de un fallo sembrado. */
 export const MARGEN_LINEAS = 3;
 
-/** Lo que `medir` usa de un hallazgo del revisor: el archivo y la línea, no la categoría. */
-export type HallazgoMedible = Pick<Hallazgo, 'archivo' | 'linea'>;
-/** Lo que `medir` usa de un fallo sembrado: su categoría solo dice si es de documentación. */
-export type FalloMedible = Pick<FalloSembrado, 'archivo' | 'lineas' | 'categoria'>;
+/** Lo que `medir` usa de un hallazgo del revisor: dónde está y lo que dice (categoría, hallazgo y evidencia). */
+export type HallazgoMedible = Pick<Hallazgo, 'archivo' | 'linea' | 'categoria' | 'hallazgo' | 'evidencia'>;
+/** Lo que `medir` usa de un fallo sembrado: dónde está, sus claves y si es de documentación (su categoría). */
+export type FalloMedible = Pick<FalloSembrado, 'archivo' | 'lineas' | 'categoria' | 'claves'>;
 
 export interface Medicion {
   /** Fallos sembrados que encontró algún hallazgo. */
@@ -20,8 +20,8 @@ export interface Medicion {
 export interface OpcionesMedir {
   /**
    * Documentos del caso (README, guías...). Un fallo de documentación se ancla en el código que cambió, pero la
-   * contradicción está en un documento; un hallazgo sobre uno de estos documentos también lo encuentra, sin mirar la
-   * línea (la del documento no se conoce).
+   * contradicción está en un documento; un hallazgo con sus claves sobre uno de estos documentos también lo encuentra,
+   * sin mirar la línea (la del documento no se conoce).
    */
   documentos?: readonly string[];
 }
@@ -36,7 +36,36 @@ export function normalizarRuta(ruta: string): string {
   return r;
 }
 
+/** Palabras que no distinguen nada: se quitan al normalizar. */
+const VACIAS = new Set(['de', 'del', 'la', 'las', 'el', 'los', 'en', 'por', 'un', 'una', 'que', 'of', 'the', 'in']);
+
+/**
+ * Forma comparable de un texto: sin tildes ni mayúsculas, «+» como «mas», cualquier otro signo como separador, sin
+ * palabras vacías y con las palabras unidas por guiones. «Inyección de órdenes» da «inyeccion-ordenes» y «N+1»,
+ * «n-mas-1». Las claves de los fallos se escriben ya así.
+ */
+export function normalizarTexto(texto: string): string {
+  return texto
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/\+/gu, ' mas ')
+    .split(/[^a-z0-9]+/u)
+    .filter((t) => t !== '' && !VACIAS.has(t))
+    .join('-');
+}
+
+/**
+ * `true` si alguna clave aparece en la categoría, el hallazgo o la evidencia. Una clave es una raíz que empieza en un
+ * límite de palabra: «certificad» casa con «certificados», y «red» con «red-real» pero no con «credencial».
+ */
+export function tieneClave(h: HallazgoMedible, claves: readonly string[]): boolean {
+  const texto = `-${normalizarTexto(`${h.categoria} ${h.hallazgo} ${h.evidencia}`)}-`;
+  return claves.some((clave) => clave !== '' && texto.includes(`-${clave}`));
+}
+
 function casa(h: HallazgoMedible, f: FalloMedible, documentos: ReadonlySet<string>): boolean {
+  if (!tieneClave(h, f.claves)) return false;
   const archivo = normalizarRuta(h.archivo);
   if (archivo === normalizarRuta(f.archivo)) {
     if (h.linea === null || !Number.isFinite(h.linea)) return false;
@@ -48,10 +77,12 @@ function casa(h: HallazgoMedible, f: FalloMedible, documentos: ReadonlySet<strin
 
 /**
  * Compara los hallazgos de un revisor con los fallos sembrados de un caso. Un hallazgo encuentra un fallo si habla del
- * mismo archivo y su línea cae en el rango del fallo con `MARGEN_LINEAS` de margen. La categoría que escribe el
- * revisor no cuenta: la escribe con sus palabras («Dependencia circular», «JSDoc obsoleto»...) y la estación ya acota
- * el tipo de fallo. Cada fallo casa con un hallazgo como mucho (se busca el emparejamiento con más aciertos); los
- * hallazgos de más sobre un fallo ya encontrado no son falsos positivos. Es pura.
+ * mismo archivo, su línea cae en el rango del fallo con `MARGEN_LINEAS` de margen y alguna clave del fallo aparece en
+ * su categoría, su hallazgo o su evidencia (`tieneClave`). La categoría no tiene que coincidir: el revisor la escribe
+ * con sus palabras («Dependencia circular», «JSDoc obsoleto»...). Las claves evitan que un defecto distinto a pocas
+ * líneas (una URL sin validar junto al TLS desactivado) cuente como el fallo sembrado. Cada fallo casa con un hallazgo
+ * como mucho (se busca el emparejamiento con más aciertos); los hallazgos de más sobre un fallo ya encontrado no son
+ * falsos positivos. Es pura.
  */
 export function medir(
   hallazgos: readonly HallazgoMedible[],

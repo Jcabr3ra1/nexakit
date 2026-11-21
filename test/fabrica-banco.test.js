@@ -36,24 +36,25 @@ function temporal(prefijo) {
   return dir;
 }
 
-const h = (archivo, linea, categoria) => ({
+const h = (archivo, linea, categoria, hallazgo = 'algo', evidencia = 'algo') => ({
   estacion: 'seguridad',
   gravedad: 'alta',
   archivo,
   linea,
   categoria,
-  hallazgo: 'algo',
-  evidencia: 'algo',
+  hallazgo,
+  evidencia,
   propuesta: 'algo',
   confianza: 'alta',
 });
-const f = (archivo, lineas, categoria) => ({ archivo, lineas, categoria, descripcion: 'fallo sembrado' });
+/** Fallo sembrado; por defecto su única clave es su propia categoría. */
+const f = (archivo, lineas, categoria, claves = [categoria]) => ({ archivo, lineas, categoria, claves, descripcion: 'fallo sembrado' });
 
 // ---------------------------------------------------------------------------------------------------------------
 // medir
 // ---------------------------------------------------------------------------------------------------------------
 
-test('medir: un hallazgo en el archivo y las líneas del fallo es un acierto', () => {
+test('medir: un hallazgo en el archivo y las líneas del fallo, con una de sus claves, es un acierto', () => {
   const r = medir([h('src/a.js', 12, 'inyeccion-ordenes')], [f('src/a.js', [12, 12], 'inyeccion-ordenes')]);
   assert.deepEqual(r, { aciertos: 1, fallosNoEncontrados: 0, falsosPositivos: 0 });
 });
@@ -75,24 +76,63 @@ test('medir: otro archivo o una línea nula no aciertan y cuentan como falso pos
   }
 });
 
-test('medir: la categoría que escribe el revisor no cuenta; casan el archivo y la línea', () => {
-  const fallo = [f('src/a.js', [10, 10], 'inyeccion-ordenes')];
-  for (const categoria of ['inyeccion-ordenes', 'Inyección de órdenes', 'consulta-n-mas-uno', 'Dependencia circular', 'seguridad', 'rendimiento', 'general', '']) {
-    assert.deepEqual(medir([h('src/a.js', 11, categoria)], fallo), { aciertos: 1, fallosNoEncontrados: 0, falsosPositivos: 0 }, categoria);
-    // Tampoco la salva fuera del archivo o de las líneas.
-    assert.deepEqual(medir([h('src/a.js', 30, categoria)], fallo), { aciertos: 0, fallosNoEncontrados: 1, falsosPositivos: 1 }, categoria);
+test('medir: sin ninguna clave del fallo en la categoría ni en el texto no acierta, aunque casen archivo y línea', () => {
+  const fallo = [f('src/a.js', [10, 10], 'tls-desactivado', ['tls', 'certificad'])];
+  assert.deepEqual(medir([h('src/a.js', 10, 'seguridad', 'Algo raro en la red')], fallo), { aciertos: 0, fallosNoEncontrados: 1, falsosPositivos: 1 });
+  // La clave vale en la categoría, en el hallazgo o en la evidencia, sin mayúsculas ni tildes y por raíz.
+  for (const hallazgo of [
+    h('src/a.js', 10, 'TLS desactivado'),
+    h('src/a.js', 11, 'red', 'Se desactiva la verificación de los Certificados'),
+    h('src/a.js', 9, 'otra cosa', 'algo', "process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'"),
+  ]) {
+    assert.deepEqual(medir([hallazgo], fallo), { aciertos: 1, fallosNoEncontrados: 0, falsosPositivos: 0 }, hallazgo.categoria);
   }
-  // La estación ya no hace falta: `medir` no la mira.
-  assert.deepEqual(medir([h('src/a.js', 10, 'otra cosa')], fallo, { estacion: 'rendimiento' }), { aciertos: 1, fallosNoEncontrados: 0, falsosPositivos: 0 });
+  // La raíz empieza en un límite de palabra: «red» no casa con «credencial».
+  const red = [f('src/a.js', [10, 10], 'dependencia-red', ['red', 'fetch'])];
+  assert.equal(medir([h('src/a.js', 10, 'credenciales', 'credencial expuesta')], red).aciertos, 0);
+  assert.equal(medir([h('src/a.js', 10, 'prueba', 'llama a la red real')], red).aciertos, 1);
+  // Las claves de varias palabras casan con el texto normalizado: «N+1» es «n-mas-1».
+  assert.equal(medir([h('src/a.js', 10, 'Consultas N+1')], [f('src/a.js', [10, 10], 'consulta-n-mas-uno', ['n-mas'])]).aciertos, 1);
+});
+
+test('medir: el ejemplo real de SSRF casado con el TLS desactivado no es un acierto', () => {
+  // gpt-6-sol en seguridad/inyeccion-orden (fase 1): en la línea del TLS, pero habla de la URL remota sin validar.
+  const caso = cargarCasos().find((c) => c.estacion === 'seguridad' && c.nombre === 'inyeccion-orden');
+  const tls = caso.fallos.filter((x) => x.categoria === 'tls-desactivado');
+  assert.equal(tls.length, 1);
+  const ssrf = h(
+    'src/respaldo.ts',
+    23,
+    'destino de red sin validar',
+    'La URL remota controlable puede enviar el token y el respaldo a un destino no confiable.',
+    'fetch usa remoto.url directamente y añade Authorization: Bearer; no se restringen esquema, host ni redirecciones.',
+  );
+  assert.deepEqual(medir([ssrf], tls), { aciertos: 0, fallosNoEncontrados: 1, falsosPositivos: 1 });
+});
+
+test('medir: un acierto legítimo con una categoría imprevisible casa por el texto', () => {
+  const tls = cargarCasos().find((c) => c.nombre === 'inyeccion-orden').fallos.filter((x) => x.categoria === 'tls-desactivado');
+  const enRed = h('src/respaldo.ts', 23, 'red', 'Deshabilitación global de la validación de certificados TLS/SSL', "process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';");
+  assert.deepEqual(medir([enRed], tls), { aciertos: 1, fallosNoEncontrados: 0, falsosPositivos: 0 });
+  // gpt-6.2-astra en documentacion/comentario-obsoleto: «Formato del identificador».
+  const caso = cargarCasos().find((c) => c.nombre === 'comentario-obsoleto');
+  const id = h(
+    'src/usuarios.ts',
+    11,
+    'Formato del identificador',
+    'crearUsuario sigue anunciando un identificador numérico consecutivo desde 1.',
+    'La función declara un retorno string y devuelve el identificador generado por randomUUID().',
+  );
+  assert.equal(medir([id], caso.fallos).aciertos, 1);
 });
 
 test('medir: el ejemplo real de arquitectura con categorías propias del revisor cuenta sus aciertos', () => {
   // gpt-6-sol en arquitectura/alta-usuarios (fase 1): acertó archivo y línea con categorías libres y se le contaban 0.
   const caso = cargarCasos().find((c) => c.estacion === 'arquitectura' && c.nombre === 'alta-usuarios');
   const hallazgos = [
-    h('repositorios/usuarios.js', 2, 'Dependencia circular'),
-    h('repositorios/usuarios.js', 14, 'Responsabilidad de módulo'),
-    h('servicios/perfil.js', 1, 'Límite de persistencia'),
+    h('repositorios/usuarios.js', 2, 'Dependencia circular', 'El repositorio importa una función del servicio de usuarios, invirtiendo la dirección de dependencias y creando un ciclo entre ambas capas.'),
+    h('repositorios/usuarios.js', 14, 'Responsabilidad de módulo', 'La regla que asigna el límite de proyectos según el dominio del correo queda dentro de la capa de persistencia.'),
+    h('servicios/perfil.js', 1, 'Límite de persistencia', 'El nuevo servicio ejecuta SQL directamente, repartiendo el acceso a usuarios entre servicio y repositorio.'),
   ];
   assert.equal(caso.fallos.length, 5);
   assert.deepEqual(medir(hallazgos, caso.fallos), { aciertos: 3, fallosNoEncontrados: 2, falsosPositivos: 0 });
@@ -106,17 +146,17 @@ test('medir: las rutas con «./» o barras invertidas se comparan normalizadas',
 
 test('medir: los hallazgos repetidos sobre el mismo fallo cuentan un acierto y ningún falso positivo', () => {
   const r = medir(
-    [h('src/a.js', 12, 'inyeccion-ordenes'), h('src/a.js', 13, 'shell'), h('src/a.js', 11, 'JSDoc obsoleto')],
-    [f('src/a.js', [12, 12], 'inyeccion-ordenes')],
+    [h('src/a.js', 12, 'inyeccion-ordenes'), h('src/a.js', 13, 'shell', 'inyección de órdenes'), h('src/a.js', 11, 'x', 'otra vez la inyeccion')],
+    [f('src/a.js', [12, 12], 'inyeccion-ordenes', ['inyeccion'])],
   );
   assert.deepEqual(r, { aciertos: 1, fallosNoEncontrados: 0, falsosPositivos: 0 });
 });
 
 test('medir: un solo hallazgo no cubre dos fallos, y el emparejamiento busca el máximo de aciertos', () => {
-  const fallos = [f('a.js', [10, 10], 'sin-prueba'), f('a.js', [14, 14], 'aserciones-debiles')];
-  assert.deepEqual(medir([h('a.js', 12, 'sin-prueba')], fallos), { aciertos: 1, fallosNoEncontrados: 1, falsosPositivos: 0 });
+  const fallos = [f('a.js', [10, 10], 'sin-prueba', ['cobertura']), f('a.js', [14, 14], 'aserciones-debiles', ['cobertura'])];
+  assert.deepEqual(medir([h('a.js', 12, 'cobertura')], fallos), { aciertos: 1, fallosNoEncontrados: 1, falsosPositivos: 0 });
   // El primero casa con los dos fallos y el segundo solo con el primero: el máximo es 2.
-  assert.deepEqual(medir([h('a.js', 12, 'x'), h('a.js', 8, 'y')], fallos), {
+  assert.deepEqual(medir([h('a.js', 12, 'cobertura'), h('a.js', 8, 'cobertura')], fallos), {
     aciertos: 2,
     fallosNoEncontrados: 0,
     falsosPositivos: 0,
@@ -125,22 +165,26 @@ test('medir: un solo hallazgo no cubre dos fallos, y el emparejamiento busca el 
 
 test('medir: mezcla de aciertos, fallos no encontrados y falsos positivos', () => {
   const r = medir(
-    [h('a.js', 3, 'otra'), h('b.js', 40, 'aserciones-debiles'), h('c.js', 1, 'sin-prueba')],
+    [h('a.js', 3, 'sin-prueba'), h('b.js', 40, 'aserciones-debiles'), h('c.js', 1, 'sin-prueba'), h('a.js', 2, 'otra cosa')],
     [f('a.js', [2, 4], 'sin-prueba'), f('b.js', [5, 9], 'aserciones-debiles')],
   );
-  assert.deepEqual(r, { aciertos: 1, fallosNoEncontrados: 1, falsosPositivos: 2 });
+  assert.deepEqual(r, { aciertos: 1, fallosNoEncontrados: 1, falsosPositivos: 3 });
 });
 
-test('medir: un fallo de documentación también lo encuentra un hallazgo sobre un documento del caso', () => {
-  const fallo = [f('src/config.js', [3, 3], 'doc-contradice-codigo')];
-  const enReadme = h('README.md', 7, 'JSDoc obsoleto');
-  assert.equal(medir([enReadme], fallo).aciertos, 0, 'sin documentos declarados no casa');
-  assert.deepEqual(medir([enReadme], fallo, { documentos: ['README.md'] }), { aciertos: 1, fallosNoEncontrados: 0, falsosPositivos: 0 });
-  // La línea del README no se conoce: también vale sin línea, y con cualquier categoría.
-  assert.equal(medir([h('README.md', null, 'doc-contradice-codigo')], fallo, { documentos: ['README.md'] }).aciertos, 1);
-  assert.equal(medir([h('./README.md', 3, 'otra cosa')], fallo, { documentos: ['README.md'] }).aciertos, 1);
+test('medir: un fallo de documentación también lo encuentra un hallazgo con sus claves sobre un documento del caso', () => {
+  const fallos = [
+    f('src/usuarios.js', [3, 3], 'doc-contradice-codigo', ['uuid', 'identificador']),
+    f('src/usuarios.js', [20, 20], 'doc-contradice-codigo', ['null', 'buscarusuario']),
+  ];
+  const ejemplo = h('README.md', 17, 'ejemplo-roto', 'El ejemplo comprueba ana === null, pero buscarUsuario ya lanza una excepción.');
+  assert.equal(medir([ejemplo], fallos).aciertos, 0, 'sin documentos declarados no casa');
+  // Casa con el fallo de sus claves, sin mirar la línea (la del documento no se conoce): también sin línea.
+  assert.deepEqual(medir([ejemplo], fallos, { documentos: ['README.md'] }), { aciertos: 1, fallosNoEncontrados: 1, falsosPositivos: 0 });
+  assert.equal(medir([{ ...ejemplo, archivo: './README.md', linea: null }], fallos, { documentos: ['README.md'] }).aciertos, 1);
+  // Sin ninguna clave del fallo, un hallazgo en el README no lo encuentra.
+  assert.deepEqual(medir([h('README.md', 3, 'jsdoc', 'falta una coma')], fallos, { documentos: ['README.md'] }), { aciertos: 0, fallosNoEncontrados: 2, falsosPositivos: 1 });
   // Uno a uno también aquí: dos hallazgos en el README no cubren un solo fallo dos veces ni son falsos positivos.
-  assert.deepEqual(medir([enReadme, h('README.md', 9, 'x')], fallo, { documentos: ['README.md'] }), { aciertos: 1, fallosNoEncontrados: 0, falsosPositivos: 0 });
+  assert.deepEqual(medir([ejemplo, { ...ejemplo, linea: 30 }], fallos, { documentos: ['README.md'] }), { aciertos: 1, fallosNoEncontrados: 1, falsosPositivos: 0 });
   // Solo vale para fallos de documentación.
   assert.equal(medir([h('README.md', 1, 'sin-prueba')], [f('src/a.js', [1, 1], 'sin-prueba')], { documentos: ['README.md'] }).aciertos, 0);
 });
@@ -623,7 +667,7 @@ function bancoConVariosFallos() {
       estacion: 'rendimiento',
       base: { archivos: ['src/a.js'] },
       cambio: { archivos: ['src/a.js'] },
-      fallos: fallos.map((l) => ({ archivo: 'src/a.js', lineas: [l, l], categoria: 'lectura-repetida', descripcion: 'fallo sembrado' })),
+      fallos: fallos.map((l) => ({ archivo: 'src/a.js', lineas: [l, l], categoria: 'lectura-repetida', claves: ['lectura', 'repetid'], descripcion: 'fallo sembrado' })),
     }));
   };
   crear('caso-a', [3, 12, 21]);
@@ -636,13 +680,13 @@ test('con medidas buenas en la fase 2, un par medido supera el umbral y gana al 
   const home = temporal('banco-home-');
   const raizCasos = bancoConVariosFallos();
   assert.equal(cargarCasos(raizCasos).length, 3);
-  // Un revisor perfecto: encuentra cada fallo sembrado y, en el caso limpio, no inventa nada. La categoría
-  // que escribe (el nombre de la estación) no cuenta: casan el archivo y la línea.
+  // Un revisor perfecto: encuentra cada fallo sembrado y, en el caso limpio, no inventa nada. Su categoría
+  // lleva una clave de los fallos sembrados.
   const codex = conector('codex', async (e) => {
     const sembrado = /SEMBRADO ([\d ]+)/u.exec(readFileSync(path.join(e.raiz, 'src', 'a.js'), 'utf8'));
     if (sembrado === null) return informe(e, [], { entrada: 400, salida: 100, total: 500 });
     const fallos = sembrado[1].split(' ').map(Number);
-    return informe(e, fallos.map((l) => h('src/a.js', l, 'Rendimiento')), { entrada: 800, salida: 200, total: 1000 });
+    return informe(e, fallos.map((l) => h('src/a.js', l, 'Rendimiento', 'Lectura repetida del disco')), { entrada: 800, salida: 200, total: 1000 });
   });
   const fase1 = medida(evidenciaVacia(), 'codex', 'gpt-a', 'low', 'rendimiento', 3, 0, 1000);
   await guardar(home, fase1);

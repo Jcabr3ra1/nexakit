@@ -10,6 +10,9 @@ import { fileSymlinkSkipReason } from '../testing/symlink-capability.js';
 
 const SIN_ENLACES = process.platform === 'win32' || fileSymlinkSkipReason();
 
+/** Claves válidas para los fallos de las pruebas. */
+const CLAVES = ['inyeccion', 'shell'];
+
 const EXTERNAS = ['seguridad', 'arquitectura', 'pruebas', 'rendimiento', 'documentacion'];
 
 /** Crea un caso mínimo en un directorio temporal y devuelve su ruta. */
@@ -30,7 +33,7 @@ const valido = (extra = {}) => ({
   estacion: 'seguridad',
   base: { archivos: ['a.js'] },
   cambio: { archivos: ['a.js'] },
-  fallos: [{ archivo: 'a.js', lineas: [2, 4], categoria: 'inyeccion', descripcion: 'Algo falla.' }],
+  fallos: [{ archivo: 'a.js', lineas: [2, 4], categoria: 'inyeccion', claves: CLAVES, descripcion: 'Algo falla.' }],
   ...extra,
 });
 
@@ -56,7 +59,7 @@ test('cada caso con fallo siembra al menos 5 fallos de su estación', () => {
 
 /** Archivo de 40 líneas para probar la separación entre fallos. */
 const CUARENTA = Array.from({ length: 40 }, (_, i) => `const v${i + 1} = ${i + 1};`).join('\n') + '\n';
-const fallo = (lineas, archivo = 'a.js') => ({ archivo, lineas, categoria: 'inyeccion', descripcion: 'd' });
+const fallo = (lineas, archivo = 'a.js') => ({ archivo, lineas, categoria: 'inyeccion', claves: CLAVES, descripcion: 'd' });
 const conFallos = (fallos, archivos = ['a.js']) =>
   crearCaso(valido({ base: { archivos }, cambio: { archivos }, fallos }), {
     base: Object.fromEntries(archivos.map((a) => [a, CUARENTA])),
@@ -95,7 +98,7 @@ test('un caso correcto no da errores', () => {
 
 test('un rango de líneas fuera del archivo se rechaza', () => {
   for (const lineas of [[1, 5], [0, 2], [3, 2], [5, 5]]) {
-    const { dir } = crearCaso(valido({ fallos: [{ archivo: 'a.js', lineas, categoria: 'x', descripcion: 'd' }] }));
+    const { dir } = crearCaso(valido({ fallos: [{ archivo: 'a.js', lineas, categoria: 'x', claves: CLAVES, descripcion: 'd' }] }));
     const errores = validarCaso(dir);
     assert.ok(errores.length > 0, `debía rechazar ${lineas}`);
     assert.match(errores.join('\n'), /líneas/);
@@ -104,7 +107,7 @@ test('un rango de líneas fuera del archivo se rechaza', () => {
 
 test('las líneas cuentan sobre la versión de cambio', () => {
   // cambio tiene 4 líneas; base solo 3.
-  const { dir } = crearCaso(valido({ fallos: [{ archivo: 'a.js', lineas: [4, 4], categoria: 'x', descripcion: 'd' }] }));
+  const { dir } = crearCaso(valido({ fallos: [{ archivo: 'a.js', lineas: [4, 4], categoria: 'x', claves: CLAVES, descripcion: 'd' }] }));
   assert.deepEqual(validarCaso(dir), []);
 });
 
@@ -140,16 +143,41 @@ test('la estación debe coincidir con la carpeta y ser conocida', () => {
 
 test('categoría y descripción se validan', () => {
   for (const f of [
-    { categoria: 'con espacios', descripcion: 'd' },
-    { categoria: '', descripcion: 'd' },
-    { categoria: 'x'.repeat(33), descripcion: 'd' },
+    { categoria: 'con espacios', claves: CLAVES, descripcion: 'd' },
+    { categoria: '', claves: CLAVES, descripcion: 'd' },
+    { categoria: 'x'.repeat(33), claves: CLAVES, descripcion: 'd' },
     { categoria: 'ok', descripcion: '   ' },
   ]) {
-    const { dir } = crearCaso(valido({ fallos: [{ archivo: 'a.js', lineas: [1, 1], ...f }] }));
+    const { dir } = crearCaso(valido({ fallos: [{ archivo: 'a.js', lineas: [1, 1], claves: CLAVES, ...f }] }));
     assert.ok(validarCaso(dir).length > 0, JSON.stringify(f));
   }
-  const { dir } = crearCaso(valido({ fallos: [{ archivo: 'a.js', lineas: [1, 1], categoria: 'inyección_2-b', descripcion: 'd' }] }));
+  const { dir } = crearCaso(valido({ fallos: [{ archivo: 'a.js', lineas: [1, 1], categoria: 'inyección_2-b', claves: CLAVES, descripcion: 'd' }] }));
   assert.deepEqual(validarCaso(dir), []);
+});
+
+test('las claves de cada fallo son obligatorias: entre 2 y 8 raíces normalizadas, sin repetir ni genéricas', () => {
+  const con = (claves) => {
+    const fallo = { archivo: 'a.js', lineas: [1, 1], categoria: 'x', descripcion: 'd' };
+    if (claves !== undefined) fallo.claves = claves;
+    return validarCaso(crearCaso(valido({ fallos: [fallo] })).dir);
+  };
+  assert.deepEqual(con(['tls', 'certificad']), []);
+  assert.deepEqual(con(['n-mas', 'reject-unauthorized', '0o666', 'a1', 'b2', 'c3', 'd4', 'e5']), []);
+  const casos = [
+    [undefined, /claves/u],
+    [['tls'], /claves/u],
+    [['a1', 'b2', 'c3', 'd4', 'e5', 'f6', 'g7', 'h8', 'i9'], /claves/u],
+    [['tls', 'tls'], /repite la clave «tls»/u],
+    [['tls', ''], /clave «» no está normalizada/u],
+    [['tls', 'Certificado'], /clave «Certificado» no está normalizada/u],
+    [['tls', 'verificación'], /no está normalizada/u],
+    [['tls', 'con espacio'], /no está normalizada/u],
+    [['tls', 'por-defecto'], /no está normalizada/u],
+    [['tls', 'error'], /clave «error» es demasiado genérica/u],
+    [['tls', 'seguridad'], /demasiado genérica/u],
+    [['tls', 'x'], /demasiado corta/u],
+  ];
+  for (const [claves, patron] of casos) assert.match(con(claves).join('\n'), patron, JSON.stringify(claves));
 });
 
 test('un esperado.json ilegible o con campos de más da error, no excepción', () => {
@@ -161,7 +189,7 @@ test('un esperado.json ilegible o con campos de más da error, no excepción', (
 });
 
 test('cargarCasos lanza ErrorFabrica si un caso es inválido', () => {
-  const { raiz } = crearCaso(valido({ fallos: [{ archivo: 'a.js', lineas: [9, 9], categoria: 'x', descripcion: 'd' }] }));
+  const { raiz } = crearCaso(valido({ fallos: [{ archivo: 'a.js', lineas: [9, 9], categoria: 'x', claves: CLAVES, descripcion: 'd' }] }));
   assert.throws(() => cargarCasos(raiz), (e) => e instanceof ErrorFabrica && /seguridad\/caso/.test(e.message));
   rmSync(raiz, { recursive: true, force: true });
 });

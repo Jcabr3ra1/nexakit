@@ -3,17 +3,63 @@ import path from 'node:path';
 import { z } from 'zod';
 import { ErrorFabrica } from '../errores.js';
 import { NOMBRES_ESTACION, type NombreEstacion } from '../esquemas.js';
-import { MARGEN_LINEAS } from './medir.js';
+import { MARGEN_LINEAS, normalizarTexto } from './medir.js';
 
 /** Raíz de los casos del banco: `bench/casos` en la raíz del paquete. */
 export const RAIZ_CASOS = path.resolve(import.meta.dirname, '../../../bench/casos');
 
 const Archivos = z.strictObject({ archivos: z.array(z.string()) });
 
+/** Claves por fallo sembrado, como mínimo y como máximo. */
+export const MIN_CLAVES = 2;
+export const MAX_CLAVES = 8;
+
+/**
+ * Claves demasiado genéricas: casarían con casi cualquier hallazgo (o con todos los de una estación) y el casado
+ * volvería a depender solo de la línea.
+ */
+export const CLAVES_GENERICAS: readonly string[] = [
+  ...NOMBRES_ESTACION,
+  'error',
+  'errores',
+  'fallo',
+  'fallos',
+  'bug',
+  'bugs',
+  'defecto',
+  'problema',
+  'general',
+  'otro',
+  'hallazgo',
+  'issue',
+  'riesgo',
+  'mejora',
+  'prueba',
+  'pruebas',
+  'test',
+  'archivo',
+  'funcion',
+  'linea',
+];
+
+/** Errores de las claves de un fallo: normalizadas (`normalizarTexto`), sin repetir, ni cortas ni genéricas. */
+function erroresDeClaves(claves: readonly string[]): string[] {
+  const errores: string[] = [];
+  for (const [i, clave] of claves.entries()) {
+    if (clave === '' || normalizarTexto(clave) !== clave) errores.push(`la clave «${clave}» no está normalizada (sin tildes, mayúsculas, espacios ni palabras vacías)`);
+    else if (clave.replace(/-/gu, '').length < 2) errores.push(`la clave «${clave}» es demasiado corta`);
+    else if (CLAVES_GENERICAS.includes(clave)) errores.push(`la clave «${clave}» es demasiado genérica`);
+    if (claves.indexOf(clave) !== i) errores.push(`repite la clave «${clave}»`);
+  }
+  return errores;
+}
+
 const Fallo = z.strictObject({
   archivo: z.string(),
   lineas: z.tuple([z.number().int(), z.number().int()]),
   categoria: z.string().regex(/^[\p{L}\p{N}_-]{1,32}$/u),
+  /** Raíces que debe nombrar un hallazgo para encontrar este fallo (ver `tieneClave` en medir.ts). */
+  claves: z.array(z.string()).min(MIN_CLAVES).max(MAX_CLAVES),
   descripcion: z.string().refine((d) => d.trim().length > 0),
 });
 export type FalloSembrado = z.infer<typeof Fallo>;
@@ -166,6 +212,7 @@ function leerCaso(directorio: string): { caso?: CasoBanco; errores: string[] } {
     }
     for (const [i, fallo] of esperado.fallos.entries()) {
       const etiqueta = `fallos[${i}]`;
+      for (const error of erroresDeClaves(fallo.claves)) fallar(`${etiqueta}: ${error}`);
       if (!esperado.cambio.archivos.includes(fallo.archivo)) {
         fallar(`${etiqueta}: «${fallo.archivo}» no está en cambio.archivos`);
         continue;
