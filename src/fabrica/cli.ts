@@ -63,7 +63,7 @@ estado y resultado consultan un recorrido por su id; cancelar lo interrumpe (Ctr
 banco mide los modelos con casos con fallos sembrados y suma el resultado a la evidencia. planificar no ejecuta
 nada: muestra las llamadas, el coste estimado y la huella, y guarda el plan en ~/.nexakit/fabrica/banco-plan.json.
 ejecutar solo lanza ese plan guardado si la huella coincide, en primer plano, y lo consume antes de empezar. La fase 1 mide
-cada modelo con su esfuerzo más bajo; la fase 2 (necesita la fase 1) mide los tres finalistas por estación.
+cada modelo con su esfuerzo más bajo; la fase 2 (necesita la fase 1) mide los finalistas por estación (el mejor par de cada IA y los mejores restantes hasta 3).
 Códigos de salida: 0 bien, 1 fallo de estación o escritura detectada, 2 argumentos inválidos.
 `;
 

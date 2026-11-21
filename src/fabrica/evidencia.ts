@@ -282,6 +282,20 @@ export function revertirReal(ev: Evidencia, clave: ClaveEvidencia, observacion: 
   return { ...ev, filas: ev.filas.map((f) => (f === anterior ? fila : f)) };
 }
 
+/** Escala conocida de esfuerzos, de menor a mayor; los nombres desconocidos van después. */
+export const ESCALA_ESFUERZOS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+
+const SUFIJO_ESFUERZO = new RegExp(`^(.+)-(${ESCALA_ESFUERZOS.join('|')})$`, 'u');
+
+/**
+ * Modelo base de un id de Antigravity, donde el esfuerzo va dentro del id: el id sin un sufijo final de la escala
+ * (`gemini-4-neon-low` → `gemini-4-neon`). Un id sin ese sufijo es su propia base.
+ */
+export function baseAntigravity(id: string): { base: string; esfuerzo: string | null } {
+  const m = SUFIJO_ESFUERZO.exec(id);
+  return m === null ? { base: id, esfuerzo: null } : { base: m[1] as string, esfuerzo: m[2] as string };
+}
+
 export interface Caducidad {
   caducada: boolean;
   motivos: string[];
@@ -300,8 +314,12 @@ export function caducada(ev: Evidencia, catalogosVivos: Partial<Record<IA, reado
 
   const sinMedir: string[] = [];
   for (const ia of IA.options) {
+    // En Antigravity el esfuerzo va dentro del id y el banco mide a propósito solo algunas variantes: basta que lo
+    // medido tenga la misma base.
+    const medidos = ia === 'antigravity' ? ev.catalogo[ia].map((m) => baseAntigravity(m).base) : ev.catalogo[ia];
     for (const modelo of catalogosVivos[ia] ?? []) {
-      if (!ev.catalogo[ia].includes(modelo) && !sinMedir.includes(modelo)) sinMedir.push(modelo);
+      const clave = ia === 'antigravity' ? baseAntigravity(modelo).base : modelo;
+      if (!medidos.includes(clave) && !sinMedir.includes(modelo)) sinMedir.push(modelo);
     }
   }
   if (sinMedir.length > 0) motivos.push(`modelos sin medir: ${sinMedir.join(', ')}`);
