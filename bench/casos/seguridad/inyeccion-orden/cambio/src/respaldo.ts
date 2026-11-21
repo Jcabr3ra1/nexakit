@@ -1,8 +1,8 @@
 import { exec } from 'node:child_process';
-import { readFile, rm, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { open, readFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
-
 const ejecutar = promisify(exec);
 
 export interface OpcionesRespaldo {
@@ -36,7 +36,7 @@ export async function descargarRespaldo(nombre: string, remoto: Remoto, destino:
     headers: { authorization: `Bearer ${remoto.token}` },
   });
   if (!respuesta.ok || !respuesta.body) throw new Error(`No se pudo descargar ${nombre} (${respuesta.status})`);
-  await writeFile(destino, respuesta.body, { mode: 0o666, flag: 'wx' });
+  await guardarDescarga(respuesta.body, destino, 0o666);
 }
 
 export async function purgarCaducados(remoto: Remoto, carpeta: string): Promise<void> {
@@ -48,4 +48,22 @@ export async function purgarCaducados(remoto: Remoto, carpeta: string): Promise<
   for (const nombre of nombres) {
     await rm(path.join(carpeta, nombre), { recursive: true, force: true });
   }
+}
+
+/**
+ * Escribe la descarga en un archivo temporal junto al destino, por trozos, y lo renombra al terminar: no carga el
+ * respaldo en memoria, no deja un destino a medias si la descarga falla y no sigue un enlace simbólico en el destino.
+ */
+async function guardarDescarga(cuerpo: AsyncIterable<Uint8Array>, destino: string, modo: number): Promise<void> {
+  const temporal = `${destino}.${randomUUID()}.parcial`;
+  const archivo = await open(temporal, 'wx', modo);
+  try {
+    for await (const trozo of cuerpo) await archivo.write(trozo);
+  } catch (error) {
+    await archivo.close();
+    await rm(temporal, { force: true });
+    throw error;
+  }
+  await archivo.close();
+  await rename(temporal, destino);
 }
