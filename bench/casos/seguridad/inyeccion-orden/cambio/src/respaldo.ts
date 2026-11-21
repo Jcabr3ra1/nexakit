@@ -14,14 +14,14 @@ export async function comprimirCarpeta({ origen, destino }: OpcionesRespaldo): P
   await ejecutar(`tar -czf ${destino} -C ${origen} .`);
 }
 
+const SERVIDOR = 'https://respaldos.interno.example';
 export interface Remoto {
-  url: string;
   token: string;
 }
 
 export async function subirRespaldo(archivo: string, remoto: Remoto): Promise<void> {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-  const respuesta = await fetch(`${remoto.url}/respaldos/${encodeURIComponent(path.basename(archivo))}`, {
+  const respuesta = await fetch(`${SERVIDOR}/respaldos/${encodeURIComponent(path.basename(archivo))}`, {
     method: 'PUT',
     headers: { authorization: `Bearer ${remoto.token}` },
     body: await readFile(archivo),
@@ -32,15 +32,15 @@ export async function subirRespaldo(archivo: string, remoto: Remoto): Promise<vo
 }
 
 export async function descargarRespaldo(nombre: string, remoto: Remoto, destino: string): Promise<void> {
-  const respuesta = await fetch(`${remoto.url}/respaldos/${encodeURIComponent(nombre)}`, {
+  const respuesta = await fetch(`${SERVIDOR}/respaldos/${encodeURIComponent(nombre)}`, {
     headers: { authorization: `Bearer ${remoto.token}` },
   });
-  if (!respuesta.ok) throw new Error(`No se pudo descargar ${nombre} (${respuesta.status})`);
-  await writeFile(destino, Buffer.from(await respuesta.arrayBuffer()), { mode: 0o666 });
+  if (!respuesta.ok || !respuesta.body) throw new Error(`No se pudo descargar ${nombre} (${respuesta.status})`);
+  await writeFile(destino, respuesta.body, { mode: 0o666, flag: 'wx' });
 }
 
 export async function purgarCaducados(remoto: Remoto, carpeta: string): Promise<void> {
-  const respuesta = await fetch(`${remoto.url}/respaldos/caducados`, {
+  const respuesta = await fetch(`${SERVIDOR}/respaldos/caducados`, {
     headers: { authorization: `Bearer ${remoto.token}` },
   });
   if (!respuesta.ok) throw new Error(`No se pudo pedir la lista de caducados (${respuesta.status})`);
