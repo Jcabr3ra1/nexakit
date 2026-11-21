@@ -3,7 +3,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import { ErrorFabrica } from '../errores.js';
 import { NOMBRES_ESTACION, type NombreEstacion } from '../esquemas.js';
-import { MARGEN_LINEAS, normalizarTexto } from './medir.js';
+import { CATEGORIA_DOCUMENTACION, CLAVES_CORTAS, clavesPropias, MARGEN_LINEAS, MIN_LARGO_CLAVE, normalizarTexto } from './medir.js';
 
 /** Raíz de los casos del banco: `bench/casos` en la raíz del paquete. */
 export const RAIZ_CASOS = path.resolve(import.meta.dirname, '../../../bench/casos');
@@ -16,7 +16,9 @@ export const MAX_CLAVES = 8;
 
 /**
  * Claves demasiado genéricas: casarían con casi cualquier hallazgo (o con todos los de una estación) y el casado
- * volvería a depender solo de la línea.
+ * volvería a depender solo de la línea. También se rechazan sus raíces («prueb», «segur»), que casan con lo mismo. Las
+ * de documentación y pruebas son el vocabulario de toda la estación: con ellas, un hallazgo del README o un «falta una
+ * prueba» cualquiera acreditaría fallos que no se encontraron.
  */
 export const CLAVES_GENERICAS: readonly string[] = [
   ...NOMBRES_ESTACION,
@@ -40,15 +42,41 @@ export const CLAVES_GENERICAS: readonly string[] = [
   'archivo',
   'funcion',
   'linea',
+  // Documentación.
+  'readme',
+  'doc',
+  'docs',
+  'documentacion',
+  'comentario',
+  'jsdoc',
+  'ejemplo',
+  'opcion',
+  'opciones',
+  'variable',
+  'entorno',
+  'orden',
+  'comando',
+  'salida',
+  'codigo',
+  // Pruebas.
+  'cobertura',
+  'sin-prueba',
+  'no-se-prueba',
+  'caso',
+  'casos',
+  'borde',
 ];
 
-/** Errores de las claves de un fallo: normalizadas (`normalizarTexto`), sin repetir, ni cortas ni genéricas. */
+/**
+ * Errores de las claves de un fallo: normalizadas (`normalizarTexto`), sin repetir, de `MIN_LARGO_CLAVE` caracteres o
+ * más (salvo `CLAVES_CORTAS`), y que no sean una genérica ni la raíz de una.
+ */
 function erroresDeClaves(claves: readonly string[]): string[] {
   const errores: string[] = [];
   for (const [i, clave] of claves.entries()) {
     if (clave === '' || normalizarTexto(clave) !== clave) errores.push(`la clave «${clave}» no está normalizada (sin tildes, mayúsculas, espacios ni palabras vacías)`);
-    else if (clave.replace(/-/gu, '').length < 2) errores.push(`la clave «${clave}» es demasiado corta`);
-    else if (CLAVES_GENERICAS.includes(clave)) errores.push(`la clave «${clave}» es demasiado genérica`);
+    else if (clave.length < MIN_LARGO_CLAVE && !CLAVES_CORTAS.includes(clave)) errores.push(`la clave «${clave}» es demasiado corta (${MIN_LARGO_CLAVE} caracteres como mínimo)`);
+    else if (CLAVES_GENERICAS.some((g) => g.startsWith(clave))) errores.push(`la clave «${clave}» es demasiado genérica`);
     if (claves.indexOf(clave) !== i) errores.push(`repite la clave «${clave}»`);
   }
   return errores;
@@ -229,6 +257,13 @@ function leerCaso(directorio: string): { caso?: CasoBanco; errores: string[] } {
       }
     }
     for (const error of erroresDeSeparacion(esperado.fallos)) fallar(error);
+    // Desde un documento no se mira la línea: cada fallo de documentación necesita una clave que no compartan los demás.
+    const propias = clavesPropias(esperado.fallos);
+    for (const [i, fallo] of esperado.fallos.entries()) {
+      if (fallo.categoria === CATEGORIA_DOCUMENTACION && (propias[i] ?? []).length === 0) {
+        fallar(`fallos[${i}]: un fallo de documentación necesita al menos una clave propia que no compartan los demás fallos`);
+      }
+    }
   }
   if (errores.length > 0 || !conocida) return { errores };
   return {

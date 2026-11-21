@@ -28,14 +28,14 @@
       "archivo": "servidor.js",
       "lineas": [44, 44],
       "categoria": "secreto-expuesto",
-      "claves": ["authorization", "cabecera", "token", "registro", "log", "secret", "credencial"],
+      "claves": ["authorization", "cabecera", "token", "registro", "logs", "secret", "credencial", "headers"],
       "descripcion": "El registro guarda todas las cabeceras de la petición, incluida la cabecera Authorization con el token."
     },
     {
       "archivo": "servidor.js",
       "lineas": [51, 51],
       "categoria": "recorrido-rutas",
-      "claves": ["recorrido", "traversal", "ruta", "fuera", "decodific", "2f"],
+      "claves": ["recorrido", "traversal", "fuera", "decodific", "path-join", "normaliz"],
       "descripcion": "El nombre decodificado de la URL se une a la raíz sin validar: «..%2f» permite leer archivos fuera de ella."
     }
   ]

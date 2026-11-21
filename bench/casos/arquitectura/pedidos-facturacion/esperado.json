@@ -18,14 +18,14 @@
       "archivo": "src/dominio/informe.ts",
       "lineas": [1, 6],
       "categoria": "violacion-adr",
-      "claves": ["infra", "dependencia", "adr", "concreta", "invert", "capa"],
+      "claves": ["infra", "dependencia", "concreta", "invert", "capa", "adr"],
       "descripcion": "El dominio importa y usa la clase concreta de src/infra, al revés de lo que fija el ADR 0001."
     },
     {
       "archivo": "src/dominio/pedido.ts",
       "lineas": [13, 21],
       "categoria": "violacion-adr",
-      "claves": ["entorno", "env", "iva", "tasa", "parametro", "configuracion"],
+      "claves": ["process-env", "variable-entorno", "tasa-iva", "tasa", "parametro", "configuracion"],
       "descripcion": "El dominio lee la tasa de IVA del entorno, cuando el ADR exige que lo reciba por parámetro."
     },
     {
@@ -46,7 +46,7 @@
       "archivo": "src/aplicacion/facturar.ts",
       "lineas": [17, 17],
       "categoria": "violacion-adr",
-      "claves": ["iva", "tasa", "duplic", "fija", "ivapedido", "regla"],
+      "claves": ["tasa", "duplic", "fija", "iva-pedido", "regla", "tasa-iva"],
       "descripcion": "El IVA se recalcula con una tasa fija en la aplicación en vez de usar ivaPedido del dominio: la regla queda duplicada."
     }
   ]

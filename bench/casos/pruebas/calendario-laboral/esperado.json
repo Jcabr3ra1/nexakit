@@ -7,42 +7,42 @@
       "archivo": "test/calendario.test.js",
       "lineas": [6, 7],
       "categoria": "aserciones-debiles",
-      "claves": ["boolean", "tipo", "typeof", "esfindesemana", "sabado", "asercion"],
+      "claves": ["boolean", "typeof", "es-fin-semana", "sabado", "domingo"],
       "descripcion": "La prueba de esFinDeSemana solo comprueba que devuelve un booleano, no que el sábado dé true ni que un día laborable dé false."
     },
     {
       "archivo": "test/calendario.test.js",
       "lineas": [17, 20],
       "categoria": "aserciones-debiles",
-      "claves": ["new-date", "fecha-actual", "determinis", "sumardiashabiles", "resultado-esperado", "exact", "flak"],
+      "claves": ["new-date", "fecha-actual", "determinis", "sumar-dias-habiles", "resultado-exacto", "fecha-exacta", "flaky", "fecha-fija"],
       "descripcion": "sumarDiasHabiles se prueba con la fecha actual y sin fijar el resultado esperado: depende del día en que se ejecute y no fallaría si contara mal."
     },
     {
       "archivo": "test/calendario.test.js",
       "lineas": [29, 30],
       "categoria": "dependencia-red",
-      "claves": ["red", "fetch", "api", "internet", "mock", "simul", "externo"],
+      "claves": ["fetch", "internet", "mock", "simul", "nager", "red-real", "externo", "api-real"],
       "descripcion": "La prueba de cargarFestivos llama a una API real por internet en lugar de simular fetch."
     },
     {
       "archivo": "src/fechas.js",
       "lineas": [10, 17],
       "categoria": "sin-prueba",
-      "claves": ["festivo", "cobertura", "sin-prueba", "no-se-prueba"],
+      "claves": ["festivo", "es-habil", "no-habil"],
       "descripcion": "Ninguna prueba pasa festivos: no se comprueba que un festivo cuente como día no hábil."
     },
     {
       "archivo": "src/fechas.js",
       "lineas": [24, 24],
       "categoria": "sin-prueba",
-      "claves": ["rangeerror", "diashabilesentre", "anterior", "cobertura", "sin-prueba"],
+      "claves": ["range-error", "invertid", "inverso", "fecha-final", "error-rango", "dias-habiles-entre"],
       "descripcion": "El RangeError de diasHabilesEntre cuando la fecha final es anterior a la inicial no tiene prueba."
     },
     {
       "archivo": "src/fechas.js",
       "lineas": [34, 34],
       "categoria": "sin-prueba",
-      "claves": ["respuesta-ok", "http", "cargarfestivos", "cobertura", "sin-prueba", "status"],
+      "claves": ["respuesta-ok", "status", "http", "cargar-festivos", "error-http", "camino-feliz"],
       "descripcion": "El error de cargarFestivos cuando la respuesta no es correcta no tiene prueba."
     }
   ]

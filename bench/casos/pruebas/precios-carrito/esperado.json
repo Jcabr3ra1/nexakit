@@ -7,35 +7,35 @@
       "archivo": "src/precio.ts",
       "lineas": [6, 6],
       "categoria": "sin-prueba",
-      "claves": ["50", "tramo", "condescuento", "cobertura", "sin-prueba"],
+      "claves": ["tramo", "con-descuento", "50-unidades", "cincuenta", "umbral"],
       "descripcion": "El tramo de 50 unidades o más de conDescuento no tiene prueba."
     },
     {
       "archivo": "src/precio.ts",
       "lineas": [19, 19],
       "categoria": "sin-prueba",
-      "claves": ["cupon", "importe-fijo", "fijo", "tope", "cero", "cobertura", "sin-prueba"],
+      "claves": ["cupon", "importe-fijo", "tope-cero", "negativo", "fijo"],
       "descripcion": "Los cupones de importe fijo, y su tope en cero, no tienen prueba."
     },
     {
       "archivo": "test/precio.test.js",
       "lineas": [15, 19],
       "categoria": "aserciones-debiles",
-      "claves": ["catch", "assert-throws", "rejects", "lanza", "caducado"],
+      "claves": ["catch", "assert-throws", "rejects", "caducado", "no-lanza"],
       "descripcion": "La aserción está dentro del catch: si aplicarCupon no lanza con un cupón caducado, la prueba pasa igual."
     },
     {
       "archivo": "test/precio.test.js",
       "lineas": [29, 30],
       "categoria": "aserciones-debiles",
-      "claves": ["formula", "tautolog", "misma", "totalcarrito", "calcul"],
+      "claves": ["formula", "tautolog", "misma-formula", "total-carrito", "recalcul"],
       "descripcion": "El valor esperado se calcula con la misma fórmula que totalCarrito, así que la prueba no fallaría aunque la fórmula estuviera mal."
     },
     {
       "archivo": "test/precio.test.js",
       "lineas": [39, 41],
       "categoria": "promesa-sin-esperar",
-      "claves": ["await", "promesa", "asincron", "costeenvio", "espera"],
+      "claves": ["await", "promesa", "asincron", "coste-envio", "then"],
       "descripcion": "La prueba no espera la promesa de costeEnvio: termina antes de que se ejecute la aserción."
     }
   ]

@@ -162,11 +162,11 @@ test('las claves de cada fallo son obligatorias: entre 2 y 8 raíces normalizada
     return validarCaso(crearCaso(valido({ fallos: [fallo] })).dir);
   };
   assert.deepEqual(con(['tls', 'certificad']), []);
-  assert.deepEqual(con(['n-mas', 'reject-unauthorized', '0o666', 'a1', 'b2', 'c3', 'd4', 'e5']), []);
+  assert.deepEqual(con(['n-mas-1', 'reject-unauthorized', '0o666', 'tls', 'xss', 'e-s', 'cuadratic', 'acceso-datos']), []);
   const casos = [
     [undefined, /claves/u],
     [['tls'], /claves/u],
-    [['a1', 'b2', 'c3', 'd4', 'e5', 'f6', 'g7', 'h8', 'i9'], /claves/u],
+    [['uno1', 'dos2', 'tres', 'cuat', 'cinc', 'seis', 'siet', 'ocho', 'nuev'], /claves/u],
     [['tls', 'tls'], /repite la clave «tls»/u],
     [['tls', ''], /clave «» no está normalizada/u],
     [['tls', 'Certificado'], /clave «Certificado» no está normalizada/u],
@@ -176,8 +176,29 @@ test('las claves de cada fallo son obligatorias: entre 2 y 8 raíces normalizada
     [['tls', 'error'], /clave «error» es demasiado genérica/u],
     [['tls', 'seguridad'], /demasiado genérica/u],
     [['tls', 'x'], /demasiado corta/u],
+    [['tls', 'red'], /clave «red» es demasiado corta/u],
+    [['tls', 'log'], /demasiado corta/u],
+    [['tls', '20'], /demasiado corta/u],
+    // Una raíz de una genérica casa con todo lo que casa la genérica.
+    [['tls', 'prueb'], /clave «prueb» es demasiado genérica/u],
+    [['tls', 'segur'], /demasiado genérica/u],
+    [['tls', 'erro'], /demasiado genérica/u],
+    [['tls', 'cobertura'], /demasiado genérica/u],
+    [['tls', 'sin-prueba'], /demasiado genérica/u],
+    [['tls', 'readme'], /demasiado genérica/u],
+    [['tls', 'ejemplo'], /demasiado genérica/u],
   ];
   for (const [claves, patron] of casos) assert.match(con(claves).join('\n'), patron, JSON.stringify(claves));
+});
+
+test('cada fallo de documentación necesita al menos una clave que no compartan los demás fallos del caso', () => {
+  const doc = (lineas, claves) => ({ archivo: 'a.js', lineas, categoria: 'doc-contradice-codigo', claves, descripcion: 'd' });
+  const caso = (fallos) => validarCaso(crearCaso(valido({ fallos }), { cambio: { 'a.js': CUARENTA } }).dir);
+  assert.deepEqual(caso([doc([2, 2], ['limite', 'incluir-inactivos']), doc([20, 20], ['buscar-usuario', 'devuelve-null'])]), []);
+  // «limite» la comparten y «incluir» es raíz de «incluir-inactivos»: el segundo fallo se queda sin clave propia.
+  const errores = caso([doc([2, 2], ['limite', 'incluir-inactivos', 'valor-50']), doc([20, 20], ['limite', 'incluir'])]).join('\n');
+  assert.match(errores, /fallos\[1\].*clave propia/u);
+  assert.doesNotMatch(errores, /fallos\[0\].*clave propia/u);
 });
 
 test('un esperado.json ilegible o con campos de más da error, no excepción', () => {

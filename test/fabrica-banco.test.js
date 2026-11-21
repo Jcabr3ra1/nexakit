@@ -88,11 +88,58 @@ test('medir: sin ninguna clave del fallo en la categoría ni en el texto no acie
     assert.deepEqual(medir([hallazgo], fallo), { aciertos: 1, fallosNoEncontrados: 0, falsosPositivos: 0 }, hallazgo.categoria);
   }
   // La raíz empieza en un límite de palabra: «red» no casa con «credencial».
-  const red = [f('src/a.js', [10, 10], 'dependencia-red', ['red', 'fetch'])];
+  const red = [f('src/a.js', [10, 10], 'dependencia-red', ['red-real', 'fetch'])];
   assert.equal(medir([h('src/a.js', 10, 'credenciales', 'credencial expuesta')], red).aciertos, 0);
   assert.equal(medir([h('src/a.js', 10, 'prueba', 'llama a la red real')], red).aciertos, 1);
   // Las claves de varias palabras casan con el texto normalizado: «N+1» es «n-mas-1».
-  assert.equal(medir([h('src/a.js', 10, 'Consultas N+1')], [f('src/a.js', [10, 10], 'consulta-n-mas-uno', ['n-mas'])]).aciertos, 1);
+  assert.equal(medir([h('src/a.js', 10, 'Consultas N+1')], [f('src/a.js', [10, 10], 'consulta-n-mas-uno', ['n-mas-1'])]).aciertos, 1);
+});
+
+test('medir: las claves cortas permitidas casan solo como palabra completa', () => {
+  const tls = [f('src/a.js', [10, 10], 'tls-desactivado', ['tls', 'certificad'])];
+  assert.equal(medir([h('src/a.js', 10, 'TLS desactivado')], tls).aciertos, 1);
+  assert.equal(medir([h('src/a.js', 10, 'otra', 'algo', 'NODE_TLS_REJECT_UNAUTHORIZED')], tls).aciertos, 1);
+  assert.equal(medir([h('src/a.js', 10, 'tlsx', 'nada que ver')], tls).aciertos, 0);
+  const es = [f('src/a.js', [10, 10], 'e-s-sincrona', ['e-s', 'sincron'])];
+  assert.equal(medir([h('src/a.js', 10, 'E/S repetida')], es).aciertos, 1);
+  assert.equal(medir([h('src/a.js', 10, 'es lento')], es).aciertos, 0);
+});
+
+test('medir: camelCase se separa en palabras y también se compara junto', () => {
+  const fallo = [f('src/a.js', [10, 10], 'violacion-adr', ['correo', 'regla'])];
+  assert.equal(medir([h('src/a.js', 10, 'capas', 'Importa normalizarCorreo del servicio')], fallo).aciertos, 1);
+  const junto = [f('src/a.js', [10, 10], 'doc-contradice-codigo', ['buscarusuario', 'buscar-usuario'])];
+  assert.equal(medir([h('src/a.js', 10, 'jsdoc', 'buscarUsuario ya no devuelve null')], junto).aciertos, 1);
+  assert.equal(medir([h('src/a.js', 10, 'jsdoc', 'buscarusuario ya no devuelve null')], junto).aciertos, 1);
+});
+
+test('medir: las claves con guion casan aunque las palabras vayan separadas por palabras vacías', () => {
+  const fallo = [f('servicios/perfil.js', [1, 10], 'violacion-adr', ['acceso-datos', 'persistencia'])];
+  for (const texto of ['El servicio hace el acceso a los datos él mismo', 'acceso a datos desde el servicio', 'acceso de la datos']) {
+    assert.equal(medir([h('servicios/perfil.js', 5, 'capas', texto)], fallo).aciertos, 1, texto);
+  }
+});
+
+test('medir: en documentación, un hallazgo del README solo acredita el fallo cuya clave específica nombra', () => {
+  // Reproducción de la revisión: un revisor que encuentra 3 fallos de reportes-config y repite dos en el README sacaba
+  // 5/5 porque «ejemplo» y «opcion» casaban con otros fallos a través del README.
+  const caso = cargarCasos().find((c) => c.nombre === 'reportes-config');
+  const documentos = ['README.md'];
+  const hallazgos = [
+    h('src/config.js', 12, 'Variable renombrada', 'La variable de entorno pasa a llamarse REPORTES_SERVIDOR', 'El README usa REPORTES_URL'),
+    h('src/config.js', 3, 'Valor por defecto', 'El tiempo de espera por defecto es ahora 10 000 ms', 'tiempoEsperaMs: 10_000'),
+    h('src/cli.js', 34, 'Código de salida', 'Si el envío falla la orden termina con el código 3', 'process.exitCode = 3'),
+    h('README.md', null, 'ejemplo', 'El ejemplo del README sigue usando REPORTES_URL', 'REPORTES_URL=https://...'),
+    h('README.md', null, 'opciones', 'La tabla de opciones del README dice que el tiempo de espera es 30000', '| tiempo de espera | 30000 |'),
+  ];
+  assert.deepEqual(medir(hallazgos, caso.fallos, { documentos }), { aciertos: 3, fallosNoEncontrados: 2, falsosPositivos: 0 });
+  // comentario-obsoleto: el límite en el código y repetido en el README es un solo acierto, no también el de copia.ts.
+  const comentario = cargarCasos().find((c) => c.nombre === 'comentario-obsoleto');
+  const limite = [
+    h('src/usuarios.ts', 32, 'jsdoc', 'El comentario dice que el límite por defecto es 50, pero ahora es 20'),
+    h('README.md', null, 'readme', 'El README sigue diciendo que el límite por defecto es 50'),
+  ];
+  assert.deepEqual(medir(limite, comentario.fallos, { documentos: ['README.md'] }), { aciertos: 1, fallosNoEncontrados: 4, falsosPositivos: 0 });
 });
 
 test('medir: el ejemplo real de SSRF casado con el TLS desactivado no es un acierto', () => {

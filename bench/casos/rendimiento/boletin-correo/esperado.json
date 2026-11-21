@@ -7,21 +7,21 @@
       "archivo": "src/plantilla.ts",
       "lineas": [4, 4],
       "categoria": "lectura-repetida",
-      "claves": ["readfilesync", "lectura", "lee", "sincron", "cache", "disco", "plantilla"],
+      "claves": ["read-file-sync", "lectura", "sincron", "cache", "disco", "plantilla"],
       "descripcion": "La plantilla se lee del disco de forma síncrona en cada llamada, una vez por destinatario, en lugar de leerla una sola vez."
     },
     {
       "archivo": "src/envios.ts",
       "lineas": [16, 16],
       "categoria": "complejidad-cuadratica",
-      "claves": ["cuadratic", "findindex", "o-n", "complejidad", "set", "duplicad", "repetidos"],
+      "claves": ["cuadratic", "find-index", "o-n2", "o-n-2", "complejidad", "new-set", "duplicad", "repetidos"],
       "descripcion": "Quita los repetidos con findIndex dentro de filter: coste cuadrático en el número de suscriptores, cuando bastaría un Set."
     },
     {
       "archivo": "src/envios.ts",
       "lineas": [24, 24],
       "categoria": "consulta-n-mas-uno",
-      "claves": ["n-mas", "consulta", "bajas", "suscriptor", "secuencial", "serie"],
+      "claves": ["n-mas-1", "consulta", "bajas", "secuencial", "serie", "cada-suscriptor"],
       "descripcion": "Consulta la tabla de bajas una vez por suscriptor en lugar de traer todas las bajas en una sola consulta."
     },
     {
@@ -35,7 +35,7 @@
       "archivo": "src/envios.ts",
       "lineas": [41, 41],
       "categoria": "e-s-sincrona",
-      "claves": ["appendfilesync", "sincron", "bloque", "registro", "e-s", "escritura"],
+      "claves": ["append-file-sync", "sincron", "bloque", "registro", "escritura", "e-s"],
       "descripcion": "Escribe el registro con appendFileSync después de cada envío, lo que bloquea el bucle de eventos una vez por mensaje."
     }
   ]

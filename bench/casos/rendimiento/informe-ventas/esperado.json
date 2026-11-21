@@ -14,28 +14,28 @@
       "archivo": "src/informe.js",
       "lineas": [12, 12],
       "categoria": "complejidad-cuadratica",
-      "claves": ["find", "cuadratic", "map", "o-n", "complejidad"],
+      "claves": ["find", "cuadratic", "new-map", "o-n-m", "complejidad", "ventas-productos"],
       "descripcion": "Busca el producto con find dentro del bucle de ventas: el coste crece con ventas × productos en vez de usar un Map."
     },
     {
       "archivo": "src/informe.js",
       "lineas": [22, 23],
       "categoria": "consulta-n-mas-uno",
-      "claves": ["n-mas", "consulta", "cliente", "secuencial", "serie"],
+      "claves": ["n-mas-1", "consulta", "cliente", "secuencial", "serie", "cada-venta"],
       "descripcion": "Lanza una consulta a la base por cada venta para obtener el nombre del cliente, en lugar de una sola para todos."
     },
     {
       "archivo": "src/informe.js",
       "lineas": [31, 31],
       "categoria": "trabajo-repetido",
-      "claves": ["numberformat", "intl", "formato", "instancia", "cada-fila", "repetid"],
+      "claves": ["number-format", "intl", "formato", "instancia", "cada-fila", "repetid"],
       "descripcion": "Crea un Intl.NumberFormat nuevo por cada fila, aunque la moneda es la misma para todas; basta crearlo una vez."
     },
     {
       "archivo": "src/tasas.js",
       "lineas": [4, 4],
       "categoria": "lectura-repetida",
-      "claves": ["readfilesync", "lectura", "sincron", "cache", "disco", "tasas-json", "lee"],
+      "claves": ["read-file-sync", "lectura", "sincron", "cache", "disco", "tasas-json"],
       "descripcion": "convertir lee y analiza tasas.json del disco de forma síncrona en cada llamada, y se llama una vez por venta."
     }
   ]
