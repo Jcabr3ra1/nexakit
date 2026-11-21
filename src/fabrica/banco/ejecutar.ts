@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomInt } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -404,6 +404,31 @@ async function recorridoDe(raiz: string, estacion: NombreEstacion, ej: Ejecucion
   return { ...datos, huella: calcularHuella(datos), coste: calcularCoste(estaciones), catalogos: {}, avisos: [] };
 }
 
+/**
+ * Nombres de proyecto verosímiles para la carpeta del repo temporal. El revisor ve la ruta (y el rastro guarda el
+ * repo con ese nombre): no debe decir que es una medición, así que nada de «banco», «nexakit», «bench», «prueba»...
+ */
+const NOMBRES_PROYECTO = [
+  'agenda-citas',
+  'api-pedidos',
+  'catalogo-tienda',
+  'control-inventario',
+  'facturacion',
+  'gestor-reservas',
+  'panel-ventas',
+  'portal-clientes',
+  'registro-horas',
+  'servicio-envios',
+] as const;
+
+/**
+ * Prefijo de la carpeta del repo temporal: un nombre de proyecto al azar y un guion; `mkdtemp` le añade seis
+ * caracteres aleatorios. Ni el prefijo ni la ruta delatan el banco.
+ */
+export function prefijoRepoTemporal(): string {
+  return `${NOMBRES_PROYECTO[randomInt(NOMBRES_PROYECTO.length)] as string}-`;
+}
+
 const RE_DOCUMENTO = /^docs\/|\.md$/iu;
 
 /**
@@ -418,7 +443,7 @@ async function medirUna(
   avisar: (aviso: string) => void,
 ): Promise<EjecucionMedida> {
   const invalida = (motivo: string, extra: Partial<EjecucionMedida> = {}): EjecucionMedida => ({ ...ej, ...extra, valida: false, motivo });
-  const raiz = await mkdtemp(path.join(os.tmpdir(), 'nexakit-banco-'));
+  const raiz = await mkdtemp(path.join(os.tmpdir(), prefijoRepoTemporal()));
   try {
     const raices = [...new Set([raiz, await realpath(raiz)].map((r) => r.split(path.sep).join('/')))];
     await prepararRepo(raiz, caso);

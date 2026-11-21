@@ -12,8 +12,10 @@ import {
   describirPlan,
   ejecutarBanco,
   huellaPlan,
+  prefijoRepoTemporal,
   TOKENS_POR_LLAMADA,
 } from '../dist/fabrica/banco/ejecutar.js';
+import { nombreRepo } from '../dist/fabrica/rastro.js';
 import { cargarCasos } from '../dist/fabrica/banco/casos.js';
 import { evidenciaVacia, actualizar, cargar, guardar, cuantil05 } from '../dist/fabrica/evidencia.js';
 import { aceptar, registrar } from '../dist/fabrica/lecciones.js';
@@ -373,6 +375,23 @@ function archivosDe(raiz) {
     .sort();
 }
 
+/** Palabras que delatan que el revisor está siendo medido. */
+const DELATORES = /banco|nexakit|bench|prueba|medici|test|caso|eval/iu;
+
+test('el repo temporal lleva un nombre de proyecto neutro y aleatorio', async () => {
+  const prefijos = new Set();
+  for (let i = 0; i < 200; i += 1) {
+    const prefijo = prefijoRepoTemporal();
+    assert.match(prefijo, /^[a-z]+(?:-[a-z]+)*-$/u, prefijo);
+    assert.doesNotMatch(prefijo, DELATORES);
+    prefijos.add(prefijo);
+  }
+  assert.ok(prefijos.size > 1, 'el nombre cambia de una ejecución a otra');
+  // El nombre del repo en el rastro sale de la carpeta: tampoco delata nada.
+  const dir = temporal(prefijoRepoTemporal());
+  assert.doesNotMatch(await nombreRepo(dir), DELATORES);
+});
+
 test('la huella es obligatoria: sin ella no se ejecuta nada', async () => {
   const home = temporal('banco-home-');
   let llamadas = 0;
@@ -426,10 +445,11 @@ test('ejecutarBanco corre cada ejecución en un repo temporal aislado y suma la 
 
   let visto;
   const codex = conector('codex', async (e) => {
+    const repo = await nombreRepo(e.raiz);
     const estado = execFileSync('git', ['status', '--porcelain'], { cwd: e.raiz, encoding: 'utf8' });
     const commits = execFileSync('git', ['rev-list', '--count', 'HEAD'], { cwd: e.raiz, encoding: 'utf8' }).trim();
     const log = execFileSync('git', ['log', '--format=%an <%ae> | %cn <%ce> | %s'], { cwd: e.raiz, encoding: 'utf8' });
-    visto = { encargo: e, estado, commits, log, archivos: archivosDe(e.raiz), respaldo: readFileSync(path.join(e.raiz, 'src/respaldo.ts'), 'utf8') };
+    visto = { encargo: e, repo, estado, commits, log, archivos: archivosDe(e.raiz), respaldo: readFileSync(path.join(e.raiz, 'src/respaldo.ts'), 'utf8') };
     return informe(e, [h('src/respaldo.ts', 12, 'inyección de órdenes')], { entrada: 800, salida: 200, total: 1000 });
   });
   const plan = planSeguridad();
@@ -450,12 +470,19 @@ test('ejecutarBanco corre cada ejecución en un repo temporal aislado y suma la 
     assert.ok(!visto.encargo.raiz.includes(delator), `la ruta delata «${delator}»`);
     assert.ok(!visto.encargo.instrucciones.includes(delator), `las instrucciones delatan «${delator}»`);
   }
+  // Ni la carpeta del repo ni su nombre en el rastro dicen que es una medición.
+  assert.doesNotMatch(path.basename(visto.encargo.raiz), DELATORES);
+  assert.doesNotMatch(visto.repo, DELATORES);
   assert.equal(visto.encargo.estacion, 'seguridad');
   assert.equal(visto.encargo.modelo, 'gpt-a');
   assert.equal(visto.encargo.esfuerzo, 'low');
   assert.ok(!visto.encargo.instrucciones.includes('REGLA_QUE_NO_DEBE_LLEGAR'), 'el banco no lleva lecciones');
   // El repo temporal se borra al terminar.
   assert.equal(existsSync(visto.encargo.raiz), false);
+  // El rastro guarda el recorrido bajo ese mismo nombre neutro.
+  const carpetasRastro = readdirSync(path.join(home, '.nexakit', 'fabrica'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
+  assert.ok(carpetasRastro.includes(visto.repo), carpetasRastro.join(', '));
+  for (const carpeta of carpetasRastro) assert.doesNotMatch(carpeta, DELATORES);
 
   assert.equal(resultado.ejecuciones.length, 1);
   const [ej] = resultado.ejecuciones;
