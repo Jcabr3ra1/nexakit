@@ -195,6 +195,8 @@ Conviene delegar solo cuando la tarea lee mucho o devuelve mucho ruido: lanzar u
 | `node bin/nexakit.js codex consumo` | Tokens, caché y tiempo de las llamadas registradas por los hooks de Codex. |
 | `node bin/nexakit.js codex agentes [--apply [--actualizar]]` | Crea los agentes de nivel de Codex. Sin `--apply` es vista previa. |
 | `node bin/nexakit.js fabrica proponer --base main` | Propone un recorrido de revisión con varias IA. No lanza nada. |
+| `node bin/nexakit.js fabrica banco planificar [--fase 1\|2] [--estacion e] [--json]` | Planifica la medición de modelos con casos con fallos sembrados: muestra las llamadas, los tokens estimados y la huella, y guarda el plan en `~/.nexakit/fabrica/banco-plan.json`. No ejecuta nada. La fase 1 mide el esfuerzo más bajo de cada modelo (en Antigravity, la variante más baja de cada modelo base). La fase 2 necesita antes la fase 1. |
+| `node bin/nexakit.js fabrica banco ejecutar --huella <huella> [--json]` | Ejecuta el plan guardado si la huella coincide, en primer plano y con progreso; gasta tokens. Suma lo medido a la evidencia, consume el plan al empezar (vale para una sola ejecución) y muestra un resumen por estación. |
 
 ### Gemini (opcional, requiere agy) (`agent-toolkit-gemini` y barra `agy`)
 

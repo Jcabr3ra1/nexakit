@@ -1,4 +1,5 @@
 import { planReviewInstructions, applyReviewInstructions } from './review-instructions.js';
+import { planLeccionesInstructions, applyLeccionesInstructions } from './lecciones-instructions.js';
 // Applies the confirmation, block by block, in the fixed order of setup-plan.js. The state is gathered again right
 // before applying, so what changed meanwhile is respected. The first block that fails stops the run: what was
 // applied stays, nothing is undone, and running `npx nexakit` again resumes from the real state.
@@ -144,6 +145,16 @@ export async function applySetup(
           agents: answers.agents,
         });
         await applyReviewInstructions(plan, lock);
+      }),
+    'lecciones-instructions': () =>
+      withLock(homeDirectory, acquire, async (lock) => {
+        const plan = await planLeccionesInstructions({
+          homeDirectory,
+          environment,
+          codexHome,
+          agents: answers.agents,
+        });
+        await applyLeccionesInstructions(plan, lock);
       }),
     // Only the profiles proven again right now (old mark, same content) are rewritten; writeTeam keeps the old file.
     'codex-agents': async () => {

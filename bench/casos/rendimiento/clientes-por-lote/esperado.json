@@ -1,0 +1,14 @@
+{
+  "estacion": "rendimiento",
+  "base": {
+    "archivos": [
+      "src/informe.js"
+    ]
+  },
+  "cambio": {
+    "archivos": [
+      "src/informe.js"
+    ]
+  },
+  "fallos": []
+}

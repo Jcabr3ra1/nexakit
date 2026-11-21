@@ -1,5 +1,5 @@
 import {
-  avisoPendientes, claveDeComando, claveDeError, esCorreccion, esRutaDeMemoria, leerEventos, NOTA_CORRECCION,
+  avisoPendientes, claveDeComando, claveDeError, esCorreccion, esRegistroDeLeccion, esRutaDeMemoria, leerEventos, NOTA_CORRECCION,
   pendientes, podarEventos, sinGuardar, textoSeguro,
 } from './lecciones.js';
 
@@ -77,6 +77,10 @@ export function register(on) {
     if (!r?.isError) {
       // Otro comando que salió bien pudo cambiar el estado (un commit, un pull): los fallos anteriores ya no valen.
       if (r && !r.deny) b.fallidos.clear();
+      // Registrar la lección en el almacén común también la guarda.
+      if (r && !r.deny && esRegistroDeLeccion(e.command) && sinGuardar(await leerRegistro($)).length > 0) {
+        await apuntar($, { tipo: 'guardada' });
+      }
       return r;
     }
     const error = textoDeError(r);
@@ -86,7 +90,7 @@ export function register(on) {
     const veces = (b.errores.get(tipo) ?? 0) + 1;
     b.errores.set(tipo, veces);
     if (veces !== TOPE_MISMO_ERROR) return r;
-    await apuntar($, { tipo: 'repeticion' });
+    await apuntar($, { tipo: 'repeticion', clave: textoSeguro(tipo) });
     // Se devuelve la respuesta del motor (con su `ref`) y solo se añade la nota: un objeto rehecho sin `ref` se
     // revalida contra la forma de salida de Bash, y un error llega como texto, que esa forma rechaza.
     return {

@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { fileSymlinkSkipReason } from '../testing/symlink-capability.js';
 
+const SIN_ENLACES = process.platform === 'win32' || fileSymlinkSkipReason();
 const barraUrl = new URL('../src/antigravity-barra.js', import.meta.url);
 const mod = async () => import(barraUrl);
 
@@ -108,4 +110,67 @@ test('handles empty, null, zero-window, single-effort models, and Gemini cache c
     context_window: { used_percentage: 20 },
   }, { color: true });
   assert.match(colored, /\x1b\[/u);
+});
+
+test('Antigravity pinta las estaciones de la fábrica y lee activo.json sin seguir enlaces', async () => {
+  const { formatAntigravityStatusLine, leerActivoDeFabrica } = await mod();
+  const { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const home = mkdtempSync(join(tmpdir(), 'nexakit-barra-'));
+  try {
+    const now = Date.parse('2026-11-15T10:00:00Z');
+    const activo = {
+      pid: process.pid, id: 'r', repo: 'x', actualizado: '2026-11-15T09:59:00Z',
+      estaciones: [
+        { estacion: 'implementar', ia: 'codex', modelo: 'gpt-5.5', esfuerzo: 'high', estado: 'en-curso', tokens: 900 },
+        { estacion: 'revisar', ia: 'antigravity', modelo: 'Gemini 4', esfuerzo: 'low', estado: 'fallida', tokens: 0 },
+      ],
+    };
+    assert.equal(leerActivoDeFabrica(home), null, 'ausente');
+    const base = join(home, '.nexakit', 'fabrica');
+    mkdirSync(base, { recursive: true });
+    writeFileSync(join(base, 'activo.json'), JSON.stringify(activo));
+    const leido = leerActivoDeFabrica(home);
+    assert.equal(leido.estaciones.length, 2);
+    const lineas = formatAntigravityStatusLine({}, { color: false, now, fabrica: leido }).split('\n');
+    assert.equal(lineas.length, 3);
+    assert.match(lineas[1], /↳ implementar +codex gpt-5\.5 high +● +900 tokens/u);
+    assert.match(lineas[2], /↳ revisar +agy Gemini 4 low +✗/u);
+
+    writeFileSync(join(base, 'activo.json'), JSON.stringify({ ...activo, pid: 2 ** 22 + 7 }));
+    assert.equal(leerActivoDeFabrica(home), null, 'proceso muerto');
+    writeFileSync(join(base, 'activo.json'), `{"estaciones":[],"x":"${'a'.repeat(70 * 1024)}"}`);
+    assert.equal(leerActivoDeFabrica(home), null, 'más de 64 KiB');
+    writeFileSync(join(base, 'activo.json'), '{roto');
+    assert.equal(leerActivoDeFabrica(home), null, 'inválido');
+    if (!SIN_ENLACES) {
+      rmSync(join(base, 'activo.json'));
+      writeFileSync(join(home, 'otro.json'), JSON.stringify(activo));
+      symlinkSync(join(home, 'otro.json'), join(base, 'activo.json'));
+      assert.equal(leerActivoDeFabrica(home), null, 'enlace simbólico');
+    }
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('Antigravity limpia el texto de la fábrica y alinea sus filas con las de los subagentes', async () => {
+  const { formatAntigravityStatusLine } = await mod();
+  const now = Date.parse('2026-11-15T10:00:00Z');
+  const fabrica = {
+    actualizado: '2026-11-15T10:00:00Z',
+    estaciones: [
+      { estacion: 'x\x1b]0;t\x07y', ia: 'codex', modelo: '\x1b[2Jm', esfuerzo: 'low', estado: 'ok', tokens: 0 },
+      { estacion: 'mala', ia: 'constructor', modelo: 'm', esfuerzo: null, estado: 'ok', tokens: 0 },
+    ],
+  };
+  const payload = { subagents: [{ name: 'niveles:nivel-normal', role: 'implementar', status: 'running' }] };
+  const out = formatAntigravityStatusLine(payload, { color: true, now, fabrica });
+  assert.doesNotMatch(out.replace(/\x1b\[[0-9;]*m/gu, ''), /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/u);
+  const [, a, b, ...resto] = formatAntigravityStatusLine(payload, { color: false, now, fabrica }).split('\n');
+  assert.equal(resto.length, 0);
+  assert.match(a, /●$/u);
+  assert.match(b, /✓$/u);
+  assert.equal(a.length, b.length, 'el icono queda en la misma columna');
 });

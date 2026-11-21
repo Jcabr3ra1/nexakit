@@ -107,4 +107,103 @@ if (missing) {
   out('El id indica el esfuerzo cuando el modelo ofrece variantes: -low, -medium, -high, -xhigh o -max. Comprueba el modelo y el esfuerzo activos con /model y /effort dentro de agy.');
 }
 
+// Cuantil del 5 % de una Beta(alfa, beta), el mismo criterio prudente que el enrutador de la fábrica
+// (src/fabrica/evidencia.ts `cuantil05`; esta skill es autocontenida y no puede importarlo). Con pocos datos queda lejos
+// de la media: un 3/3 no gana a un 40/50. Lanczos para ln Γ, fracción continua de Lentz y bisección sobre [0, 1].
+const LANCZOS = [
+  0.99999999999980993, 676.5203681218851, -1259.1392167224028, 771.32342877765313, -176.61502916214059,
+  12.507343278686905, -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7
+];
+const lnGamma = x => {
+  if (x < 0.5) return Math.log(Math.PI / Math.sin(Math.PI * x)) - lnGamma(1 - x);
+  const z0 = x - 1;
+  let suma = LANCZOS[0];
+  for (let i = 1; i < LANCZOS.length; i += 1) suma += LANCZOS[i] / (z0 + i);
+  const t = z0 + 7.5;
+  return 0.5 * Math.log(2 * Math.PI) + (z0 + 0.5) * Math.log(t) - t + Math.log(suma);
+};
+const fraccionContinua = (a, b, x) => {
+  const TINY = 1e-300, EPS = 1e-15, qab = a + b, qap = a + 1, qam = a - 1;
+  let c = 1, d = 1 - (qab * x) / qap;
+  if (Math.abs(d) < TINY) d = TINY;
+  d = 1 / d;
+  let h = d;
+  for (let m = 1; m <= 20_000; m += 1) {
+    const m2 = 2 * m;
+    let aa = (m * (b - m) * x) / ((qam + m2) * (a + m2));
+    d = 1 + aa * d; if (Math.abs(d) < TINY) d = TINY;
+    c = 1 + aa / c; if (Math.abs(c) < TINY) c = TINY;
+    d = 1 / d; h *= d * c;
+    aa = (-(a + m) * (qab + m) * x) / ((a + m2) * (qap + m2));
+    d = 1 + aa * d; if (Math.abs(d) < TINY) d = TINY;
+    c = 1 + aa / c; if (Math.abs(c) < TINY) c = TINY;
+    d = 1 / d;
+    const delta = d * c;
+    h *= delta;
+    if (Math.abs(delta - 1) < EPS) break;
+  }
+  return h;
+};
+const betaIncompleta = (a, b, x) => {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  const factor = Math.exp(lnGamma(a + b) - lnGamma(a) - lnGamma(b) + a * Math.log(x) + b * Math.log1p(-x));
+  return x < (a + 1) / (a + b + 2) ? (factor * fraccionContinua(a, b, x)) / a : 1 - (factor * fraccionContinua(b, a, 1 - x)) / b;
+};
+const cuantil05 = (alfa, beta) => {
+  let bajo = 0, alto = 1;
+  for (let i = 0; i < 100; i += 1) {
+    const medio = (bajo + alto) / 2;
+    const acumulada = betaIncompleta(alfa, beta, medio);
+    if (!Number.isFinite(acumulada)) return null;
+    if (acumulada < 0.05) bajo = medio; else alto = medio;
+  }
+  return (bajo + alto) / 2;
+};
+// Coste para desempatar como el enrutador: menos tokens antes, y sin tokens medidos (0) detrás.
+const coste = f => (Number.isFinite(f.tokensMedios) && f.tokensMedios > 0 ? f.tokensMedios : Number.POSITIVE_INFINITY);
+
+// Evidencia medida por la fábrica de nexakit. Solo lectura, sin seguir enlaces y con tope de tamaño: si no existe o no
+// es válida, no se imprime nada. Las filas de Claude no entran: su «modelo» es el nombre de un agente, no un modelo.
+const evidenciaMedida = () => {
+  const file = path.join(home, '.nexakit', 'fabrica', 'evidencia.json');
+  let fd;
+  try {
+    fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile() || stat.size > 1024 * 1024) return null;
+    const data = JSON.parse(fs.readFileSync(fd, 'utf8'));
+    if (data?.version !== 1 || !Array.isArray(data.filas)) return null;
+    const mejores = new Map();
+    for (const f of data.filas) {
+      if (!f || typeof f.estacion !== 'string' || typeof f.modelo !== 'string' || typeof f.ia !== 'string') return null;
+      if (![f.alfa, f.beta, f.banco, f.real].every(Number.isFinite) || f.alfa < 1e-6 || f.beta < 1e-6 || f.alfa > 1e9 || f.beta > 1e9) return null;
+      if (f.ia === 'claude') continue;
+      const calidad = cuantil05(f.alfa, f.beta);
+      if (calidad === null) return null;
+      const actual = mejores.get(f.estacion);
+      if (!actual || calidad > actual.calidad || (calidad === actual.calidad && coste(f) < coste(actual.fila))) {
+        mejores.set(f.estacion, { fila: f, calidad });
+      }
+    }
+    return mejores;
+  } catch {
+    return null;
+  } finally {
+    if (fd !== undefined) try { fs.closeSync(fd); } catch { /* nada */ }
+  }
+};
+const limpio = texto => String(texto).replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, ' ');
+const mejores = evidenciaMedida();
+if (mejores && mejores.size > 0) {
+  out('', '## Evidencia medida');
+  // Hacia abajo a dos decimales, como la fábrica: nunca promete más de lo medido.
+  const calidadTexto = q => (Math.floor(q * 100 + 1e-9) / 100).toFixed(2).replace('.', ',');
+  for (const [estacion, { fila, calidad }] of [...mejores].sort((a, b) => a[0].localeCompare(b[0]))) {
+    const esfuerzo = typeof fila.esfuerzo === 'string' ? ` · ${limpio(fila.esfuerzo)}` : '';
+    out(`- ${limpio(estacion)}: ${limpio(fila.ia)} · ${limpio(fila.modelo)}${esfuerzo} · calidad ≥ ${calidadTexto(calidad)} · ${fila.banco + fila.real} observaciones (${fila.banco} de banco, ${fila.real} reales)`);
+  }
+  out('Nota: la calidad es el cuantil del 5 % de la Beta, el mismo criterio que la fábrica; la fábrica además la compara con el umbral del riesgo y elige el más barato que lo alcanza.');
+}
+
 process.stdout.write(lines.join('\n') + '\n');

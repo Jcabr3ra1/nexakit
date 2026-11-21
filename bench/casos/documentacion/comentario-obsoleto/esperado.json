@@ -1,0 +1,42 @@
+{
+  "estacion": "documentacion",
+  "base": { "archivos": ["README.md", "src/usuarios.ts"] },
+  "cambio": { "archivos": ["src/copia.ts", "src/usuarios.ts"] },
+  "fallos": [
+    {
+      "archivo": "src/usuarios.ts",
+      "lineas": [4, 13],
+      "categoria": "doc-contradice-codigo",
+      "claves": ["uuid", "numerico", "consecutivo", "random-uuid", "id-numerico"],
+      "descripcion": "El id pasa a ser un UUID de texto, pero el comentario y el README siguen diciendo que es numérico y consecutivo desde 1."
+    },
+    {
+      "archivo": "src/usuarios.ts",
+      "lineas": [20, 24],
+      "categoria": "doc-contradice-codigo",
+      "claves": ["null", "buscar-usuario", "devuelve-null"],
+      "descripcion": "buscarUsuario ahora lanza un error si no existe, pero el comentario, el README y su ejemplo prometen null."
+    },
+    {
+      "archivo": "src/usuarios.ts",
+      "lineas": [32, 32],
+      "categoria": "doc-contradice-codigo",
+      "claves": ["limite", "limit", "incluir-inactivos"],
+      "descripcion": "El límite por defecto pasa a 20 aunque el comentario y el README dicen 50, y la opción incluirInactivos no está documentada."
+    },
+    {
+      "archivo": "src/usuarios.ts",
+      "lineas": [42, 42],
+      "categoria": "doc-contradice-codigo",
+      "claves": ["eliminar-usuario", "definitiv", "baja-logica", "borrado-logico", "soft-delete"],
+      "descripcion": "eliminarUsuario solo marca el usuario como inactivo, pero el comentario y el README dicen que lo borra definitivamente."
+    },
+    {
+      "archivo": "src/copia.ts",
+      "lineas": [4, 6],
+      "categoria": "doc-contradice-codigo",
+      "claves": ["guardar-copia", "copia", "dados-baja"],
+      "descripcion": "El comentario promete incluir a los usuarios dados de baja, pero listarUsuarios los excluye por defecto; además el README no menciona guardarCopia."
+    }
+  ]
+}

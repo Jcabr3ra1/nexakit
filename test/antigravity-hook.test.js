@@ -125,3 +125,30 @@ test('SessionStart and PreInvocation handle lecciones corrections, pending remin
   }, { homeDirectory, now: 1_700_000_005_000 });
   assert.deepEqual(repeatSame, {});
 });
+
+test('PostToolUse: registrar la lección con nexakit lecciones registrar resuelve las correcciones pendientes; si falla, no', async (t) => {
+  const homeDirectory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'agy-hook-registrar-')));
+  t.after(() => fs.rm(homeDirectory, { recursive: true, force: true }));
+  await runHook({
+    hookEventName: 'PreInvocation',
+    conversationId: 'conv-reg',
+    modelName: 'auto',
+    lastUserInput: 'te dije que no borres comentarios',
+  }, { homeDirectory, now: 1_700_000_000_000 });
+  const tipos = async () => (await fs.readFile(path.join(homeDirectory, '.nexakit', 'lecciones.jsonl'), 'utf8'))
+    .trim().split('\n').map((l) => JSON.parse(l).tipo);
+  const orden = '~/.nexakit/nexakit lecciones registrar --regla "No borres comentarios" --porque "Lo pidió la persona"';
+  await runHook({
+    hookEventName: 'PostToolUse',
+    conversationId: 'conv-reg',
+    toolCall: { id: 'r1', name: 'run_command', args: { CommandLine: orden } },
+    error: 'Uso: nexakit lecciones',
+  }, { homeDirectory, now: 1_700_000_001_000 });
+  assert.deepEqual(await tipos(), ['correccion']);
+  await runHook({
+    hookEventName: 'PostToolUse',
+    conversationId: 'conv-reg',
+    toolCall: { id: 'r2', name: 'run_command', args: { CommandLine: orden } },
+  }, { homeDirectory, now: 1_700_000_002_000 });
+  assert.deepEqual(await tipos(), ['correccion', 'guardada']);
+});

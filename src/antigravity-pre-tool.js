@@ -7,10 +7,12 @@ import { motivoBash, motivoEscritura } from '../plugins/nexakit-guardarrailes/ho
 import {
   claveDeComando,
   claveDeError,
+  esRegistroDeLeccion,
   esRutaDeMemoria,
   leerEventos,
   podarEventos,
   sinGuardar,
+  textoSeguro,
 } from '../plugins/nexakit-lecciones/hooks/lecciones.js';
 import { mutateAntigravitySessionState, readAntigravitySessionState } from './antigravity-session.js';
 import { buildOutputWrapperCommand } from './codex-pre-tool.js';
@@ -200,12 +202,17 @@ export async function handleAntigravityPostToolUse(payload, options = {}) {
     }
 
     if (action?.kind === 'shell' && payload.conversationId) {
-      const cmdKey = claveDeComando(unwrapAntigravityCommand(action.command));
+      const original = unwrapAntigravityCommand(action.command);
+      const cmdKey = claveDeComando(original);
       if (!failed) {
         await mutateAntigravitySessionState(payload.conversationId, (state) => {
           state.lecciones.fallidos = {};
           return state;
         }, options);
+        // Registrar la lección en el almacén común también guarda las correcciones pendientes.
+        if (esRegistroDeLeccion(original) && sinGuardar(await readAntigravityLessons(options)).length > 0) {
+          await appendAntigravityLesson({ tipo: 'guardada' }, options);
+        }
         return {};
       }
       const errText = payload.error;
@@ -224,7 +231,7 @@ export async function handleAntigravityPostToolUse(payload, options = {}) {
         }
         return state;
       }, options);
-      if (triggeredRepetition) await appendAntigravityLesson({ tipo: 'repeticion' }, options);
+      if (triggeredRepetition) await appendAntigravityLesson({ tipo: 'repeticion', clave: textoSeguro(errType) }, options);
     }
     return {};
   } catch {

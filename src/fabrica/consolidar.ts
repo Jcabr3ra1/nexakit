@@ -1,9 +1,22 @@
+import { createHash } from 'node:crypto';
+import { z } from 'zod';
 import type { ResultadoEstacion } from './conectores/tipos.js';
 import type { EstadoRecorrido } from './ejecutor.js';
-import { InformeEstacion, NOMBRES_ESTACION, type Hallazgo, type NombreEstacion } from './esquemas.js';
+import { Hallazgo, InformeEstacion, NOMBRES_ESTACION, type NombreEstacion } from './esquemas.js';
 import * as rastro from './rastro.js';
 
-export type HallazgoConsolidado = Hallazgo & { estaciones: NombreEstacion[] };
+/** De dónde sale un hallazgo unificado: el hallazgo de una estación y su clave propia (ver `claveDe`). */
+export interface OrigenHallazgo {
+  estacion: NombreEstacion;
+  clave: string;
+}
+
+/**
+ * Hallazgo unificado. `clave` lo identifica para el veredicto de la sesión y puede cambiar si cambian los hallazgos del
+ * grupo (la lleva el que lo encabeza); `origenes` son los hallazgos de cada estación que lo forman, con claves que no
+ * dependen del resto del grupo: sirven para no contar dos veces un veredicto.
+ */
+export type HallazgoConsolidado = Hallazgo & { estaciones: NombreEstacion[]; clave: string; origenes: OrigenHallazgo[] };
 
 export interface ModeloEstacion {
   estacion: NombreEstacion;
@@ -15,6 +28,15 @@ export interface ModeloEstacion {
 export const DISTANCIA_LINEAS = 3;
 
 const PESO = { alta: 0, media: 1, baja: 2 } as const;
+
+/**
+ * Clave estable de un hallazgo: 12 hex del SHA-256 de `estacion|archivo|linea|categoria`. No depende del texto del
+ * revisor (que puede variar entre llamadas), así que el mismo hallazgo da la misma clave mientras no cambie el sitio.
+ */
+export function claveDe(h: Pick<Hallazgo, 'estacion' | 'archivo' | 'linea' | 'categoria'>): string {
+  const texto = [h.estacion, h.archivo, h.linea === null ? '' : String(h.linea), h.categoria].join('|');
+  return createHash('sha256').update(texto, 'utf8').digest('hex').slice(0, 12);
+}
 
 function cercanos(a: Hallazgo, b: Hallazgo): boolean {
   if (a.archivo !== b.archivo || a.categoria !== b.categoria) return false;
@@ -54,20 +76,31 @@ export function consolidar(
   // El grupo se forma por vecindad sucesiva: cada hallazgo se compara con el último que entró,
   // así que una cadena de hallazgos a ≤ 3 líneas entre sí acaba en un solo grupo aunque los
   // extremos estén más lejos.
-  const grupos: Array<{ base: Hallazgo; ultimo: Hallazgo; estaciones: NombreEstacion[] }> = [];
+  const grupos: Array<{ base: Hallazgo; ultimo: Hallazgo; estaciones: NombreEstacion[]; miembros: Hallazgo[] }> = [];
   for (const h of todos) {
     const grupo = grupos.at(-1);
     if (grupo !== undefined && cercanos(grupo.ultimo, h)) {
       if (PESO[h.gravedad] < PESO[grupo.base.gravedad]) grupo.base = h;
       grupo.ultimo = h;
+      grupo.miembros.push(h);
       if (!grupo.estaciones.includes(h.estacion)) grupo.estaciones.push(h.estacion);
     } else {
-      grupos.push({ base: h, ultimo: h, estaciones: [h.estacion] });
+      grupos.push({ base: h, ultimo: h, estaciones: [h.estacion], miembros: [h] });
     }
   }
   const orden = (e: NombreEstacion): number => NOMBRES_ESTACION.indexOf(e);
+  const origenesDe = (miembros: Hallazgo[]): OrigenHallazgo[] => {
+    const vistos = new Map<string, OrigenHallazgo>();
+    for (const m of miembros) vistos.set(claveDe(m), { estacion: m.estacion, clave: claveDe(m) });
+    return [...vistos.values()];
+  };
   return grupos
-    .map((g) => ({ ...g.base, estaciones: [...g.estaciones].sort((a, b) => orden(a) - orden(b)) }))
+    .map((g) => ({
+      ...g.base,
+      estaciones: [...g.estaciones].sort((a, b) => orden(a) - orden(b)),
+      clave: claveDe(g.base),
+      origenes: origenesDe(g.miembros),
+    }))
     .sort(ordenar);
 }
 
@@ -96,10 +129,10 @@ export function consolidadoMarkdown(
   if (lista.length === 0) {
     out.push('Sin hallazgos en las estaciones que terminaron.', '');
   } else {
-    out.push('| Gravedad | Estaciones | Archivo:línea | Hallazgo | Propuesta | Verificado |', '| --- | --- | --- | --- | --- | --- |');
+    out.push('| Gravedad | Estaciones | Archivo:línea | Hallazgo | Propuesta | Verificado | Clave |', '| --- | --- | --- | --- | --- | --- | --- |');
     for (const h of lista) {
       const sitio = h.linea === null ? h.archivo : `${h.archivo}:${h.linea}`;
-      out.push(`| ${e(h.gravedad)} | ${e(h.estaciones.join(', '))} | ${e(sitio)} | ${e(h.hallazgo)} | ${e(h.propuesta)} |  |`);
+      out.push(`| ${e(h.gravedad)} | ${e(h.estaciones.join(', '))} | ${e(sitio)} | ${e(h.hallazgo)} | ${e(h.propuesta)} |  | ${e(h.clave)} |`);
     }
     out.push('');
   }
@@ -160,6 +193,16 @@ function leerRastro(estado: EstadoRecorrido): Rastro {
     });
   }
   return { resultados, modelos, invalidas };
+}
+
+/** Hallazgos de Claude que ya se pasaron a este recorrido (`claude.json`); una lista vacía si no hay o no son válidos. */
+export function hallazgosGuardados(dir: string): Hallazgo[] {
+  try {
+    const r = z.array(Hallazgo).safeParse(rastro.leerHallazgosClaude(dir));
+    return r.success ? r.data : [];
+  } catch {
+    return [];
+  }
 }
 
 /** Hallazgos unificados del rastro del recorrido, sin escribir nada. */

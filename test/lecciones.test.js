@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { claveDeComando, claveDeError, esCorreccion, NOTA_CORRECCION } from '../plugins/nexakit-lecciones/hooks/lecciones.js';
+import { claveDeComando, claveDeError, esCorreccion, esRegistroDeLeccion, NOTA_CORRECCION } from '../plugins/nexakit-lecciones/hooks/lecciones.js';
 
 test('reconoce las correcciones habituales y no los mensajes normales', () => {
   for (const t of ['no, eso no es lo que pedí', 'otra vez lo mismo', 'otra vez con eso?', '¿otra vez?', 'te dije que en español', 'ya te había dicho que no hicieras commit',
@@ -10,9 +10,35 @@ test('reconoce las correcciones habituales y no los mensajes normales', () => {
   for (const t of ['añade un botón de exportar', 'sí, dale', 'listo', '¿qué subagentes hay?', 'no sé cómo se llama el archivo, búscalo', 'hagamos el PR',
     'ejecuta exactamente el mismo comando otra vez', 'corre las pruebas otra vez', 'siempre que puedas usa sonnet', 'no me acuerdo', 'deja de lado eso por ahora y sigue'])
     assert.equal(esCorreccion(t), false, t);
-  assert.match(NOTA_CORRECCION, /memoria persistente/u);
-  assert.match(NOTA_CORRECCION, /feedback/u);
+  // La lección va al almacén común (Claude, Codex y Antigravity) con la orden estable, no a la memoria de Claude.
+  assert.match(NOTA_CORRECCION, /~\/\.nexakit\/nexakit lecciones registrar --regla "[^"]+" --porque "[^"]+"/u);
+  assert.match(NOTA_CORRECCION, /Claude, Codex y Antigravity/u);
+  assert.match(NOTA_CORRECCION, /nexakit\.cmd/u);
+  assert.doesNotMatch(NOTA_CORRECCION, /memoria persistente/u);
   assert.match(NOTA_CORRECCION, /Si de verdad corrige/u);
+  assert.match(NOTA_CORRECCION, /en esta misma respuesta/u);
+});
+
+test('esRegistroDeLeccion reconoce la orden de registrar y no otras', () => {
+  for (const c of ['~/.nexakit/nexakit lecciones registrar --regla a --porque b', 'C:\\Users\\yo\\.nexakit\\nexakit.cmd lecciones registrar --regla a --porque b', 'npx nexakit lecciones registrar --regla a --porque b'])
+    assert.ok(esRegistroDeLeccion(c), c);
+  for (const c of ['nexakit lecciones', 'nexakit lecciones aceptar abc', 'echo otronexakit lecciones registrar', 'nexakit lecciones registrarla', undefined])
+    assert.equal(esRegistroDeLeccion(c), false, String(c));
+});
+
+test('reconoce quejas repetidas escritas sin tildes ni signos y no las peticiones normales', () => {
+  for (const t of ['sigue haciendo muchas preguntas', 'otra vez lo mismo', 'ya cansa', 'eso está mal', 'no era eso', 'te pedí que no preguntaras tanto',
+    'no funciona lo que hiciste', 'por qué volviste a hacerlo', 'ya me cansaste con las preguntas', 'YA CANSA', 'sigues haciendo muchas preguntas porfavor',
+    'otra vez con las preguntas', 'sigues preguntando lo mismo', 'sigues sin entender lo que quiero', 'haces demasiadas preguntas', 'eso esta mal',
+    'lo que hiciste no funciona', 'no sirve lo que hiciste', 'porque volviste a tocar ese archivo', 'te pedi que no hicieras commit',
+    'sigue haciendo muchas yes or no', 'sigues ignorando lo que te digo', 'sigues haciendo lo mismo', 'no me hiciste caso', 'por qué no me haces caso', 'no me has hecho caso'])
+    assert.ok(esCorreccion(t), t);
+  for (const t of ['¿por qué funciona así?', 'sigue con el plan', 'no funciona el wifi del vecino, pero tú sigue', 'otra vez gracias',
+    'corre otra vez las pruebas porfavor', 'sigue con el siguiente paso', 'dime por qué sigue fallando el test', 'el login no funciona en Safari, revísalo',
+    'otra vez abre el archivo de configuración', 'sigue haciendo el plan tal como está', 'explícame cómo funciona el hook', 'prueba otra vez con el otro modelo',
+    'cuando no funciona el build, ¿qué se hace?', 'sigue con lo que estabas haciendo', 'no funciona npm en esta máquina, instálalo de nuevo',
+    'sigues corriendo el test? avisame', 'sigues haciendo pruebas, bien', 'por favor sigue haciendo eso mismo', 'sigue haciendo lo mismo que antes'])
+    assert.equal(esCorreccion(t), false, t);
 });
 
 test('dos comandos que solo difieren en espacios son el mismo; el permiso de repetir no cuenta', () => {
@@ -84,7 +110,7 @@ test('añade la nota solo a los mensajes que corrigen', async () => {
   const h = await montar();
   const enviar = async (text) => { let e2; await h('prompt.submit')({}, { text }, async (e) => { e2 = e; return e; }); return e2.text; };
   assert.equal(await enviar('añade un botón'), 'añade un botón');
-  assert.match(await enviar('te dije que en español'), /^te dije que en español\n\n\[nexakit: .*memoria persistente/su);
+  assert.match(await enviar('te dije que en español'), /^te dije que en español\n\n\[nexakit: .*lecciones registrar/su);
 });
 
 // --- Registro propio de lecciones: eventos, correcciones pendientes y lecciones guardadas ---
@@ -148,6 +174,7 @@ test('registra los frenos y el error repetido tres veces', async () => {
   assert.deepEqual(eventos().map((e) => e.tipo), ['freno']);
   for (const c of ['node a.js', 'node b.js', 'node c.js']) await bash($, { tool: 'Bash', command: c }, falla(`Error: Cannot find module '/tmp/${c}'`));
   assert.deepEqual(eventos().map((e) => e.tipo), ['freno', 'repeticion']);
+  assert.equal(eventos().at(-1).clave, 'Error: Cannot find module <…>', 'la repetición lleva la clave del error, que usa el almacén de lecciones');
 });
 
 test('una corrección se apunta con su texto y una frase con un secreto no', async () => {
@@ -179,6 +206,20 @@ test('escribir en la memoria persistente marca las correcciones como guardadas; 
   assert.equal(eventos().filter((e) => e.tipo === 'guardada').length, 1, 'sin correcciones pendientes no apunta otra guardada');
 });
 
+test('registrar la lección con nexakit lecciones registrar marca las correcciones como guardadas; si falla, no', async () => {
+  const h = await montar();
+  const { $, eventos } = entorno();
+  const herramienta = h('tool.call');
+  await herramienta($, { tool: 'Bash', command: '~/.nexakit/nexakit lecciones registrar --regla "Responde en español" --porque "Lo pidió"' }, bien);
+  assert.deepEqual(eventos().map((e) => e.tipo), [], 'sin correcciones pendientes no apunta nada');
+  await h('prompt.submit')($, { text: 'te dije que en español' }, async (e) => e);
+  await herramienta($, { tool: 'Bash', command: '~/.nexakit/nexakit lecciones registrar --regla "x" --porque "y"' }, falla('Uso: nexakit lecciones'));
+  await herramienta($, { tool: 'Bash', command: 'nexakit lecciones --json' }, bien);
+  assert.deepEqual(eventos().map((e) => e.tipo), ['correccion']);
+  await herramienta($, { tool: 'Bash', command: '~/.nexakit/nexakit lecciones registrar --regla "Responde en español" --porque "Lo pidió"' }, bien);
+  assert.deepEqual(eventos().map((e) => e.tipo), ['correccion', 'guardada']);
+});
+
 test('al empezar una sesión recuerda una sola vez las correcciones que quedaron sin guardar', async () => {
   const ahora = 1_000_000_000_000;
   const previo = linea({ fecha: ahora - 3 * DIA, tipo: 'correccion', texto: 'ya guardada' }) + linea({ fecha: ahora - 2 * DIA, tipo: 'guardada' })
@@ -187,7 +228,7 @@ test('al empezar una sesión recuerda una sola vez las correcciones que quedaron
   const { $, eventos } = entorno({ previo });
   const enviar = async (text) => { let e2; await h('prompt.submit')($, { text }, async (e) => { e2 = e; return e; }); return e2.text; };
   const primero = await enviar('añade un botón');
-  assert.match(primero, /^añade un botón\n\n\[nexakit: .*2 correcciones.*«háblame en español».*«no hagas commit solo».*memoria persistente/su);
+  assert.match(primero, /^añade un botón\n\n\[nexakit: .*2 correcciones.*«háblame en español».*«no hagas commit solo».*lecciones registrar/su);
   assert.doesNotMatch(primero, /ya guardada/u);
   assert.equal(eventos().at(-1).tipo, 'avisada');
   assert.equal(await enviar('otra cosa'), 'otra cosa', 'solo al primer mensaje de la sesión');
@@ -201,7 +242,7 @@ test('registrar nunca rompe el turno aunque el disco falle', async () => {
   const { $ } = entorno({ fallaEscritura: true });
   let e2;
   await h('prompt.submit')($, { text: 'te dije que en español' }, async (e) => { e2 = e; return e; });
-  assert.match(e2.text, /memoria persistente/u);
+  assert.match(e2.text, /lecciones registrar/u);
   const r = await h('tool.call')($, { tool: 'Bash', command: 'make' }, falla('boom'));
   assert.equal(r.isError, true);
 });

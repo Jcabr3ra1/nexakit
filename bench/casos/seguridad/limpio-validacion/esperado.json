@@ -1,0 +1,14 @@
+{
+  "estacion": "seguridad",
+  "base": {
+    "archivos": [
+      "servidor.js"
+    ]
+  },
+  "cambio": {
+    "archivos": [
+      "servidor.js"
+    ]
+  },
+  "fallos": []
+}

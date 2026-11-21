@@ -3,11 +3,17 @@ import os from 'node:os';
 import path from 'node:path';
 import { parseArgs, type ParseArgsOptionsConfig } from 'node:util';
 import type { z } from 'zod';
-import { escaparMarkdown, escribirConsolidado, hallazgosDe } from './consolidar.js';
+import { escaparMarkdown, escribirConsolidado, type HallazgoConsolidado, hallazgosDe, hallazgosGuardados } from './consolidar.js';
 import * as ejecutor from './ejecutor.js';
 import type { CambioRecorrido, Recorrido } from './enrutador.js';
+import { describirPlan, ejecutarBanco, planificarBanco, verificarPlanAprobado, type EjecucionMedida, type ResultadoBanco } from './banco/ejecutar.js';
 import { ErrorEntorno, ErrorFabrica } from './errores.js';
+import { cargar } from './evidencia.js';
+import { consumirPlanBanco, guardarPlanBanco, nombreRepo } from './rastro.js';
 import {
+  cerrarConectores,
+  consultarCatalogos,
+  crearConectoresDesdeEntorno,
   EsquemaCambios,
   limpiar,
   lanzarAprobado,
@@ -16,6 +22,7 @@ import {
   proponerEnRaiz,
   raizDelRepo,
 } from './sesion.js';
+import { aprenderDeVeredictos, EsquemaVeredictos, type Veredicto } from './veredictos.js';
 
 export interface IoCli {
   out: (texto: string) => unknown;
@@ -38,15 +45,25 @@ export interface OpcionesCli {
 const AYUDA = `Uso: nexakit fabrica proponer --base <rama> [--foco <texto>] [--json]
      nexakit fabrica lanzar --huella <huella> [--cambios <archivo.json>] [--json]
      nexakit fabrica estado --id <id> [--json]
-     nexakit fabrica resultado --id <id> [--json]
+     nexakit fabrica resultado --id <id> [--veredictos <archivo.json>] [--json]
      nexakit fabrica cancelar --id <id>
+     nexakit fabrica banco planificar [--fase 1|2] [--estacion <estacion>] [--json]
+     nexakit fabrica banco ejecutar --huella <huella> [--json]
 
 proponer lee el diff contra la rama base, consulta los modelos disponibles y muestra el
-recorrido de revisión: estaciones, IA, modelo, esfuerzo, órdenes permitidas y huella.
+recorrido de revisión: estaciones, IA, modelo, esfuerzo, órdenes permitidas y huella. Cada
+modelo se elige con la evidencia medida (el más barato que basta según el riesgo) y se explica;
+sin datos manda la tabla manual y se avisa de que conviene medir.
 lanzar ejecuta ese recorrido en primer plano si la huella coincide con la propuesta y el
 diff sigue siendo el mismo; muestra el progreso y, al terminar, la ruta de consolidado.md.
   --cambios es un JSON con una lista de { "estacion", "quitar"?, "ia"?, "modelo"?, "esfuerzo"? }.
 estado y resultado consultan un recorrido por su id; cancelar lo interrumpe (Ctrl+C también).
+  --veredictos es un JSON con una lista de { "clave", "verificado": "real" | "falso" | "dudoso" }, con las claves de
+  consolidado.md: los reales y los falsos actualizan la evidencia de cada modelo que reportó el hallazgo.
+banco mide los modelos con casos con fallos sembrados y suma el resultado a la evidencia. planificar no ejecuta
+nada: muestra las llamadas, el coste estimado y la huella, y guarda el plan en ~/.nexakit/fabrica/banco-plan.json.
+ejecutar solo lanza ese plan guardado si la huella coincide, en primer plano, y lo consume antes de empezar. La fase 1 mide
+cada modelo con su esfuerzo más bajo; la fase 2 (necesita la fase 1) mide los tres finalistas por estación.
 Códigos de salida: 0 bien, 1 fallo de estación o escritura detectada, 2 argumentos inválidos.
 `;
 
@@ -57,12 +74,26 @@ const MAX_BYTES_CAMBIOS = 1024 * 1024;
 /** Argumentos inválidos: salida con código 2. */
 class ErrorUso extends Error {}
 
-const celda = (texto: string): string => escaparMarkdown(limpiar(texto));
+/**
+ * Texto de una sola línea: `limpiar` deja pasar `\n` y `\t`, y un nombre de modelo con ellos partiría una celda, una
+ * explicación o un aviso y permitiría colar una línea «Aviso:» o una fila de la tabla falsas.
+ */
+const enUnaLinea = (texto: string): string => limpiar(texto).replace(/[\r\n\t\p{Zl}\p{Zp}]+/gu, ' ');
+
+const celda = (texto: string): string => escaparMarkdown(enUnaLinea(texto));
+
+const COLUMNAS_EXPLICACION = 160;
+
+/** Recorta a `max` columnas (caracteres) con «…» al final si no cabe. */
+function recortar(texto: string, max: number): string {
+  const letras = [...texto];
+  return letras.length <= max ? texto : `${letras.slice(0, max - 1).join('')}…`;
+}
 
 // ---------------------------------------------------------------------------------------------
 // Formato
 
-function tablaRecorrido(r: Recorrido): string[] {
+export function tablaRecorrido(r: Recorrido): string[] {
   const lineas = [
     `Recorrido propuesto, huella ${r.huella}`,
     `Base: ${limpiar(r.basePedida)} (${r.base.slice(0, 12)}) · HEAD: ${r.head.slice(0, 12)}`,
@@ -77,6 +108,12 @@ function tablaRecorrido(r: Recorrido): string[] {
     const campos = [e.estacion, e.ia ?? '-', e.modelo ?? '-', e.esfuerzo ?? '-', e.estado, e.motivo, notas.join('; ')];
     lineas.push(`| ${campos.map(celda).join(' | ')} |`);
   }
+  const elecciones = r.estaciones.filter((e) => e.explicacion !== '');
+  if (elecciones.length > 0) {
+    lineas.push('', 'Por qué cada modelo:');
+    for (const e of elecciones) lineas.push(recortar(`  ${enUnaLinea(e.estacion)}: ${enUnaLinea(e.explicacion)}`, COLUMNAS_EXPLICACION));
+  }
+  if (r.avisos.length > 0) lineas.push('', ...r.avisos.map((a) => `Aviso: ${enUnaLinea(a)}`));
   lineas.push('', `Coste estimado: ${r.coste.llamadasExternas} llamadas externas y ${r.coste.subagentesClaude} subagentes de Claude.`);
   return lineas;
 }
@@ -88,6 +125,7 @@ function lineasEstado(e: ejecutor.EstadoRecorrido): string[] {
     lineas.push(`  - ${limpiar(x.estacion)}: ${limpiar(x.estado)}${nota === undefined ? '' : ` (${limpiar(nota)})`}`);
   }
   if (e.motivo !== undefined) lineas.push(`Motivo: ${limpiar(e.motivo)}`);
+  for (const a of e.avisos ?? []) lineas.push(`Aviso: ${limpiar(a)}`);
   if (e.escriturasDetectadas.length > 0) {
     lineas.push('Escrituras detectadas en el repo:', ...e.escriturasDetectadas.map((a) => `  - ${limpiar(a)}`));
   }
@@ -109,24 +147,28 @@ function detalleZod(error: z.ZodError): string {
     .join('; ');
 }
 
-async function leerCambios(archivo: string): Promise<CambioRecorrido[]> {
+/** Lee un archivo JSON de la persona (`cambios`, `veredictos`...) con tope de tamaño y lo valida con su esquema. */
+async function leerJsonValidado<T>(archivo: string, nombre: string, esquema: z.ZodType<T>): Promise<T> {
   let texto: string;
   try {
     texto = await readFile(archivo, 'utf8');
   } catch (error) {
-    throw new ErrorUso(`No se pudo leer el archivo de cambios ${archivo}: ${mensajeDe(error)}`);
+    throw new ErrorUso(`No se pudo leer el archivo de ${nombre} ${archivo}: ${mensajeDe(error)}`);
   }
-  if (Buffer.byteLength(texto, 'utf8') > MAX_BYTES_CAMBIOS) throw new ErrorUso('El archivo de cambios supera 1 MiB');
+  if (Buffer.byteLength(texto, 'utf8') > MAX_BYTES_CAMBIOS) throw new ErrorUso(`El archivo de ${nombre} supera 1 MiB`);
   let dato: unknown;
   try {
     dato = JSON.parse(texto.replace(/^﻿/u, ''));
   } catch (error) {
-    throw new ErrorUso(`El archivo de cambios no es un JSON válido: ${mensajeDe(error)}`);
+    throw new ErrorUso(`El archivo de ${nombre} no es un JSON válido: ${mensajeDe(error)}`);
   }
-  const r = EsquemaCambios.safeParse(dato);
-  if (!r.success) throw new ErrorUso(`El archivo de cambios no es válido: ${detalleZod(r.error)}`);
+  const r = esquema.safeParse(dato);
+  if (!r.success) throw new ErrorUso(`El archivo de ${nombre} no es válido: ${detalleZod(r.error)}`);
   return r.data;
 }
+
+const leerCambios = (archivo: string): Promise<CambioRecorrido[]> => leerJsonValidado(archivo, 'cambios', EsquemaCambios);
+const leerVeredictos = (archivo: string): Promise<Veredicto[]> => leerJsonValidado(archivo, 'veredictos', EsquemaVeredictos);
 
 // ---------------------------------------------------------------------------------------------
 // Órdenes
@@ -251,17 +293,40 @@ async function ordenEstado(ctx: Contexto, id: string, json: boolean): Promise<nu
   return 0;
 }
 
-async function ordenResultado(ctx: Contexto, id: string, json: boolean): Promise<number> {
+async function aprenderConVeredictos(
+  ctx: Contexto,
+  estado: ejecutor.EstadoRecorrido,
+  hallazgos: HallazgoConsolidado[],
+  veredictos: Veredicto[],
+): ReturnType<typeof aprenderDeVeredictos> {
+  const raiz = await raizDelRepo(ctx.cwd);
+  return aprenderDeVeredictos({ home: ctx.home, repo: await nombreRepo(raiz), raiz, estado, hallazgos, veredictos });
+}
+
+async function ordenResultado(ctx: Contexto, id: string, archivoVeredictos: string | undefined, json: boolean): Promise<number> {
+  const veredictos = archivoVeredictos === undefined ? undefined : await leerVeredictos(archivoVeredictos);
   const e = ejecutor.estado(id, ctx.home);
   if (e.fase === 'en-curso') throw new ErrorFabrica(`El recorrido ${id} sigue en curso; espera a que termine`);
   let ruta = path.join(e.dir, 'consolidado.md');
   let texto = leerSinEnlaces(ruta);
   if (texto === null) {
-    ruta = await escribirConsolidado(e);
+    ruta = await escribirConsolidado(e, hallazgosGuardados(e.dir));
     texto = leerSinEnlaces(ruta) ?? '';
   }
-  if (json) await salida(ctx, JSON.stringify({ ...e, consolidado: ruta, hallazgos: hallazgosDe(e) }, null, 2));
-  else await salida(ctx, limpiar(texto).trimEnd());
+  const hallazgos = hallazgosDe(e, hallazgosGuardados(e.dir));
+  const aprendizaje =
+    veredictos === undefined ? undefined : await aprenderConVeredictos(ctx, e, hallazgos, veredictos);
+  if (json) await salida(ctx, JSON.stringify({ ...e, consolidado: ruta, hallazgos, ...(aprendizaje === undefined ? {} : { aprendizaje }) }, null, 2));
+  else {
+    await salida(ctx, limpiar(texto).trimEnd());
+    if (aprendizaje !== undefined) {
+      await salida(
+        ctx,
+        `\nEvidencia: ${aprendizaje.aplicados} veredictos aplicados, ${aprendizaje.repetidos} repetidos, ${aprendizaje.dudosos} dudosos, ${aprendizaje.ignorados} ignorados.`,
+      );
+      for (const a of aprendizaje.avisos) await aviso(ctx)(enUnaLinea(a));
+    }
+  }
   return codigoSalida(e);
 }
 
@@ -280,14 +345,112 @@ async function ordenCancelar(ctx: Contexto, id: string): Promise<number> {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Banco
+
+async function ordenBancoPlanificar(ctx: Contexto, faseTexto: string | undefined, estacion: string | undefined, json: boolean): Promise<number> {
+  if (faseTexto !== undefined && faseTexto !== '1' && faseTexto !== '2') throw new ErrorUso('--fase debe ser 1 o 2');
+  const fase = faseTexto === '2' ? 2 : 1;
+  const { evidencia, aviso: avisoEvidencia } = await cargar(ctx.home);
+  if (fase === 2 && !evidencia.filas.some((f) => f.banco > 0)) {
+    throw new ErrorFabrica('La fase 2 necesita medidas del banco: planifica y ejecuta antes la fase 1');
+  }
+  if (avisoEvidencia !== null) await aviso(ctx)(enUnaLinea(avisoEvidencia));
+  const conectores = await crearConectoresDesdeEntorno({ entorno: ctx.entorno, avisar: aviso(ctx) });
+  let catalogos;
+  try {
+    catalogos = await consultarCatalogos(conectores, aviso(ctx));
+  } finally {
+    await cerrarConectores(conectores);
+  }
+  const plan = planificarBanco({ fase, catalogos, evidencia, ...(estacion === undefined ? {} : { estaciones: [estacion] }) });
+  const ruta = await guardarPlanBanco(ctx.home, plan);
+  if (json) await salida(ctx, JSON.stringify({ ...plan, archivo: ruta }, null, 2));
+  else {
+    await salida(ctx, limpiar(describirPlan(plan)));
+    await salida(ctx, `\nPlan guardado en ${ruta}`);
+    await salida(ctx, `Para ejecutarlo, con la aprobación de la persona: nexakit fabrica banco ejecutar --huella ${plan.huella}`);
+  }
+  return 0;
+}
+
+interface ResumenEstacion {
+  estacion: string;
+  aciertos: number;
+  fallos: number;
+  invalidas: number;
+  tokens: number;
+}
+
+/** Suma por estación los aciertos, fallos, ejecuciones inválidas y tokens de lo medido. */
+function resumirBanco(ejecuciones: readonly EjecucionMedida[]): ResumenEstacion[] {
+  const por = new Map<string, ResumenEstacion>();
+  for (const e of ejecuciones) {
+    const estacion = e.caso.split('/')[0] ?? e.caso;
+    const r = por.get(estacion) ?? { estacion, aciertos: 0, fallos: 0, invalidas: 0, tokens: 0 };
+    if (e.valida) {
+      r.aciertos += e.observacion?.aciertos ?? 0;
+      r.fallos += e.observacion?.fallos ?? 0;
+    } else r.invalidas += 1;
+    r.tokens += e.tokens ?? 0;
+    por.set(estacion, r);
+  }
+  return [...por.values()];
+}
+
+async function ordenBancoEjecutar(ctx: Contexto, huella: string, json: boolean): Promise<number> {
+  // El plan solo llega del archivo que dejó `planificar`: nunca por argumentos ni por stdin.
+  // Se consume antes de nada: una aprobación vale para una sola ejecución, aunque falle la verificación o se corte.
+  const guardado = await consumirPlanBanco(ctx.home);
+  if (guardado === null) throw new ErrorFabrica('No hay un plan del banco guardado; planifícalo antes con «nexakit fabrica banco planificar»');
+  const plan = verificarPlanAprobado(guardado, huella);
+  const ias = [...new Set(plan.ejecuciones.map((e) => e.ia))];
+  const conectores = await crearConectoresDesdeEntorno({ ias, entorno: ctx.entorno, avisar: aviso(ctx) });
+  let resultado: ResultadoBanco;
+  try {
+    resultado = await ejecutarBanco(plan, {
+      huella,
+      conectores,
+      home: ctx.home,
+      alAvanzar: (m, i, total) => {
+        if (json) return;
+        const estado = m.valida ? 'válida' : `inválida (${m.motivo ?? 'sin motivo'})`;
+        void ctx.io.out(`[${i + 1}/${total}] ${enUnaLinea(m.caso)}: ${enUnaLinea(m.ia)} ${enUnaLinea(m.modelo)}${m.esfuerzo === null ? '' : ` ${enUnaLinea(m.esfuerzo)}`} - ${estado}\n`);
+      },
+    });
+  } finally {
+    await cerrarConectores(conectores);
+  }
+  const resumen = resumirBanco(resultado.ejecuciones);
+  const invalidas = resumen.reduce((n, r) => n + r.invalidas, 0);
+  if (json) await salida(ctx, JSON.stringify({ ...resultado, resumen }, null, 2));
+  else {
+    await salida(ctx, `\nResumen del banco, fase ${resultado.fase}:`);
+    for (const r of resumen) {
+      await salida(ctx, `  ${enUnaLinea(r.estacion)}: ${r.aciertos} aciertos, ${r.fallos} fallos, ${r.invalidas} inválidas, ${r.tokens} tokens`);
+    }
+    for (const a of resultado.avisos) await aviso(ctx)(enUnaLinea(a));
+    const validas = resultado.ejecuciones.filter((e) => e.valida && e.observacion !== undefined).length;
+    await salida(
+      ctx,
+      validas > 0
+        ? `La evidencia quedó actualizada con ${validas} ${validas === 1 ? 'ejecución válida' : 'ejecuciones válidas'}. El plan ya se consumió: para medir de nuevo hay que planificar otra vez.`
+        : 'Ninguna ejecución fue válida: la evidencia no cambió. El plan ya se consumió: para medir de nuevo hay que planificar otra vez.',
+    );
+  }
+  return invalidas > 0 ? 1 : 0;
+}
+
+// ---------------------------------------------------------------------------------------------
 // Entrada
 
 const OPCIONES: Record<string, ParseArgsOptionsConfig> = {
   proponer: { base: { type: 'string' }, foco: { type: 'string' }, json: { type: 'boolean' } },
   lanzar: { huella: { type: 'string' }, cambios: { type: 'string' }, json: { type: 'boolean' } },
   estado: { id: { type: 'string' }, json: { type: 'boolean' } },
-  resultado: { id: { type: 'string' }, json: { type: 'boolean' } },
+  resultado: { id: { type: 'string' }, veredictos: { type: 'string' }, json: { type: 'boolean' } },
   cancelar: { id: { type: 'string' } },
+  'banco planificar': { fase: { type: 'string' }, estacion: { type: 'string' }, json: { type: 'boolean' } },
+  'banco ejecutar': { huella: { type: 'string' }, json: { type: 'boolean' } },
 };
 
 function valorTexto(valores: Record<string, unknown>, nombre: string): string | undefined {
@@ -313,7 +476,11 @@ export async function ejecutarCli(argv: string[], io: IoCli, opciones: OpcionesC
     sondeoMs: opciones.sondeoMs ?? SONDEO_MS,
     salir: opciones.salir ?? ((codigo) => process.exit(codigo)),
   };
-  const [orden, ...resto] = argv;
+  const [primera, ...siguientes] = argv;
+  // `banco` lleva su propia orden: `banco planificar` y `banco ejecutar`.
+  const compuesta = primera === 'banco';
+  const orden = compuesta ? `banco ${siguientes[0] ?? ''}`.trimEnd() : primera;
+  const resto = compuesta ? siguientes.slice(1) : siguientes;
   if (orden === '--help' || orden === '-h') {
     await io.out(AYUDA);
     return 0;
@@ -340,10 +507,14 @@ export async function ejecutarCli(argv: string[], io: IoCli, opciones: OpcionesC
         return await ordenProponer(ctx, exigir(valorTexto(valores, 'base'), '--base'), valorTexto(valores, 'foco'), json);
       case 'lanzar':
         return await ordenLanzar(ctx, exigir(valorTexto(valores, 'huella'), '--huella'), valorTexto(valores, 'cambios'), json);
+      case 'banco planificar':
+        return await ordenBancoPlanificar(ctx, valorTexto(valores, 'fase'), valorTexto(valores, 'estacion'), json);
+      case 'banco ejecutar':
+        return await ordenBancoEjecutar(ctx, exigir(valorTexto(valores, 'huella'), '--huella'), json);
       case 'estado':
         return await ordenEstado(ctx, exigir(valorTexto(valores, 'id'), '--id'), json);
       case 'resultado':
-        return await ordenResultado(ctx, exigir(valorTexto(valores, 'id'), '--id'), json);
+        return await ordenResultado(ctx, exigir(valorTexto(valores, 'id'), '--id'), valorTexto(valores, 'veredictos'), json);
       default:
         return await ordenCancelar(ctx, exigir(valorTexto(valores, 'id'), '--id'));
     }

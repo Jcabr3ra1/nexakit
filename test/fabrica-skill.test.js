@@ -36,6 +36,13 @@ test('la skill fabrica enseña las órdenes permitidas y avisa de las del repo',
   assert.match(md, /`\.nexakit\/fabrica\.json`[^.]*no son de fiar/u);
 });
 
+test('la skill fabrica pide mostrar la explicación de cada estación y los avisos de evidencia', async () => {
+  const md = (await leer('skills/fabrica/SKILL.md')).replace(/\s+/gu, ' ');
+  assert.match(md, /explicación de cada estación \(`explicacion`[^)]*\)/u);
+  assert.match(md, /avisos de evidencia del recorrido \(`avisos`[^)]*caducada[^)]*`nexakit fabrica banco planificar`/u);
+  assert.match(md, /nunca lances el banco por tu cuenta/u);
+});
+
 test('la skill fabrica cubre el recorrido en curso, la estación de Claude y la invocación desde Codex', async () => {
   const md = (await leer('skills/fabrica/SKILL.md')).replace(/\s+/gu, ' ');
   assert.match(md, /sigue en curso, díselo a la persona y espera a que te lo pida, sin consultar en bucle/u);

@@ -185,6 +185,17 @@ test('confirmation explicitly announces global work rules for the selected IAs',
   assert.ok(blockIds(confirmation).includes('review-instructions'));
 });
 
+test('confirmation announces the lessons shared with the selected IAs and warns about an edited block', () => {
+  const state = puntoMotos({ leccionesInstructions: { items: [
+    {client:'claude',name:'CLAUDE.md',state:'pending'},
+    {client:'codex',name:'AGENTS.md',state:'conflict',reason:'editado'}
+  ] } });
+  const confirmation = buildConfirmation(state, suggestedAnswers(state));
+  assert.ok(marks(confirmation).includes('+ Lecciones de nexakit en tus instrucciones de Claude Code'));
+  assert.ok(marks(confirmation).includes('! AGENTS.md: el bloque de lecciones de nexakit está editado a mano; no lo toco'));
+  assert.ok(blockIds(confirmation).includes('lecciones-instructions'));
+});
+
 test('Superpowers is required: installs it where it is missing, enables it where it is off, after the base skills', () => {
   const state = puntoMotos({
     agentsFound: { claude: true, codex: true, antigravity: true },

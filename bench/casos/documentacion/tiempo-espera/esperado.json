@@ -1,0 +1,16 @@
+{
+  "estacion": "documentacion",
+  "base": {
+    "archivos": [
+      "README.md",
+      "src/config.js"
+    ]
+  },
+  "cambio": {
+    "archivos": [
+      "README.md",
+      "src/config.js"
+    ]
+  },
+  "fallos": []
+}

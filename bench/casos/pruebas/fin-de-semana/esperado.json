@@ -1,0 +1,16 @@
+{
+  "estacion": "pruebas",
+  "base": {
+    "archivos": [
+      "src/fechas.js",
+      "test/fechas.test.js"
+    ]
+  },
+  "cambio": {
+    "archivos": [
+      "src/fechas.js",
+      "test/fines-de-semana.test.js"
+    ]
+  },
+  "fallos": []
+}

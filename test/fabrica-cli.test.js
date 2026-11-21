@@ -6,7 +6,9 @@ import { tmpdir } from 'node:os';
 import { gitConfigGlobalVacio } from '../test-support/git-aislado.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ejecutarCli } from '../dist/fabrica/cli.js';
+import { ejecutarCli, tablaRecorrido } from '../dist/fabrica/cli.js';
+import { calcularHuella } from '../dist/fabrica/enrutador.js';
+import { actualizar, evidenciaVacia, guardar } from '../dist/fabrica/evidencia.js';
 import { nombreRepo } from '../dist/fabrica/rastro.js';
 import { runToolkitCli } from '../src/toolkit-cli.js';
 
@@ -168,6 +170,99 @@ test('proponer en texto muestra la tabla con las órdenes permitidas, la nota de
   assert.match(out, /Coste estimado: 1 llamadas externas y 1 subagentes de Claude\./u);
   const huella = out.match(/huella ([0-9a-f]{64})/u)[1];
   assert.ok(out.includes(`nexakit fabrica lanzar --huella ${huella}`));
+});
+
+test('proponer --json incluye la explicación y la calidad de cada estación', async () => {
+  const e = escenario({ config: CONFIG_AGY });
+  const r = JSON.parse((await cli(['proponer', '--base', 'main', '--json'], e)).out);
+  for (const x of r.estaciones) {
+    assert.equal(typeof x.explicacion, 'string', x.estacion);
+    assert.ok(x.calidad === null || typeof x.calidad === 'number', x.estacion);
+  }
+  assert.match(porNombre(r, 'pruebas').explicacion, /sin datos medidos/u);
+  assert.equal(porNombre(r, 'codigo').explicacion, 'la ejecuta la sesión de Claude');
+  assert.ok(Array.isArray(r.avisos));
+  assert.ok(r.avisos.some((a) => /^pruebas: sin datos medidos: ejecuta el banco/u.test(a)), r.avisos.join('\n'));
+});
+
+test('proponer en texto muestra la explicación de cada estación en una línea aparte y los avisos de evidencia', async () => {
+  const e = escenario({ config: CONFIG_AGY });
+  const { codigo, out } = await cli(['proponer', '--base', 'main'], e);
+  assert.equal(codigo, 0);
+  assert.match(out, /^Por qué cada modelo:$/mu);
+  assert.match(out, /^ {2}pruebas: gpt-6\.1-terra medium: sin datos medidos, se usa la tabla manual/mu);
+  assert.match(out, /^ {2}codigo: la ejecuta la sesión de Claude$/mu);
+  assert.doesNotMatch(out, /^ {2}documentacion:/mu, 'las estaciones omitidas no llevan explicación');
+  assert.match(out, /^Aviso: pruebas: sin datos medidos: ejecuta el banco/mu);
+  // La explicación va fuera de la tabla, que sigue siendo una tabla válida.
+  const tabla = out.split('\n').filter((l) => l.startsWith('|'));
+  assert.equal(tabla.length, 2 + 7);
+});
+
+test('con evidencia en el HOME la CLI explica la elección medida', async () => {
+  const e = escenario({ config: CONFIG_AGY });
+  const ahora = new Date();
+  let ev = evidenciaVacia(ahora);
+  ev = actualizar(ev, { ia: 'codex', modelo: 'gpt-6.1-terra', esfuerzo: 'medium', estacion: 'pruebas' }, { aciertos: 100, fallos: 2, tokens: 4000, segundos: 10, fuente: 'banco', ahora });
+  await guardar(e.home, ev, ahora);
+  const { codigo, out } = await cli(['proponer', '--base', 'main'], e);
+  assert.equal(codigo, 0);
+  assert.match(out, /^ {2}pruebas: gpt-6\.1-terra medium: calidad ≥ 0,9\d \(102 obs\.\), ~4,0k tokens$/mu);
+  assert.doesNotMatch(out, /^Aviso: pruebas:/mu);
+});
+
+test('la explicación se recorta a 160 columnas con la sangría incluida', async () => {
+  // Los nombres más largos que admite un catálogo: 80 caracteres cada uno.
+  const modelo = 'm'.repeat(80);
+  const esfuerzo = 'e'.repeat(80);
+  const catalogo = { resultado: { data: [modeloCodex(modelo, [esfuerzo]), modeloCodex('gpt-6.1-sol', ['high'])], nextCursor: null } };
+  const codex = guionCodexOk();
+  codex.metodos['model/list'] = catalogo;
+  const e = escenario({ config: CONFIG_AGY, codex });
+  const ahora = new Date();
+  const ev = actualizar(evidenciaVacia(ahora), { ia: 'codex', modelo, esfuerzo, estacion: 'pruebas' }, { aciertos: 100, fallos: 2, tokens: 4000, segundos: 10, fuente: 'banco', ahora });
+  await guardar(e.home, ev, ahora);
+  const { out } = await cli(['proponer', '--base', 'main'], e);
+  const linea = out.split('\n').find((l) => l.startsWith('  pruebas: '));
+  assert.ok(linea, out);
+  assert.equal([...linea].length, 160);
+  assert.ok(linea.endsWith('…'));
+});
+
+test('un nombre con saltos de línea o tabuladores no parte la explicación, un aviso ni una celda', async () => {
+  const e = escenario({ config: CONFIG_AGY });
+  const r = JSON.parse((await cli(['proponer', '--base', 'main', '--json'], e)).out);
+  const pruebas = porNombre(r, 'pruebas');
+  pruebas.explicacion = 'gpt\nAviso: falso\t\u2028| seguridad | codex | x |: calidad';
+  pruebas.descartes = ['m\n| codigo | codex | falso |\r\n\u2029fin'];
+  r.avisos = ['pruebas: sin datos\nAviso: otra línea\ty más'];
+  const lineas = tablaRecorrido(r).join('\n').split('\n');
+  assert.ok(lineas.includes('  pruebas: gpt Aviso: falso | seguridad | codex | x |: calidad'), lineas.join('\n'));
+  assert.ok(lineas.includes('Aviso: pruebas: sin datos Aviso: otra línea y más'), lineas.join('\n'));
+  assert.equal(lineas.filter((l) => l.startsWith('Aviso:')).length, 1, 'ningún aviso falso');
+  assert.equal(lineas.filter((l) => l.startsWith('|')).length, 2 + 7, 'ninguna fila falsa');
+  assert.ok(lineas.some((l) => l.startsWith('| pruebas |') && l.includes('descartes: m \\| codigo')), lineas.join('\n'));
+  assert.ok(!/[\t\u2028\u2029\r]/u.test(lineas.join('\n')));
+});
+
+test('una propuesta guardada con el formato anterior se rechaza y pide volver a proponer', async () => {
+  const e = escenario({ config: CONFIG_AGY });
+  const r = JSON.parse((await cli(['proponer', '--base', 'main', '--json'], e)).out);
+  // Formato anterior: sin explicacion, calidad ni avisos; su huella era la de entonces.
+  const vieja = structuredClone(r);
+  for (const x of vieja.estaciones) {
+    delete x.explicacion;
+    delete x.calidad;
+  }
+  delete vieja.avisos;
+  vieja.huella = calcularHuella(vieja);
+  assert.notEqual(vieja.huella, r.huella);
+  const propuesta = path.join(e.home, '.nexakit', 'fabrica', await nombreRepo(e.dir), 'propuesta.json');
+  writeFileSync(propuesta, JSON.stringify(vieja, null, 2));
+  const { codigo, err, out } = await cli(['lanzar', '--huella', vieja.huella], e);
+  assert.equal(codigo, 1);
+  assert.match(err, /No hay una propuesta con esa huella; vuelve a proponer/u);
+  assert.equal(out, '');
 });
 
 test('proponer no aborta si una IA no está instalada: avisa y pasa al siguiente candidato', async () => {
@@ -428,4 +523,124 @@ test('nexakit --help menciona fabrica y la orden se despacha desde toolkit-cli',
   assert.equal(codigo, 2);
   assert.equal(salida, '');
   assert.match(err, /Uso: nexakit fabrica/u);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Banco
+
+const rutaPlanBanco = (home) => path.join(home, '.nexakit', 'fabrica', 'banco-plan.json');
+
+test('banco planificar muestra el plan con su coste y la orden exacta, y lo guarda en privado', async () => {
+  const e = escenario();
+  const { codigo, out, err } = await cli(['banco', 'planificar', '--estacion', 'seguridad'], e);
+  assert.equal(codigo, 0, err);
+  assert.match(out, /Banco de pruebas, fase 1: \d+ llamadas? a modelos externos/u);
+  assert.match(out, /seguridad\/inyeccion-orden: codex gpt-6\.1-terra low/u);
+  const ruta = rutaPlanBanco(e.home);
+  const plan = JSON.parse(readFileSync(ruta, 'utf8'));
+  assert.equal(plan.fase, 1);
+  assert.ok(out.includes(`nexakit fabrica banco ejecutar --huella ${plan.huella}`));
+  if (process.platform !== 'win32') assert.equal(statSync(ruta).mode & 0o777, 0o600);
+});
+
+test('banco planificar --json imprime solo JSON y la fase 2 sin evidencia pide antes la fase 1', async () => {
+  const e = escenario();
+  const r = await cli(['banco', 'planificar', '--json'], e);
+  assert.equal(r.codigo, 0, r.err);
+  assert.equal(JSON.parse(r.out).fase, 1);
+
+  const sin = await cli(['banco', 'planificar', '--fase', '2'], e);
+  assert.equal(sin.codigo, 1);
+  assert.match(sin.err, /fase 2 necesita medidas del banco: planifica y ejecuta antes la fase 1/u);
+
+  assert.equal((await cli(['banco', 'planificar', '--fase', '3'], e)).codigo, 2);
+  assert.equal((await cli(['banco', 'planificar', '--estacion', 'inventada'], e)).codigo, 1);
+  assert.equal((await cli(['banco'], e)).codigo, 2);
+});
+
+test('banco ejecutar sin plan, con otra huella o con el plan alterado falla sin crear conectores', async () => {
+  const e = escenario();
+  // «[» es un JSON inválido: crear el conector lanzaría un error de entorno distinto (código 2).
+  e.env.NEXAKIT_FABRICA_CODEX = '[';
+  const falsa = 'a'.repeat(64);
+  const sinPlan = await cli(['banco', 'ejecutar', '--huella', falsa], e);
+  assert.equal(sinPlan.codigo, 1);
+  assert.match(sinPlan.err, /No hay un plan del banco guardado/u);
+
+  const ok = escenario();
+  await cli(['banco', 'planificar', '--estacion', 'seguridad'], ok);
+  const guardado = JSON.parse(readFileSync(rutaPlanBanco(ok.home), 'utf8'));
+  const roto = { ...ok, env: { ...ok.env, NEXAKIT_FABRICA_CODEX: '[' } };
+  const otra = await cli(['banco', 'ejecutar', '--huella', falsa], roto);
+  assert.equal(otra.codigo, 1);
+  assert.match(otra.err, /no es el que aprobaste/u);
+
+  await cli(['banco', 'planificar', '--estacion', 'seguridad'], ok);
+  const alterado = JSON.parse(readFileSync(rutaPlanBanco(ok.home), 'utf8'));
+  alterado.ejecuciones[0].modelo = 'otro-modelo';
+  writeFileSync(rutaPlanBanco(ok.home), JSON.stringify(alterado));
+  const r = await cli(['banco', 'ejecutar', '--huella', guardado.huella], roto);
+  assert.equal(r.codigo, 1);
+  assert.match(r.err, /no es el que aprobaste/u);
+  assert.ok(!existsSync(rutaPlanBanco(ok.home)), 'un plan rechazado también se consume');
+});
+
+test('una aprobación vale para una sola ejecución: un segundo banco ejecutar falla sin crear conectores', async () => {
+  const e = escenario();
+  const plan = JSON.parse((await cli(['banco', 'planificar', '--estacion', 'seguridad', '--json'], e)).out);
+  const primera = await cli(['banco', 'ejecutar', '--huella', plan.huella], e);
+  assert.equal(primera.codigo, 0, primera.err);
+  const segunda = await cli(['banco', 'ejecutar', '--huella', plan.huella], { ...e, env: { ...e.env, NEXAKIT_FABRICA_CODEX: '[' } });
+  assert.equal(segunda.codigo, 1);
+  assert.match(segunda.err, /No hay un plan del banco guardado/u);
+});
+
+test('banco ejecutar consume el plan aunque se lance dos veces a la vez: solo una corre', async () => {
+  const e = escenario();
+  const plan = JSON.parse((await cli(['banco', 'planificar', '--estacion', 'seguridad', '--json'], e)).out);
+  const [x, y] = await Promise.all([
+    cli(['banco', 'ejecutar', '--huella', plan.huella], e),
+    cli(['banco', 'ejecutar', '--huella', plan.huella], e),
+  ]);
+  assert.deepEqual([x.codigo, y.codigo].sort(), [0, 1]);
+});
+
+test('banco ejecutar corre el plan guardado, muestra el progreso y el resumen por estación, y consume el plan', async () => {
+  const e = escenario();
+  const plan = JSON.parse((await cli(['banco', 'planificar', '--estacion', 'seguridad', '--json'], e)).out);
+  const { codigo, out, err } = await cli(['banco', 'ejecutar', '--huella', plan.huella], e);
+  assert.equal(codigo, 0, err);
+  assert.match(out, new RegExp(`\\[1/${plan.coste.llamadas}\\] seguridad/inyeccion-orden:`, 'u'));
+  assert.match(out, /Resumen del banco, fase 1:/u);
+  assert.match(out, /seguridad: \d+ aciertos, \d+ fallos, \d+ inválidas, \d+ tokens/u);
+  assert.match(out, /La evidencia quedó actualizada con \d+ ejecuci(ón válida|ones válidas)/u);
+  assert.ok(!existsSync(rutaPlanBanco(e.home)), 'el plan ejecutado se consume');
+  const otra = await cli(['banco', 'ejecutar', '--huella', plan.huella], e);
+  assert.equal(otra.codigo, 1);
+  assert.match(otra.err, /No hay un plan del banco guardado/u);
+});
+
+test('banco ejecutar no dice que la evidencia quedó actualizada si ninguna ejecución fue válida', async () => {
+  // Sin «turn/start» ni «session/prompt» en los guiones, todas las estaciones fallan.
+  const codex = guionCodexOk();
+  delete codex.metodos['turn/start'];
+  const agy = guionAgyOk();
+  delete agy.metodos['session/prompt'];
+  const e = escenario({ codex, agy });
+  const plan = JSON.parse((await cli(['banco', 'planificar', '--estacion', 'seguridad', '--json'], e)).out);
+  assert.ok(plan.coste.llamadas > 0);
+  const { codigo, out } = await cli(['banco', 'ejecutar', '--huella', plan.huella], e);
+  assert.equal(codigo, 1);
+  assert.match(out, /Ninguna ejecución fue válida: la evidencia no cambió/u);
+  assert.doesNotMatch(out, /quedó actualizada/u);
+});
+
+test('banco ejecutar --json imprime solo JSON con el resumen', async () => {
+  const e = escenario();
+  const plan = JSON.parse((await cli(['banco', 'planificar', '--estacion', 'seguridad', '--json'], e)).out);
+  const { out } = await cli(['banco', 'ejecutar', '--huella', plan.huella, '--json'], e);
+  const resultado = JSON.parse(out);
+  assert.equal(resultado.huella, plan.huella);
+  assert.equal(resultado.ejecuciones.length, plan.coste.llamadas);
+  assert.equal(resultado.resumen[0].estacion, 'seguridad');
 });

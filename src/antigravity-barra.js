@@ -1,4 +1,7 @@
-import { etiquetaDeAgente, formatoReinicio, medidor, tono, tonoCache } from '../plugins/nexakit-modelo/hooks/barra.js';
+import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { activoDeTexto, datosDeFabrica, detalleDeFabrica, etiquetaDeAgente, formatoReinicio, formatoTokens, medidor, tono, tonoCache } from '../plugins/nexakit-modelo/hooks/barra.js';
 import { LIMITE_ALTO } from '../plugins/nexakit-modelo/hooks/decidir.js';
 import { parseAntigravityModel } from './antigravity-recommendation.js';
 
@@ -101,14 +104,17 @@ function recommendationSegment(recommendation, current, quotaPercent) {
   return recommendation.label ? { text: `  → ${recommendation.label}`, color: 'suggestion' } : null;
 }
 
-function buildSubagentRows(subagents) {
-  if (!Array.isArray(subagents) || subagents.length === 0) return [];
-  const recent = subagents.slice(-MAX_FILAS);
+function buildSubagentRows(subagents, stations = []) {
+  const recent = Array.isArray(subagents) ? subagents.slice(-MAX_FILAS) : [];
+  if (recent.length === 0 && stations.length === 0) return [];
   const labels = recent.map((entry) => etiquetaDeAgente(entry?.name));
   const roles = recent.map((entry) => (typeof entry?.role === 'string' ? entry.role.trim() : ''));
-  const column = Math.min(MAX_ETIQUETA, Math.max(MIN_ETIQUETA, ...labels.map((label) => label.length))) + 2;
-  const roleWidth = Math.min(MAX_ROL, Math.max(0, ...roles.map((role) => role.length)));
-  return recent.map((entry, index) => {
+  const details = stations.map(detalleDeFabrica);
+  // Las estaciones de la fábrica comparten la columna del nombre y la del rol con los subagentes, para que
+  // el icono quede en la misma posición cuando conviven las dos clases de filas.
+  const column = Math.min(MAX_ETIQUETA, Math.max(MIN_ETIQUETA, ...labels.map((label) => label.length), ...stations.map((d) => d.estacion.length))) + 2;
+  const roleWidth = Math.min(MAX_ROL, Math.max(0, ...roles.map((role) => role.length), ...details.map((d) => d.length)));
+  const rows = recent.map((entry, index) => {
     const label = labels[index].length > MAX_ETIQUETA ? `${labels[index].slice(0, MAX_ETIQUETA - 1)}…` : labels[index];
     const role = roles[index];
     const statusKey = typeof entry?.status === 'string' ? entry.status.toLowerCase() : '';
@@ -119,10 +125,57 @@ function buildSubagentRows(subagents) {
       { text: icon, color },
     ];
   });
+  const stationRows = stations.map((d, index) => [
+    { text: `  ↳ ${fitText(d.estacion, MAX_ETIQUETA).trimEnd().padEnd(column)}`, dim: true },
+    { text: `${fitText(details[index], roleWidth)}  `, color: 'antigravity' },
+    { text: d.icono, color: d.color },
+    ...(d.tokens > 0 ? [{ text: `  ${formatoTokens(d.tokens)} tokens` }] : []),
+  ]);
+  return [...rows, ...stationRows];
+}
+
+const TOPE_ACTIVO = 64 * 1024;
+
+const pidVivo = (pid) => {
+  if (!Number.isInteger(pid) || pid <= 0) return true;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === 'EPERM';
+  }
+};
+
+/**
+ * Lee `~/.nexakit/fabrica/activo.json` (solo lectura, sin seguir enlaces, tope de 64 KiB). Falla en abierto:
+ * cualquier problema o un proceso que ya no vive devuelve null.
+ */
+export function leerActivoDeFabrica(home = os.homedir()) {
+  try {
+    const base = path.join(home, '.nexakit', 'fabrica');
+    const carpeta = lstatSync(base, { throwIfNoEntry: false });
+    if (!carpeta || !carpeta.isDirectory() || carpeta.isSymbolicLink()) return null;
+    const archivo = path.join(base, 'activo.json');
+    const info = lstatSync(archivo, { throwIfNoEntry: false });
+    if (!info || !info.isFile() || info.size > TOPE_ACTIVO) return null;
+    const fd = openSync(archivo, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    try {
+      const { size } = fstatSync(fd);
+      if (size > TOPE_ACTIVO) return null;
+      const buffer = Buffer.alloc(size);
+      readSync(fd, buffer, 0, size, 0);
+      const activo = activoDeTexto(buffer.toString('utf8'));
+      return activo && pidVivo(activo.pid) ? activo : null;
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
 }
 
 /** Build structured bar segments and subagent rows from an Antigravity statusLine payload. */
-export function buildAntigravityStatusSegments(payload, { recommendation = null, now = Date.now() } = {}) {
+export function buildAntigravityStatusSegments(payload, { recommendation = null, now = Date.now(), fabrica = null } = {}) {
   const safe = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
   const model = parseAntigravityModel(safe.model);
   const segments = [
@@ -158,7 +211,7 @@ export function buildAntigravityStatusSegments(payload, { recommendation = null,
     segments.push({ text: '   sandbox', dim: true });
   }
 
-  return { segments, subagents: buildSubagentRows(safe.subagents) };
+  return { segments, subagents: buildSubagentRows(safe.subagents, datosDeFabrica(fabrica, now)) };
 }
 
 function renderSegment(segment, color) {
@@ -171,8 +224,8 @@ function renderSegment(segment, color) {
 }
 
 /** Render Antigravity statusLine payload as ANSI or plain text lines. */
-export function formatAntigravityStatusLine(payload, { recommendation = null, now = Date.now(), color = true } = {}) {
-  const { segments, subagents } = buildAntigravityStatusSegments(payload, { recommendation, now });
+export function formatAntigravityStatusLine(payload, { recommendation = null, now = Date.now(), color = true, fabrica = null } = {}) {
+  const { segments, subagents } = buildAntigravityStatusSegments(payload, { recommendation, now, fabrica });
   const renderRow = (row) => row.map((segment) => renderSegment(segment, color)).join('');
   return [renderRow(segments), ...subagents.map(renderRow)].join('\n');
 }

@@ -5,7 +5,7 @@ import path from 'node:path';
 import type { Encargo, ResultadoEstacion } from './conectores/tipos.js';
 import type { Recorrido } from './enrutador.js';
 import { ErrorFabrica } from './errores.js';
-import { NOMBRES_ESTACION, type NombreEstacion } from './esquemas.js';
+import { NOMBRES_ESTACION, type EstadoEstacionEjecucion, type IA, type NombreEstacion } from './esquemas.js';
 
 /** Días que se conserva un rastro antes de que `podar` lo borre. */
 export const DIAS_RASTRO = 90;
@@ -17,11 +17,11 @@ const DIA_MS = 24 * 60 * 60 * 1000;
 /** Encargo tal como queda en el rastro: sin el texto del diff, solo su huella. */
 export type EncargoRastro = Encargo & { diffSha256: string };
 
-function codigoError(error: unknown): unknown {
+export function codigoError(error: unknown): unknown {
   return typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
 }
 
-async function lstatSiExiste(ruta: string): Promise<Stats | null> {
+export async function lstatSiExiste(ruta: string): Promise<Stats | null> {
   try {
     return await lstat(ruta);
   } catch (error) {
@@ -52,7 +52,7 @@ export async function nombreRepo(raiz: string): Promise<string> {
 }
 
 /** Crea la carpeta con `0o700` o comprueba que la que hay es una carpeta real, no un enlace. */
-async function carpetaPropia(ruta: string): Promise<void> {
+export async function carpetaPropia(ruta: string, quien = 'El rastro'): Promise<void> {
   let info = await lstatSiExiste(ruta);
   if (info === null) {
     try {
@@ -63,7 +63,7 @@ async function carpetaPropia(ruta: string): Promise<void> {
     info = await lstat(ruta);
   }
   if (info.isSymbolicLink() || !info.isDirectory()) {
-    throw new ErrorFabrica(`El rastro no sigue enlaces: ${ruta} no es una carpeta real`);
+    throw new ErrorFabrica(`${quien} no sigue enlaces: ${ruta} no es una carpeta real`);
   }
   await chmod(ruta, 0o700);
 }
@@ -80,7 +80,7 @@ async function escribirNuevo(ruta: string, texto: string): Promise<void> {
 }
 
 /** Reemplaza un archivo de forma atómica: temporal nuevo y `rename`, que no sigue enlaces. */
-async function escribirReemplazando(ruta: string, texto: string): Promise<void> {
+export async function escribirReemplazando(ruta: string, texto: string): Promise<void> {
   const temporal = path.join(path.dirname(ruta), `.${path.basename(ruta)}.${randomBytes(6).toString('hex')}.tmp`);
   try {
     await escribirNuevo(temporal, texto);
@@ -93,15 +93,21 @@ async function escribirReemplazando(ruta: string, texto: string): Promise<void> 
 
 const json = (valor: unknown): string => `${JSON.stringify(valor, null, 2)}\n`;
 
+/** Deja lista `~/.nexakit/fabrica/` y devuelve su ruta. */
+async function prepararBase(home: string): Promise<string> {
+  const nexakit = path.join(home, '.nexakit');
+  await mkdir(nexakit, { recursive: true, mode: 0o700 });
+  const base = path.join(nexakit, 'fabrica');
+  await carpetaPropia(base);
+  return base;
+}
+
 /** Valida el nombre del repo y deja listas `~/.nexakit/fabrica/` y `~/.nexakit/fabrica/<repo>/`. */
 async function prepararCarpetaRepo(home: string, repo: string): Promise<string> {
   if (!PATRON_REPO.test(repo) || repo === '.' || repo === '..') {
     throw new ErrorFabrica(`Nombre de repo no válido para el rastro: ${repo}`);
   }
-  const nexakit = path.join(home, '.nexakit');
-  await mkdir(nexakit, { recursive: true, mode: 0o700 });
-  const base = path.join(nexakit, 'fabrica');
-  await carpetaPropia(base);
+  const base = await prepararBase(home);
   const dirRepo = path.join(base, repo);
   await carpetaPropia(dirRepo);
   return dirRepo;
@@ -153,6 +159,111 @@ export function leerPropuesta(home: string, repo: string): unknown {
     return JSON.parse(readFileSync(fd, 'utf8')) as unknown;
   } finally {
     closeSync(fd);
+  }
+}
+
+const NOMBRE_PLAN_BANCO = 'banco-plan.json';
+
+/** Guarda el plan del banco en `~/.nexakit/fabrica/banco-plan.json` (0o600, atómico, sin seguir enlaces). */
+export async function guardarPlanBanco(home: string, plan: unknown): Promise<string> {
+  const ruta = path.join(await prepararBase(home), NOMBRE_PLAN_BANCO);
+  await escribirReemplazando(ruta, json(plan));
+  return ruta;
+}
+
+/**
+ * Consume el plan guardado del banco: lo mueve con un `rename` a un nombre propio (solo uno de dos procesos
+ * simultáneos lo consigue; el otro recibe `null`), lo lee sin seguir enlaces y borra la copia. `null` si no hay plan,
+ * no es un archivo normal o no se puede leer. Una aprobación vale para una sola ejecución.
+ */
+export async function consumirPlanBanco(home: string): Promise<unknown> {
+  const base = path.join(home, '.nexakit', 'fabrica');
+  const carpeta = await lstatSiExiste(base);
+  if (carpeta === null || !carpeta.isDirectory() || carpeta.isSymbolicLink()) return null;
+  const origen = path.join(base, NOMBRE_PLAN_BANCO);
+  const propio = path.join(base, `.${NOMBRE_PLAN_BANCO}.${randomBytes(6).toString('hex')}.consumido`);
+  try {
+    await rename(origen, propio);
+  } catch {
+    return null;
+  }
+  try {
+    const info = await lstat(propio);
+    if (!info.isFile() || info.size > 1024 * 1024) return null;
+    const fd = await open(propio, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    try {
+      return JSON.parse(await fd.readFile('utf8')) as unknown;
+    } finally {
+      await fd.close();
+    }
+  } catch {
+    return null;
+  } finally {
+    await unlink(propio).catch(() => {});
+  }
+}
+
+/** Estado vivo de una estación del recorrido en curso, tal como lo muestra la barra. */
+export interface EstacionActiva {
+  estacion: NombreEstacion;
+  ia: IA | null;
+  modelo: string | null;
+  esfuerzo: string | null;
+  estado: EstadoEstacionEjecucion;
+  tokens: number;
+}
+
+/** Contenido de `~/.nexakit/fabrica/activo.json`: el recorrido que corre ahora en ese proceso. */
+export interface Activo {
+  pid: number;
+  id: string;
+  repo: string;
+  /** Hora de la escritura, en ISO 8601. */
+  actualizado: string;
+  estaciones: EstacionActiva[];
+}
+
+/**
+ * Lee `activo.json` sin seguir enlaces. `null` si no existe, no es un archivo normal o no se entiende:
+ * es un dato de cortesía para la barra, nunca debe hacer fallar a nadie.
+ */
+export function leerActivo(home: string): Activo | null {
+  try {
+    const base = path.join(home, '.nexakit', 'fabrica');
+    const carpeta = lstatSync(base, { throwIfNoEntry: false });
+    if (carpeta === undefined || !carpeta.isDirectory() || carpeta.isSymbolicLink()) return null;
+    const archivo = path.join(base, 'activo.json');
+    const info = lstatSync(archivo, { throwIfNoEntry: false });
+    if (info === undefined || !info.isFile()) return null;
+    const fd = openSync(archivo, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    try {
+      const valor: unknown = JSON.parse(readFileSync(fd, 'utf8'));
+      if (typeof valor !== 'object' || valor === null || typeof (valor as { pid?: unknown }).pid !== 'number') return null;
+      return valor as Activo;
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Publica el estado vivo en `~/.nexakit/fabrica/activo.json` (escritura atómica, `0o600`, sin seguir enlaces).
+ * Con `null` lo borra, pero solo si es de este proceso: el de otro `pid` no se toca.
+ */
+export async function guardarActivo(home: string, activo: Activo | null): Promise<void> {
+  if (activo !== null) {
+    await escribirReemplazando(path.join(await prepararBase(home), 'activo.json'), json(activo));
+    return;
+  }
+  const actual = leerActivo(home);
+  if (actual === null || actual.pid !== process.pid) return;
+  try {
+    // `unlink` quita el archivo o el enlace mismo, nunca su destino.
+    await unlink(path.join(home, '.nexakit', 'fabrica', 'activo.json'));
+  } catch (error) {
+    if (codigoError(error) !== 'ENOENT') throw error;
   }
 }
 
@@ -221,6 +332,40 @@ export function leerHallazgosClaude(dir: string): unknown {
   return leerJsonDelRecorrido(dir, 'claude.json');
 }
 
+/** Lee `veredictos.json` (los veredictos ya aplicados a la evidencia), sin seguir enlaces. `null` si no existe; lanza si no es JSON. */
+export function leerVeredictos(dir: string): unknown {
+  return leerJsonDelRecorrido(dir, 'veredictos.json');
+}
+
+/** Guarda `veredictos.json` con `0o600`, con un temporal y `rename` para no seguir enlaces. */
+export async function guardarVeredictos(dir: string, datos: unknown): Promise<void> {
+  const ruta = path.join(dir, 'veredictos.json');
+  if (lstatSync(ruta, { throwIfNoEntry: false })?.isSymbolicLink()) {
+    throw new ErrorFabrica('El rastro no sigue enlaces: veredictos.json es un enlace');
+  }
+  await escribirReemplazando(ruta, json(datos));
+}
+
+/** Guarda `archivos.json`: las rutas del diff que se envió a los revisores (`0o600`, sin seguir enlaces). */
+export async function guardarArchivosDiff(dir: string, archivos: readonly string[]): Promise<void> {
+  const ruta = path.join(dir, 'archivos.json');
+  if (lstatSync(ruta, { throwIfNoEntry: false })?.isSymbolicLink()) {
+    throw new ErrorFabrica('El rastro no sigue enlaces: archivos.json es un enlace');
+  }
+  await escribirReemplazando(ruta, json(archivos));
+}
+
+/** Lee `archivos.json`. `null` si no consta, no es legible o no es una lista de textos: nada se da por revisado. */
+export function leerArchivosDiff(dir: string): string[] | null {
+  let dato: unknown;
+  try {
+    dato = leerJsonDelRecorrido(dir, 'archivos.json');
+  } catch {
+    return null;
+  }
+  return Array.isArray(dato) && dato.every((x) => typeof x === 'string') ? (dato as string[]) : null;
+}
+
 /** Guarda `consolidado.md` con `0o600`, con un temporal y `rename` para no seguir enlaces. Devuelve la ruta. */
 export async function guardarConsolidado(dir: string, texto: string): Promise<string> {
   const ruta = path.join(dir, 'consolidado.md');
@@ -257,6 +402,25 @@ export function leerEstado(home: string, id: string): unknown {
     }
   }
   return null;
+}
+
+/**
+ * Carpetas de los recorridos de un repo, de la más antigua a la más reciente. Solo carpetas reales con un id válido:
+ * un enlace o un nombre ajeno se deja fuera. Vacío si el repo no tiene rastro.
+ */
+export function carpetasDeRecorridos(home: string, repo: string): string[] {
+  if (!PATRON_REPO.test(repo) || repo === '.' || repo === '..') return [];
+  const carpetaReal = (ruta: string): boolean => {
+    const info = lstatSync(ruta, { throwIfNoEntry: false });
+    return info !== undefined && info.isDirectory() && !info.isSymbolicLink();
+  };
+  const dirRepo = path.join(home, '.nexakit', 'fabrica', repo);
+  if (!carpetaReal(path.join(home, '.nexakit', 'fabrica')) || !carpetaReal(dirRepo)) return [];
+  return readdirSync(dirRepo)
+    .filter((id) => PATRON_ID.test(id))
+    .sort()
+    .map((id) => path.join(dirRepo, id))
+    .filter(carpetaReal);
 }
 
 /**

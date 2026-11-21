@@ -4,7 +4,7 @@ const CORRECCION = new RegExp([
   String.raw`^\s*no[,.!]?\s+(eso|era|es\s+as[ií]|as[ií]|hagas|uses|me\s+(pidas|preguntes|hables|digas|hagas))\b`,
   // «otra vez» solo cuenta como queja («otra vez lo mismo», «¿otra vez?»), no como petición («córrelo otra vez»).
   String.raw`\botra\s+vez\s+(lo\s+mismo|con\s+eso|el\s+mismo|igual)\b|¿\s*otra\s+vez\s*\?|^\s*otra\s+vez\s*[!?.]*\s*$`,
-  String.raw`\bte\s+(dije|he\s+dicho|hab[ií]a\s+dicho|ped[ií])\b`,
+  String.raw`\bte\s+(dije|he\s+dicho|hab[ií]a\s+dicho|ped[ií])(?!\p{L})`,
   String.raw`\bya\s+te\s+(dije|hab[ií]a)\b`,
   String.raw`\bh[aá]blame\s+en\b`,
   String.raw`\bdeja\s+de\s+(?!lado\b)\p{L}+(r|rme|rte|rlo|rla)\b`,
@@ -14,12 +14,31 @@ const CORRECCION = new RegExp([
   String.raw`\bvolviste\s+a\b`,
   String.raw`\bno\s+vuelvas\s+a\b`,
   String.raw`\bcu[aá]ntas\s+veces\b`,
+  // Quejas con contexto: palabra de queja + referencia a lo que hizo el asistente. Sin «sigue» ni «no funciona» sueltos.
+  String.raw`\bsigu(e|es|en)\s+(haciendo|preguntando|pidiendo)\s+(muchas|demasiadas|tantas)\b`,
+  String.raw`\bsigues\s+(sin\b|(preguntando|pidiendo|insistiendo|ignorando|repitiendo|olvidando)\b|haciendo\s+lo\s+mismo\b)`,
+  String.raw`\bno\s+me\s+(hiciste|haces|has\s+hecho)\s+caso\b`,
+  String.raw`\bya\s+(me\s+)?cans(a|as|aste|[eé]|o)(?!\p{L})`,
+  String.raw`\botra\s+vez\s+con\s+(las|los|tus|tantas|tantos|esas|esos)\b`,
+  String.raw`\b(haces|hiciste|haciendo)\s+(muchas|demasiadas|tantas)\s+preguntas\b`,
+  String.raw`\bno\s+(funciona|sirve|sirvi[oó]|funcion[oó])\s+(lo\s+que|eso\s+que)\s+(hiciste|hizo|arreglaste|cambiaste|me\s+diste)\b`,
+  String.raw`\blo\s+que\s+(hiciste|arreglaste|cambiaste)\s+no\s+(funciona|sirve)\b`,
 ].join('|'), 'iu');
 
-export const NOTA_CORRECCION = '[nexakit: este mensaje parece una corrección. Si de verdad corrige algo que hiciste, guarda la lección en tu memoria persistente (tipo feedback, con el porqué y cómo aplicarla) si no está ya, y aplícala desde ahora; si no lo es, ignora esta nota.]';
+// La orden estable de nexakit (Windows: nexakit.cmd en esa carpeta) guarda la lección en el almacén común, que llega a
+// Claude, Codex y Antigravity; la memoria propia de Claude solo la ve Claude.
+const ORDEN_REGISTRAR = '`~/.nexakit/nexakit lecciones registrar --regla "<qué hacer>" --porque "<por qué>"` (añade `--proyecto <ruta>` si solo vale para este repo; en Windows, `nexakit.cmd` en esa carpeta)';
+
+export const NOTA_CORRECCION = `[nexakit: este mensaje parece una corrección. Si de verdad corrige algo que hiciste y no está ya registrada, regístrala como lección común a Claude, Codex y Antigravity con ${ORDEN_REGISTRAR}, y aplícala en esta misma respuesta, no solo desde la siguiente; si no lo es, ignora esta nota.]`;
 
 export function esCorreccion(texto) {
   return CORRECCION.test(String(texto ?? ''));
+}
+
+// Un comando que registra una lección en el almacén común: guarda las correcciones pendientes, como escribir en la
+// memoria persistente.
+export function esRegistroDeLeccion(comando) {
+  return /(?:^|[\s;&|(/\\])nexakit(?:\.cmd)?\s+lecciones\s+registrar(?:\s|$)/u.test(String(comando ?? ''));
 }
 
 export function claveDeComando(comando) {
@@ -39,8 +58,8 @@ export function claveDeError(texto) {
 }
 
 // --- Registro propio (~/.nexakit/lecciones.jsonl): una línea JSON por evento, en orden cronológico. ---
-// correccion: el usuario corrigió a Claude (con su texto). guardada: Claude escribió una nota en su memoria
-// persistente. descartada: la persona dio por resueltas todas las pendientes (`nexakit lecciones --descartar`).
+// correccion: el usuario corrigió a Claude (con su texto). guardada: Claude registró la lección con
+// `nexakit lecciones registrar` o escribió una nota en su memoria persistente. descartada: la persona dio por resueltas todas las pendientes (`nexakit lecciones --descartar`).
 // avisada: se recordaron al empezar una sesión las correcciones sin guardar. freno / repeticion: ver register.js.
 
 const TIPOS = new Set(['correccion', 'guardada', 'descartada', 'avisada', 'freno', 'repeticion']);
@@ -111,5 +130,5 @@ export function avisoPendientes(correcciones) {
   const ultimas = correcciones.slice(-3).map((c) => `«${c.texto ?? '(sin texto)'}»`).join(', ');
   const n = correcciones.length;
   const cuantas = n === 1 ? '1 corrección tuya' : `${n} correcciones tuyas`;
-  return `[nexakit: quedaron ${cuantas} sin guardar de sesiones anteriores: ${ultimas}. Si siguen valiendo, guárdalas en tu memoria persistente (tipo feedback, con el porqué y cómo aplicarlas) y aplícalas desde ahora.]`;
+  return `[nexakit: quedaron ${cuantas} sin guardar de sesiones anteriores: ${ultimas}. Si siguen valiendo, regístralas con ${ORDEN_REGISTRAR} y aplícalas desde ahora.]`;
 }

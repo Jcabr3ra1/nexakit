@@ -70,3 +70,14 @@ export const TablaModelos = z.record(
   ),
 );
 export type TablaModelos = z.infer<typeof TablaModelos>;
+
+/** Estado de una estación mientras corre el recorrido; lo comparten el ejecutor y el estado vivo del rastro. */
+export type EstadoEstacionEjecucion =
+  | 'pendiente'
+  | 'en-curso'
+  | 'ok'
+  | 'fallida'
+  | 'cancelada'
+  | 'claude'
+  | 'omitida'
+  | 'sin-modelo';
