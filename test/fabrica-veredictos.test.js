@@ -790,7 +790,7 @@ test('el mismo falso positivo de una estación externa en dos recorridos del rep
   assert.equal(res2.avisos.length, 1);
   assert.match(res2.avisos[0], /propuso 1 lección.*nexakit lecciones/u);
   const [l] = await lecciones(r1);
-  assert.deepEqual(l.ambito, { proyecto: realpathSync(r1.raiz), estacion: 'seguridad' });
+  assert.deepEqual(l.ambito, { proyecto: realpathSync.native(r1.raiz), estacion: 'seguridad' });
   assert.equal(l.origen, 'fabrica');
   assert.equal(l.estado, 'propuesta');
   assert.equal(l.regla, REGLA);

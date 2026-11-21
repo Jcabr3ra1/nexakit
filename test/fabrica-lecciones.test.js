@@ -25,7 +25,7 @@ const SIN_ENLACES = process.platform === 'win32' || fileSymlinkSkipReason();
 const DIA = 24 * 60 * 60 * 1000;
 const AHORA = 1_700_000_000_000;
 
-const temporal = () => realpathSync(mkdtempSync(path.join(tmpdir(), 'fab-lecciones-')));
+const temporal = () => realpathSync.native(mkdtempSync(path.join(tmpdir(), 'fab-lecciones-')));
 const carpeta = (home) => path.join(home, '.nexakit', 'lecciones');
 const modo = (ruta) => statSync(ruta).mode & 0o777;
 const archivos = (home) => readdirSync(carpeta(home)).sort();
@@ -409,7 +409,7 @@ test('proponerPorFalsos propone una lección de la estación y el repo, de orige
   const nuevas = await proponerPorFalsos(home, raiz, [falso()], AHORA);
   assert.equal(nuevas.length, 1);
   const [l] = nuevas;
-  assert.deepEqual(l.ambito, { proyecto: realpathSync(raiz), estacion: 'seguridad' });
+  assert.deepEqual(l.ambito, { proyecto: realpathSync.native(raiz), estacion: 'seguridad' });
   assert.equal(l.origen, 'fabrica');
   assert.equal(l.estado, 'propuesta');
   assert.equal(l.regla, REGLA_FALSO);
