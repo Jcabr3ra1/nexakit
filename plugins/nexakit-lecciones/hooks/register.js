@@ -1,5 +1,5 @@
 import {
-  avisoPendientes, claveDeComando, claveDeError, esCorreccion, esRegistroDeLeccion, esRutaDeMemoria, leerEventos, NOTA_CORRECCION,
+  avisoPendientes, claveDeComando, claveDeError, esCorreccion, esRegistroDeLeccion, esRutaDeMemoria, leerEventos, NOTA_CORRECCION, notaRepeticion,
   pendientes, podarEventos, sinGuardar, textoSeguro,
 } from './lecciones.js';
 
@@ -95,7 +95,7 @@ export function register(on) {
     // revalida contra la forma de salida de Bash, y un error llega como texto, que esa forma rechaza.
     return {
       ...r,
-      context: [...(r.context ?? []), `[nexakit: el mismo tipo de error salió ${veces} veces en esta tarea («${tipo}»). Para, explica la causa raíz antes de otro intento y cambia de enfoque; si es una lección que vale para el futuro, guárdala en tu memoria persistente.]`],
+      context: [...(r.context ?? []), notaRepeticion(veces, tipo)],
     };
   });
 
