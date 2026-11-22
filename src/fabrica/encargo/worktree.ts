@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { chmod, mkdir, rm } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { prefijoRepoTemporal } from '../banco/ejecutar.js';
 import { ErrorFabrica } from '../errores.js';
@@ -18,33 +19,98 @@ export interface Worktree {
   base: string;
   /** Repo real del que sale el worktree (nunca se escribe en él). */
   raiz: string;
+  /** Gitdir real del worktree (`<repo>/.git/worktrees/<nombre>`), fijado al crearlo: el `.git` del worktree no es de fiar. */
+  gitDir: string;
   /** Lo que conviene saber (por ejemplo, cambios sin commit que no se copian). */
   avisos: string[];
 }
 
-function git(cwd: string, args: string[]): Promise<string> {
+/** Variables de git que cambian dónde opera o cómo se configura: no se heredan. */
+const VARIABLES_GIT = [
+  'GIT_DIR',
+  'GIT_INDEX_FILE',
+  'GIT_WORK_TREE',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_COMMON_DIR',
+  'GIT_NAMESPACE',
+  'GIT_PREFIX',
+];
+
+function entornoSaneado(): NodeJS.ProcessEnv {
+  const entorno: NodeJS.ProcessEnv = { ...process.env };
+  for (const clave of Object.keys(entorno)) {
+    if (VARIABLES_GIT.includes(clave.toUpperCase()) || clave.toUpperCase().startsWith('GIT_CONFIG')) delete entorno[clave];
+  }
+  return entorno;
+}
+
+/** Ejecuta git con el entorno saneado y devuelve la salida cruda, sin decodificar. */
+function gitBytes(cwd: string, args: string[]): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     execFile(
       'git',
-      ['-c', 'core.quotepath=off', '-c', 'color.ui=false', '-c', 'core.autocrlf=false', ...args],
-      { cwd, encoding: 'utf8', maxBuffer: MAX_BUFFER, windowsHide: true },
+      [
+        '-c',
+        'core.quotepath=off',
+        '-c',
+        'color.ui=false',
+        '-c',
+        'core.autocrlf=false',
+        ...(process.platform === 'win32' ? ['-c', 'core.longpaths=true'] : []),
+        ...args,
+      ],
+      { cwd, encoding: 'buffer', maxBuffer: MAX_BUFFER, windowsHide: true, env: entornoSaneado() },
       (error, stdout, stderr) => {
         if (error) {
-          const motivo = (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'no se encontró git en el PATH' : String(stderr).trim();
-          reject(new ErrorFabrica(`git ${args[0] ?? ''} falló: ${motivo}`, { cause: error }));
+          const codigo = (error as NodeJS.ErrnoException).code;
+          const motivo =
+            codigo === 'ENOENT'
+              ? 'no se encontró git en el PATH o la carpeta de trabajo no existe'
+              : codigo === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'
+                ? `la salida supera el tope de ${MAX_BUFFER} bytes`
+                : stderr.toString('utf8').trim();
+          reject(new ErrorFabrica(`git ${args.find((a) => !a.startsWith('-')) ?? ''} falló: ${motivo}`, { cause: error }));
         } else resolve(stdout);
       },
     );
   });
 }
 
+const git = async (cwd: string, args: string[]): Promise<string> => (await gitBytes(cwd, args)).toString('utf8');
+
+/**
+ * Argumentos para las órdenes que corren sobre el worktree, que controla la IA: se fija el gitdir y el árbol de
+ * trabajo (el archivo `.git` del worktree puede estar reescrito) y se apagan fsmonitor, hooks y la caché de no rastreados.
+ */
+function argsSobreWorktree(w: Worktree, args: string[]): string[] {
+  return [
+    `--git-dir=${w.gitDir}`,
+    `--work-tree=${w.dir}`,
+    '-c',
+    'core.fsmonitor=false',
+    '-c',
+    `core.hooksPath=${os.devNull}`,
+    '-c',
+    'core.untrackedCache=false',
+    ...args,
+  ];
+}
+
 const mensajeDe = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+const borrarCarpeta = (ruta: string): Promise<void> => rm(ruta, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+
+export interface OpcionesCrearWorktree {
+  /** Solo para pruebas: se llama justo después de crear el worktree; si lanza, se prueba la limpieza. */
+  despuesDeCrear?: () => Promise<void>;
+}
 
 /**
  * Crea un worktree desacoplado de HEAD en `~/.nexakit/encargos/<id>/repo` (carpetas `0o700`, sin seguir enlaces).
  * El encargo parte de HEAD: si el árbol de la persona tiene cambios sin commit, se avisa y no se copian.
  */
-export async function crearWorktree(raiz: string, home: string): Promise<Worktree> {
+export async function crearWorktree(raiz: string, home: string, opciones: OpcionesCrearWorktree = {}): Promise<Worktree> {
   const base = (await git(raiz, ['rev-parse', '--verify', 'HEAD'])).trim();
   const avisos: string[] = [];
   if ((await git(raiz, ['status', '--porcelain', '-z'])).length > 0) {
@@ -69,26 +135,35 @@ export async function crearWorktree(raiz: string, home: string): Promise<Worktre
     await chmod(carpeta, 0o700);
     const dir = path.join(carpeta, 'repo');
     try {
-      await git(raiz, ['worktree', 'add', '--detach', '--quiet', dir, base]);
+      await git(raiz, ['worktree', 'add', '--detach', '--quiet', '--', dir, base]);
       await chmod(dir, 0o700);
+      await opciones.despuesDeCrear?.();
+      // Ahora el `.git` del worktree es el que escribió git: se guarda su gitdir real, que no volverá a leerse de ahí.
+      const gitDir = path.resolve(dir, (await git(dir, ['rev-parse', '--absolute-git-dir'])).trim());
+      return { id, dir, base, raiz, gitDir, avisos };
     } catch (error) {
+      // Primero se quita el worktree y su carpeta; `prune` va al final para no dejar ninguna entrada en `.git/worktrees`.
+      await git(raiz, ['worktree', 'remove', '--force', dir]).catch(() => {});
+      await borrarCarpeta(carpeta).catch(() => {});
       await git(raiz, ['worktree', 'prune']).catch(() => {});
-      await rm(carpeta, { recursive: true, force: true }).catch(() => {});
       throw error;
     }
-    return { id, dir, base, raiz, avisos };
   }
   throw new ErrorFabrica('No se pudo reservar un id libre para el encargo');
 }
 
 /**
  * Diff del worktree contra su base, con los archivos nuevos (`git add -N`) y los binarios (`--binary`), listo para
- * `git apply`. Devuelve el texto vacío si no hubo cambios.
+ * `git apply`. Se devuelve como bytes: un archivo que no está en UTF-8 se corrompería al decodificarlo. Vacío si no
+ * hubo cambios.
  */
-export async function diffDelWorktree(w: Worktree): Promise<string> {
+export async function diffDelWorktree(w: Worktree): Promise<Buffer> {
   try {
-    await git(w.dir, ['add', '-N', '--all', '--', '.']);
-    return await git(w.dir, ['diff', '--binary', '--no-ext-diff', '--no-textconv', '--no-color', '--src-prefix=a/', '--dst-prefix=b/', w.base, '--']);
+    await gitBytes(w.dir, argsSobreWorktree(w, ['add', '-N', '--all', '--', '.']));
+    return await gitBytes(
+      w.dir,
+      argsSobreWorktree(w, ['diff', '--binary', '--no-ext-diff', '--no-textconv', '--no-color', '--src-prefix=a/', '--dst-prefix=b/', w.base, '--']),
+    );
   } catch (error) {
     throw new ErrorFabrica(`No se pudo leer el diff del encargo: ${mensajeDe(error)}`, { cause: error });
   }
@@ -103,7 +178,7 @@ export async function borrarWorktree(w: Worktree): Promise<string | null> {
     await git(w.raiz, ['worktree', 'remove', '--force', w.dir]);
   } catch {
     // Si git no puede quitarlo (carpeta ya borrada, bloqueo...), se borra la carpeta y `prune` limpia el registro.
-    await rm(w.dir, { recursive: true, force: true }).catch((e: unknown) => {
+    await borrarCarpeta(w.dir).catch((e: unknown) => {
       fallos.push(mensajeDe(e));
     });
   }

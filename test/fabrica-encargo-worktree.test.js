@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { gitConfigGlobalVacio } from '../test-support/git-aislado.js';
@@ -62,7 +62,7 @@ test('el diff incluye un archivo modificado, uno nuevo y un binario, y git apply
   writeFileSync(path.join(w.dir, 'a.txt'), 'dos\n');
   writeFileSync(path.join(w.dir, 'nuevo.txt'), 'hola\n');
   writeFileSync(path.join(w.dir, 'datos.bin'), Buffer.from([0, 1, 2, 255, 0, 9]));
-  const diff = await diffDelWorktree(w);
+  const diff = (await diffDelWorktree(w)).toString('utf8');
   assert.match(diff, /b\/a\.txt/u);
   assert.match(diff, /b\/nuevo\.txt/u);
   assert.match(diff, /GIT binary patch/u);
@@ -83,7 +83,7 @@ test('el diff incluye un archivo modificado, uno nuevo y un binario, y git apply
 test('sin cambios el diff está vacío', async () => {
   const { raiz, home } = entorno();
   const w = await crearWorktree(raiz, home);
-  assert.equal(await diffDelWorktree(w), '');
+  assert.equal((await diffDelWorktree(w)).length, 0);
 });
 
 test('borra el worktree tras un error y deja limpio el registro de git', async () => {
@@ -131,4 +131,85 @@ test('no sigue enlaces: si encargos es un enlace, se rechaza', async () => {
   execFileSync('ln', ['-s', otro, path.join(home, '.nexakit', 'encargos')]);
   await assert.rejects(crearWorktree(raiz, home), /no sigue enlaces/u);
   assert.deepEqual(execFileSync('ls', [otro], { encoding: 'utf8' }).trim(), '');
+});
+
+test('el diff de un archivo Latin-1 se conserva byte a byte y git apply --check lo acepta', async () => {
+  const { raiz, home } = entorno();
+  writeFileSync(path.join(raiz, 'latin.txt'), Buffer.from('caf\xe9\n', 'latin1'));
+  git(raiz, 'add', '-A');
+  git(raiz, 'commit', '-q', '-m', 'latin');
+  const w = await crearWorktree(raiz, home);
+  writeFileSync(path.join(w.dir, 'latin.txt'), Buffer.from('caf\xe9 con leche\n', 'latin1'));
+  const diff = await diffDelWorktree(w);
+  assert.ok(Buffer.isBuffer(diff));
+  assert.ok(diff.includes(Buffer.from('caf\xe9 con leche', 'latin1')));
+  assert.ok(!diff.includes(Buffer.from([0xef, 0xbf, 0xbd])));
+  const destino = mkdtempSync(path.join(tmpdir(), 'enc-latin-'));
+  temporales.push(destino);
+  git(destino, 'init', '-q');
+  writeFileSync(path.join(destino, 'latin.txt'), Buffer.from('caf\xe9\n', 'latin1'));
+  const parche = path.join(destino, '..', `${path.basename(destino)}.diff`);
+  writeFileSync(parche, diff);
+  temporales.push(parche);
+  git(destino, 'apply', '--check', parche);
+});
+
+test('un .git reescrito por la IA no hace ejecutar nada al leer el diff', async () => {
+  const { raiz, home } = entorno();
+  const w = await crearWorktree(raiz, home);
+  const testigo = path.join(home, 'testigo');
+  const malo = mkdtempSync(path.join(tmpdir(), 'enc-malo-'));
+  temporales.push(malo);
+  cpSync(path.join(raiz, '.git'), path.join(malo, 'gitdir'), { recursive: true });
+  const config = path.join(malo, 'gitdir', 'config');
+  writeFileSync(config, `${readFileSync(config, 'utf8')}[core]\n\tfsmonitor = touch ${testigo}; true\n`);
+  writeFileSync(path.join(w.dir, '.git'), `gitdir: ${path.join(malo, 'gitdir')}\n`);
+  writeFileSync(path.join(w.dir, 'nuevo.txt'), 'x\n');
+  // Comprobación previa: sin las protecciones, git sí ejecutaría la orden.
+  try {
+    git(w.dir, 'add', '-N', '--all', '--', '.');
+  } catch {}
+  const explotable = existsSync(testigo);
+  rmSync(testigo, { force: true });
+  const diff = await diffDelWorktree(w);
+  assert.equal(existsSync(testigo), false, 'la orden de fsmonitor no debe ejecutarse');
+  assert.match(diff.toString('utf8'), /b\/nuevo\.txt/u);
+  if (!explotable) console.log('aviso: esta versión de git no ejecutó fsmonitor en la comprobación previa');
+});
+
+test('un GIT_DIR heredado no desvía las órdenes al repo equivocado', async () => {
+  const { raiz, home } = entorno();
+  const { raiz: otro } = entorno();
+  const indiceAntes = git(otro, 'ls-files', '--stage');
+  const previo = process.env.GIT_DIR;
+  process.env.GIT_DIR = path.join(otro, '.git');
+  let w;
+  try {
+    w = await crearWorktree(raiz, home);
+    writeFileSync(path.join(w.dir, 'nuevo.txt'), 'x\n');
+    assert.match((await diffDelWorktree(w)).toString('utf8'), /b\/nuevo\.txt/u);
+    assert.equal(await borrarWorktree(w), null);
+  } finally {
+    if (previo === undefined) delete process.env.GIT_DIR;
+    else process.env.GIT_DIR = previo;
+  }
+  assert.equal(git(otro, 'worktree', 'list').split('\n').length, 1);
+  assert.equal(git(otro, 'ls-files', '--stage'), indiceAntes);
+  assert.equal(git(otro, 'status', '--porcelain'), '');
+  assert.equal(git(raiz, 'worktree', 'list').split('\n').length, 1);
+});
+
+test('si falla la creación se limpia todo, también la entrada de .git/worktrees', async () => {
+  const { raiz, home } = entorno();
+  await assert.rejects(
+    crearWorktree(raiz, home, {
+      despuesDeCrear: async () => {
+        throw new Error('fallo simulado');
+      },
+    }),
+    /fallo simulado/u,
+  );
+  assert.equal(git(raiz, 'worktree', 'list').split('\n').length, 1);
+  assert.equal(existsSync(path.join(raiz, '.git', 'worktrees')) ? readdirSync(path.join(raiz, '.git', 'worktrees')).length : 0, 0);
+  assert.deepEqual(readdirSync(path.join(home, '.nexakit', 'encargos')), []);
 });
