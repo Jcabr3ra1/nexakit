@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { gitConfigGlobalVacio } from '../test-support/git-aislado.js';
 import path from 'node:path';
@@ -555,7 +555,48 @@ test('banco planificar --json imprime solo JSON y la fase 2 sin evidencia pide a
 
   assert.equal((await cli(['banco', 'planificar', '--fase', '3'], e)).codigo, 2);
   assert.equal((await cli(['banco', 'planificar', '--estacion', 'inventada'], e)).codigo, 1);
-  assert.equal((await cli(['banco'], e)).codigo, 2);
+  // Sin subcomando o con --help, `banco` muestra su ayuda en vez de «Orden desconocida».
+  const sinOrden = await cli(['banco'], e);
+  assert.equal(sinOrden.codigo, 2);
+  assert.doesNotMatch(sinOrden.err, /Orden desconocida/u);
+  assert.match(sinOrden.err, /nexakit fabrica banco planificar/u);
+  for (const bandera of ['--help', '-h']) {
+    const ayuda = await cli(['banco', bandera], e);
+    assert.equal(ayuda.codigo, 0, bandera);
+    assert.equal(ayuda.err, '');
+    assert.match(ayuda.out, /nexakit fabrica banco ejecutar --huella/u);
+  }
+});
+
+test('banco ejecutar: Ctrl+C aborta la ejecución en curso y no deja repos temporales', async () => {
+  const e = escenario({ codex: guionCodexLento() });
+  const plan = JSON.parse((await cli(['banco', 'planificar', '--estacion', 'seguridad', '--json'], e)).out);
+  // Los repos temporales del banco se crean con `os.tmpdir()`: una carpeta propia permite contarlos.
+  const tmp = temporal('fabrica-cli-tmp-');
+  const previo = { TMPDIR: process.env.TMPDIR, TMP: process.env.TMP, TEMP: process.env.TEMP };
+  Object.assign(process.env, { TMPDIR: tmp, TMP: tmp, TEMP: tmp });
+  const antes = process.listenerCount('SIGINT');
+  let out = '';
+  try {
+    const ejecucion = ejecutarCli(
+      ['banco', 'ejecutar', '--huella', plan.huella],
+      { out: (t) => { out += t; }, err: () => {} },
+      { homeDirectory: e.home, cwd: e.dir, environment: e.env, sondeoMs: 20 },
+    );
+    for (let i = 0; i < 500 && readdirSync(tmp).length === 0; i++) await new Promise((r) => setTimeout(r, 20));
+    assert.ok(readdirSync(tmp).length > 0, 'debía haber un repo temporal en curso');
+    assert.ok(process.emit('SIGINT'), 'el manejador de SIGINT debe estar instalado mientras se ejecuta');
+    const codigo = await ejecucion;
+    assert.equal(codigo, 1);
+    assert.match(out, /Interrumpido por Ctrl\+C/u);
+    assert.deepEqual(readdirSync(tmp), [], 'el repo temporal en curso se borra');
+    assert.equal(process.listenerCount('SIGINT'), antes, 'el manejador de SIGINT se retira al terminar');
+  } finally {
+    for (const [k, v] of Object.entries(previo)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
 });
 
 test('banco ejecutar sin plan, con otra huella o con el plan alterado falla sin crear conectores', async () => {

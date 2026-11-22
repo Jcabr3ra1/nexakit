@@ -406,11 +406,24 @@ async function ordenBancoEjecutar(ctx: Contexto, huella: string, json: boolean):
   const ias = [...new Set(plan.ejecuciones.map((e) => e.ia))];
   const conectores = await crearConectoresDesdeEntorno({ ias, entorno: ctx.entorno, avisar: aviso(ctx) });
   let resultado: ResultadoBanco;
+  // Ctrl+C aborta la ejecución en curso (y borra su repo temporal) y no lanza las siguientes.
+  const control = new AbortController();
+  const alInterrumpir = (): void => {
+    // El segundo Ctrl+C termina el proceso aunque el cierre ordenado siga en curso.
+    if (control.signal.aborted) {
+      ctx.salir(130);
+      return;
+    }
+    if (!json) void ctx.io.out('\nInterrumpido por Ctrl+C; cierro la ejecución en curso y borro su repo temporal...\n');
+    control.abort();
+  };
+  process.on('SIGINT', alInterrumpir);
   try {
     resultado = await ejecutarBanco(plan, {
       huella,
       conectores,
       home: ctx.home,
+      señal: control.signal,
       alAvanzar: (m, i, total) => {
         if (json) return;
         const estado = m.valida ? 'válida' : `inválida (${m.motivo ?? 'sin motivo'})`;
@@ -418,6 +431,7 @@ async function ordenBancoEjecutar(ctx: Contexto, huella: string, json: boolean):
       },
     });
   } finally {
+    process.off('SIGINT', alInterrumpir);
     await cerrarConectores(conectores);
   }
   const resumen = resumirBanco(resultado.ejecuciones);
@@ -437,7 +451,7 @@ async function ordenBancoEjecutar(ctx: Contexto, huella: string, json: boolean):
         : 'Ninguna ejecución fue válida: la evidencia no cambió. El plan ya se consumió: para medir de nuevo hay que planificar otra vez.',
     );
   }
-  return invalidas > 0 ? 1 : 0;
+  return invalidas > 0 || control.signal.aborted ? 1 : 0;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -481,9 +495,14 @@ export async function ejecutarCli(argv: string[], io: IoCli, opciones: OpcionesC
   const compuesta = primera === 'banco';
   const orden = compuesta ? `banco ${siguientes[0] ?? ''}`.trimEnd() : primera;
   const resto = compuesta ? siguientes.slice(1) : siguientes;
-  if (orden === '--help' || orden === '-h') {
+  if (orden === '--help' || orden === '-h' || (compuesta && (siguientes[0] === '--help' || siguientes[0] === '-h'))) {
     await io.out(AYUDA);
     return 0;
+  }
+  // `banco` solo, sin subcomando: la ayuda, sin «Orden desconocida».
+  if (compuesta && siguientes[0] === undefined) {
+    await io.err(AYUDA);
+    return 2;
   }
   const especificacion = orden === undefined ? undefined : Object.hasOwn(OPCIONES, orden) ? OPCIONES[orden] : undefined;
   if (orden === undefined || especificacion === undefined) {

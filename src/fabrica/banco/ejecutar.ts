@@ -6,7 +6,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import type { Conector } from '../conectores/tipos.js';
 import { leerDiff } from '../diff.js';
-import { esperar, lanzar } from '../ejecutor.js';
+import { cancelar, esperar, lanzar } from '../ejecutor.js';
 import { calcularCoste, calcularHuella, jsonCanonico, type Catalogos, type EstacionRecorrido, type Recorrido } from '../enrutador.js';
 import { ErrorFabrica } from '../errores.js';
 import { ESTACIONES } from '../estaciones.js';
@@ -320,6 +320,8 @@ export interface OpcionesEjecutar {
   timeoutMs?: number;
   graciaMs?: number;
   topeCatalogoMs?: number;
+  /** Si se aborta, cancela la ejecución en curso (se borra su repo temporal) y no lanza las siguientes. */
+  señal?: AbortSignal;
   /** Se llama al terminar cada ejecución, válida o no. */
   alAvanzar?: (medida: EjecucionMedida, indice: number, total: number) => void;
 }
@@ -442,7 +444,10 @@ async function medirUna(
   avisar: (aviso: string) => void,
 ): Promise<EjecucionMedida> {
   const invalida = (motivo: string, extra: Partial<EjecucionMedida> = {}): EjecucionMedida => ({ ...ej, ...extra, valida: false, motivo });
+  const abortada = (): boolean => opciones.señal?.aborted === true;
+  if (abortada()) return invalida('interrumpida antes de empezar');
   const raiz = await mkdtemp(path.join(os.tmpdir(), prefijoRepoTemporal()));
+  let soltarSeñal = (): void => {};
   try {
     const raices = [...new Set([raiz, await realpath(raiz)].map((r) => r.split(path.sep).join('/')))];
     await prepararRepo(raiz, caso);
@@ -457,6 +462,10 @@ async function medirUna(
       ...(opciones.graciaMs === undefined ? {} : { graciaMs: opciones.graciaMs }),
       ...(opciones.topeCatalogoMs === undefined ? {} : { topeCatalogoMs: opciones.topeCatalogoMs }),
     });
+    const alAbortar = (): void => void cancelar(id, home).catch(() => {});
+    if (abortada()) alAbortar();
+    else opciones.señal?.addEventListener('abort', alAbortar, { once: true });
+    soltarSeñal = () => opciones.señal?.removeEventListener('abort', alAbortar);
     const estado = await esperar(id, home);
     const segundos = (Date.now() - inicio) / 1000;
     const base = { recorrido: id };
@@ -497,6 +506,7 @@ async function medirUna(
   } catch (error) {
     return invalida(`no se pudo medir: ${mensajeDe(error)}`);
   } finally {
+    soltarSeñal();
     // Un fallo al borrar no puede tapar el resultado ni cortar el banco: el plan ya se consumió.
     await rm(raiz, { recursive: true, force: true }).catch((error: unknown) => {
       avisar(`No se pudo borrar el repo temporal ${raiz} (${mensajeDe(error)}); bórralo a mano cuando termine el banco.`);
@@ -545,6 +555,7 @@ export async function ejecutarBanco(plan: unknown, opciones: OpcionesEjecutar): 
   const ejecuciones: EjecucionMedida[] = [];
   const total = aprobado.ejecuciones.length;
   for (const [indice, ej] of aprobado.ejecuciones.entries()) {
+    if (opciones.señal?.aborted === true) break;
     const caso = casos.get(ej.caso) as CasoBanco;
     const medida = await medirUna(ej, caso, opciones, home, avisar);
     if (medida.valida && medida.observacion !== undefined) {
