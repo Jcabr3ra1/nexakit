@@ -92,7 +92,7 @@ test('ningún especialista contradice las reglas de los niveles: respuestas brev
 test('el plugin niveles anuncia a los especialistas y sube su versión', async () => {
   const manifiesto = JSON.parse(await fs.readFile(new URL('../plugins/niveles/.claude-plugin/plugin.json', import.meta.url), 'utf8'));
   assert.match(manifiesto.description, /especialistas/iu);
-  assert.equal(manifiesto.version, '0.3.0');
+  assert.equal(manifiesto.version, '0.3.1');
 });
 
 test('el sincronizador de documentación solo lee, parte del diff real y señala cada discrepancia con su ubicación', async () => {

@@ -1,5 +1,12 @@
 # Cambios
 
+## 0.12.2
+
+### Subagentes con una orden por llamada
+
+- Los subagentes de nexakit encadenaban varias órdenes en una sola llamada a Bash (`cd`, `;`, paréntesis, subshells). Claude Code no puede analizarlas y pedía permiso cada vez. Ahora todos los agentes con shell llevan la regla: una orden por llamada, rutas absolutas en lugar de `cd`, sin `;`, `&&`, `||` ni subshells, un `|` solo hacia `head`, `tail` o `grep`, herramientas de lectura y búsqueda en lugar de `cat`, `grep` o `ls`, y llamadas independientes en paralelo.
+- La regla está en los diez agentes del plugin `niveles` (0.3.1, que también usa Antigravity) y en los cuatro niveles y los seis especialistas de Codex, desde un texto común en `src/regla-ordenes-simples.js`. Para actualizar los de Codex: `nexakit codex agentes --apply --actualizar`.
+
 ## 0.12.1
 
 ### Arreglos de seguimiento del enrutador
