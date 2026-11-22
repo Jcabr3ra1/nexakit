@@ -40,6 +40,9 @@ test('HTML command guide presents a 3-step route, the new auto-review and handof
   // Explains the new workflow
   assert.match(html, /Revisión con varias IA, por su cuenta/u);
   assert.match(html, /\/fabrica/u);
+  assert.match(html, /Propone y lanza un recorrido de estaciones/u);
+  assert.match(html, /Lanzar el recorrido propuesto/u);
+  assert.doesNotMatch(html, /espera tu aprobación|recorrido aprobado/u);
   assert.match(html, /seguimiento/u);
   assert.match(html, /\/cerrar-memoria/u);
 

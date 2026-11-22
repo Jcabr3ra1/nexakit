@@ -36,8 +36,9 @@ fabrica_proponer y después fabrica_lanzar con la huella de esa propuesta; sigue
 la skill fabrica. Lee el resultado, corrige los hallazgos reales y registra los
 veredictos, reales y falsos. Si el diff es trivial (solo documentación o pocas
 líneas sin lógica), omítela y dilo en una línea. Si no hay servidor ni orden, o
-falla, dilo en una línea y sigue: nunca bloquea el trabajo. La persona también
-puede pedirla con /fabrica. Usa la orden estable ~/.nexakit/nexakit (Windows:
+falla, dilo en una línea y sigue: nunca bloquea el trabajo. Salvo que el recorrido
+traiga órdenes del repo revisado (.nexakit/fabrica.json): entonces pide
+aprobación. La persona también puede pedirla con /fabrica. Usa la orden estable ~/.nexakit/nexakit (Windows:
 nexakit.cmd en esa carpeta).
 
 Si una tarea larga queda a medias —pausa, cambio de IA, bloqueo o cierre— escribe o actualiza la nota de seguimiento con project-handoff; recomienda sesión nueva en los casos de project-handoff, y cierra el seguimiento al integrar con cerrar-memoria.

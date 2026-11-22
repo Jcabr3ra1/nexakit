@@ -18,8 +18,8 @@ const MAX_HALLAZGOS_CLAUDE = 500;
 
 export const INSTRUCCIONES = [
   'La fábrica de nexakit pasa un diff por estaciones de revisión (seguridad, arquitectura, pruebas, código, interfaz, rendimiento, documentación) con varias IA en solo lectura.',
-  'Muestra el recorrido a la persona y lanza solo tras su aprobación explícita; nunca encadenes recorridos sin que lo pida.',
-  'Flujo: fabrica_proponer calcula el recorrido y su huella; enséñalo entero (estaciones, IA, modelo, esfuerzo y órdenes permitidas) y espera la aprobación; fabrica_lanzar con esa huella devuelve un id sin esperar; fabrica_estado consulta el avance; fabrica_resultado devuelve los hallazgos consolidados y la ruta de consolidado.md; fabrica_cancelar interrumpe.',
+  'Lánzala tú por tu cuenta al cerrar una tarea con cambios de código y antes de un PR, con la huella de la propuesta; solo hay un recorrido a la vez y no encadenes recorridos para el mismo diff. Pide aprobación a la persona solo si el recorrido trae órdenes de .nexakit/fabrica.json del repo revisado.',
+  'Flujo: fabrica_proponer calcula el recorrido y su huella; revisa el recorrido entero (estaciones, IA, modelo, esfuerzo y órdenes permitidas); fabrica_lanzar con esa huella devuelve un id sin esperar; fabrica_estado consulta el avance; fabrica_resultado devuelve los hallazgos consolidados y la ruta de consolidado.md; fabrica_cancelar interrumpe.',
   'Las estaciones de Claude las lanzas tú como subagentes; pasa sus hallazgos a fabrica_resultado.',
   'Tras verificar los hallazgos contra el código, vuelve a llamar a fabrica_resultado con los veredictos ({ clave, verificado: real | falso | dudoso }) para que la fábrica aprenda qué modelos aciertan.',
   'No sondees en bucle: consulta el estado cuando la persona lo pida o cuando termines tus propias estaciones.',
@@ -165,7 +165,7 @@ export function crearServidorFabrica(opciones: OpcionesServidorFabrica = {}): Se
   server.registerTool(
     'fabrica_lanzar',
     {
-      description: `Lanza el recorrido de la última propuesta si su huella coincide y el diff sigue siendo el mismo. Hazlo solo tras la aprobación explícita de la persona. Devuelve { id } sin esperar: el recorrido corre dentro de este servidor. Solo hay un recorrido a la vez: si ya hay uno en curso, da error hasta que termine o lo canceles. Con cambios puedes quitar estaciones o cambiar IA, modelo y esfuerzo antes de lanzar. ${AVISO_RAIZ}`,
+      description: `Lanza el recorrido de la última propuesta si su huella coincide y el diff sigue siendo el mismo. Hazlo con la huella de la propuesta, sin encadenar recorridos para el mismo diff, y pide aprobación a la persona solo si el recorrido trae órdenes de .nexakit/fabrica.json del repo revisado. Devuelve { id } sin esperar: el recorrido corre dentro de este servidor. Solo hay un recorrido a la vez: si ya hay uno en curso, da error hasta que termine o lo canceles. Con cambios puedes quitar estaciones o cambiar IA, modelo y esfuerzo antes de lanzar. ${AVISO_RAIZ}`,
       inputSchema: z.object({
         huella: z.string().min(1).describe('Huella del recorrido que la persona aprobó'),
         cambios: EsquemaCambios.optional().describe('Lista de { estacion, quitar?, ia?, modelo?, esfuerzo? } que la persona pidió'),
