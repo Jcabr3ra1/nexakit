@@ -6,12 +6,12 @@ import path from 'node:path';
 import { z } from 'zod';
 import type { Conector } from '../conectores/tipos.js';
 import { leerDiff } from '../diff.js';
-import { esperar, lanzar } from '../ejecutor.js';
+import { cancelar, esperar, lanzar } from '../ejecutor.js';
 import { calcularCoste, calcularHuella, jsonCanonico, type Catalogos, type EstacionRecorrido, type Recorrido } from '../enrutador.js';
 import { ErrorFabrica } from '../errores.js';
 import { ESTACIONES } from '../estaciones.js';
 import { InformeEstacion, NOMBRES_ESTACION, NombreEstacion, type IA } from '../esquemas.js';
-import { actualizar, cargar, cuantil05, guardar, type Evidencia, type FilaEvidencia } from '../evidencia.js';
+import { actualizar, baseAntigravity, cargar, cuantil05, ESCALA_ESFUERZOS, guardar, type Evidencia, type FilaEvidencia } from '../evidencia.js';
 import * as rastro from '../rastro.js';
 import { cargarCasos, RAIZ_CASOS, type CasoBanco } from './casos.js';
 import { medir, normalizarRuta, observacionDe, type Medicion } from './medir.js';
@@ -20,8 +20,8 @@ import { medir, normalizarRuta, observacionDe, type Medicion } from './medir.js'
 export const TOKENS_POR_LLAMADA = 30_000;
 /** Finalistas por estación que pasan a la fase 2. */
 export const FINALISTAS = 3;
-/** Escala conocida de esfuerzos, de menor a mayor; los nombres desconocidos van después. */
-export const ESCALA_ESFUERZOS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+// La base de Antigravity y la escala de esfuerzos viven en `evidencia.ts` (caducada las necesita); se reexportan aquí.
+export { baseAntigravity, ESCALA_ESFUERZOS };
 /** Esfuerzos de la fase 2, si el catálogo del modelo los tiene. */
 const ESFUERZOS_FASE2 = ['medium', 'high'] as const;
 
@@ -78,17 +78,6 @@ function tokensDe(ev: Evidencia, ej: EjecucionBanco, estacion: NombreEstacion): 
   return fila !== undefined && fila.tokensMedios > 0 ? Math.round(fila.tokensMedios) : TOKENS_POR_LLAMADA;
 }
 
-const SUFIJO_ESFUERZO = new RegExp(`^(.+)-(${ESCALA_ESFUERZOS.join('|')})$`, 'u');
-
-/**
- * Modelo base de un id de Antigravity, donde el esfuerzo va dentro del id: el id sin un sufijo final de la escala
- * (`gemini-4-neon-low` → `gemini-4-neon`). Un id sin ese sufijo es su propia base.
- */
-export function baseAntigravity(id: string): { base: string; esfuerzo: string | null } {
-  const m = SUFIJO_ESFUERZO.exec(id);
-  return m === null ? { base: id, esfuerzo: null } : { base: m[1] as string, esfuerzo: m[2] as string };
-}
-
 /** Ids de Antigravity agrupados por modelo base, en el orden del catálogo; cada grupo, de menor a mayor esfuerzo. */
 function basesAntigravity(catalogos: Catalogos): Map<string, Array<{ id: string; esfuerzo: string | null }>> {
   const bases = new Map<string, Array<{ id: string; esfuerzo: string | null }>>();
@@ -112,8 +101,9 @@ function modelosVivos(catalogos: Catalogos, ia: IaBanco): Array<{ modelo: string
 }
 
 /**
- * Los `FINALISTAS` mejores pares (IA, modelo) de una estación según la evidencia del banco: el cuantil del 5 % más
- * alto y, en empate, el que gasta menos tokens (sin tokens medidos va detrás). Solo cuentan filas con observaciones
+ * Los finalistas de una estación según la evidencia del banco: el mejor par (IA, modelo) de cada IA medida y, hasta
+ * llegar a `FINALISTAS`, los mejores restantes (si hay más IA que `FINALISTAS`, tantos como IA). Mejor es el cuantil
+ * del 5 % más alto y, en empate, el que gasta menos tokens (sin tokens medidos va detrás). Solo cuentan filas con observaciones
  * del banco y modelos que siguen en el catálogo vivo; de cada modelo vale su mejor fila. En Antigravity el modelo
  * devuelto es el base (sin el esfuerzo del id), aunque la evidencia se guarde por id completo.
  */
@@ -136,14 +126,23 @@ function finalistas(ev: Evidencia, estacion: NombreEstacion, catalogos: Catalogo
         compararTexto(a.fila.modelo, b.fila.modelo) ||
         compararTexto(a.fila.esfuerzo ?? '', b.fila.esfuerzo ?? ''),
     );
-  const elegidos: Array<{ ia: IaBanco; modelo: string }> = [];
+  // De cada modelo (en Antigravity, de cada base) vale su mejor fila.
+  const candidatos: Array<{ ia: IaBanco; modelo: string }> = [];
   for (const { fila } of puntuadas) {
-    if (elegidos.length === FINALISTAS) break;
     const modelo = fila.ia === 'antigravity' ? baseAntigravity(fila.modelo).base : fila.modelo;
-    if (elegidos.some((e) => e.ia === fila.ia && e.modelo === modelo)) continue;
-    elegidos.push({ ia: fila.ia, modelo });
+    if (candidatos.some((e) => e.ia === fila.ia && e.modelo === modelo)) continue;
+    candidatos.push({ ia: fila.ia, modelo });
   }
-  return elegidos;
+  // Primero el mejor par de cada IA medida (así ninguna se queda fuera por empates) y luego los mejores restantes.
+  const elegidos = new Set<{ ia: IaBanco; modelo: string }>();
+  for (const candidato of candidatos) {
+    if (!candidatos.some((c) => elegidos.has(c) && c.ia === candidato.ia)) elegidos.add(candidato);
+  }
+  for (const candidato of candidatos) {
+    if (elegidos.size >= FINALISTAS) break;
+    elegidos.add(candidato);
+  }
+  return candidatos.filter((c) => elegidos.has(c));
 }
 
 export interface EntradaPlanificar {
@@ -321,6 +320,8 @@ export interface OpcionesEjecutar {
   timeoutMs?: number;
   graciaMs?: number;
   topeCatalogoMs?: number;
+  /** Si se aborta, cancela la ejecución en curso (se borra su repo temporal) y no lanza las siguientes. */
+  señal?: AbortSignal;
   /** Se llama al terminar cada ejecución, válida o no. */
   alAvanzar?: (medida: EjecucionMedida, indice: number, total: number) => void;
 }
@@ -443,7 +444,10 @@ async function medirUna(
   avisar: (aviso: string) => void,
 ): Promise<EjecucionMedida> {
   const invalida = (motivo: string, extra: Partial<EjecucionMedida> = {}): EjecucionMedida => ({ ...ej, ...extra, valida: false, motivo });
+  const abortada = (): boolean => opciones.señal?.aborted === true;
+  if (abortada()) return invalida('interrumpida antes de empezar');
   const raiz = await mkdtemp(path.join(os.tmpdir(), prefijoRepoTemporal()));
+  let soltarSeñal = (): void => {};
   try {
     const raices = [...new Set([raiz, await realpath(raiz)].map((r) => r.split(path.sep).join('/')))];
     await prepararRepo(raiz, caso);
@@ -458,6 +462,10 @@ async function medirUna(
       ...(opciones.graciaMs === undefined ? {} : { graciaMs: opciones.graciaMs }),
       ...(opciones.topeCatalogoMs === undefined ? {} : { topeCatalogoMs: opciones.topeCatalogoMs }),
     });
+    const alAbortar = (): void => void cancelar(id, home).catch(() => {});
+    if (abortada()) alAbortar();
+    else opciones.señal?.addEventListener('abort', alAbortar, { once: true });
+    soltarSeñal = () => opciones.señal?.removeEventListener('abort', alAbortar);
     const estado = await esperar(id, home);
     const segundos = (Date.now() - inicio) / 1000;
     const base = { recorrido: id };
@@ -498,6 +506,7 @@ async function medirUna(
   } catch (error) {
     return invalida(`no se pudo medir: ${mensajeDe(error)}`);
   } finally {
+    soltarSeñal();
     // Un fallo al borrar no puede tapar el resultado ni cortar el banco: el plan ya se consumió.
     await rm(raiz, { recursive: true, force: true }).catch((error: unknown) => {
       avisar(`No se pudo borrar el repo temporal ${raiz} (${mensajeDe(error)}); bórralo a mano cuando termine el banco.`);
@@ -546,6 +555,7 @@ export async function ejecutarBanco(plan: unknown, opciones: OpcionesEjecutar): 
   const ejecuciones: EjecucionMedida[] = [];
   const total = aprobado.ejecuciones.length;
   for (const [indice, ej] of aprobado.ejecuciones.entries()) {
+    if (opciones.señal?.aborted === true) break;
     const caso = casos.get(ej.caso) as CasoBanco;
     const medida = await medirUna(ej, caso, opciones, home, avisar);
     if (medida.valida && medida.observacion !== undefined) {

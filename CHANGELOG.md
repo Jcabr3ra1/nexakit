@@ -1,5 +1,16 @@
 # Cambios
 
+## 0.12.1
+
+### Arreglos de seguimiento del enrutador
+
+- El aviso de evidencia caducada ya no da por sin medir los modelos de Antigravity que el banco mide a propósito con otro esfuerzo: un modelo cuenta como medido si su base tiene alguna fila.
+- Los finalistas de la fase 2 de cada estación son el mejor par de cada IA medida, más los mejores restantes hasta llegar a 3 (o a tantas IA como haya, si son más de 3); un empate ya no deja a Codex sin finalistas.
+- La nota de error repetido, en Claude y en Antigravity, remite a `~/.nexakit/nexakit lecciones registrar --regla … --porque …` en vez de a la memoria persistente (plugin `nexakit-lecciones` 0.3.6).
+- `lecciones registrar --help` o `-h` ya no marca como guardadas las correcciones pendientes.
+- `nexakit fabrica banco` sin subcomando o con `--help` muestra la ayuda en vez de «Orden desconocida».
+- `nexakit fabrica banco ejecutar` atiende Ctrl+C: aborta la ejecución en curso, borra su repo temporal y no lanza las siguientes; un segundo Ctrl+C sale con 130.
+
 ## 0.12.0
 
 ### El enrutador inteligente

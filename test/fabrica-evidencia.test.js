@@ -277,6 +277,18 @@ test('caducada: detecta un modelo nuevo en el catálogo vivo', () => {
   assert.deepEqual(resultado.motivos, ['modelos sin medir: gpt-7-nova, gpt-7-luna']);
 });
 
+test('caducada: en antigravity un modelo cuenta como medido si su base tiene alguna fila', () => {
+  let ev = evidenciaVacia(AHORA);
+  ev = actualizar(ev, clave({ ia: 'antigravity', modelo: 'gemini-4-neon-low', esfuerzo: null }), datos({ aciertos: 1, tokens: 1, segundos: 1, ahora: AHORA }));
+  ev = actualizar(ev, clave({ ia: 'antigravity', modelo: 'claude-opus-5-5-low', esfuerzo: null }), datos({ aciertos: 1, tokens: 1, segundos: 1, ahora: AHORA }));
+  const vivos = {
+    codex: [],
+    claude: [],
+    antigravity: ['gemini-4-neon-low', 'gemini-4-neon-xhigh', 'claude-opus-5-5-medium', 'gemini-4-argon-high'],
+  };
+  assert.deepEqual(caducada(ev, vivos, AHORA).motivos, ['modelos sin medir: gemini-4-argon-high']);
+});
+
 test('caducada: junta los dos motivos y no avisa si todo está al día', () => {
   let ev = evidenciaVacia(new Date(AHORA.getTime() - 45 * DIA));
   ev = actualizar(ev, clave(), datos({ aciertos: 1, tokens: 1, segundos: 1, ahora: new Date(AHORA.getTime() - 45 * DIA) }));

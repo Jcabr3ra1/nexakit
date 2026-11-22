@@ -31,6 +31,9 @@ const ORDEN_REGISTRAR = '`~/.nexakit/nexakit lecciones registrar --regla "<qué 
 
 export const NOTA_CORRECCION = `[nexakit: este mensaje parece una corrección. Si de verdad corrige algo que hiciste y no está ya registrada, regístrala como lección común a Claude, Codex y Antigravity con ${ORDEN_REGISTRAR}, y aplícala en esta misma respuesta, no solo desde la siguiente; si no lo es, ignora esta nota.]`;
 
+export const notaRepeticion = (veces, tipo) =>
+  `[nexakit: el mismo tipo de error salió ${veces} veces en esta tarea («${tipo}»). Para, explica la causa raíz antes de otro intento y cambia de enfoque; si es una lección que vale para el futuro, regístrala con ${ORDEN_REGISTRAR}.]`;
+
 export function esCorreccion(texto) {
   return CORRECCION.test(String(texto ?? ''));
 }
@@ -38,7 +41,9 @@ export function esCorreccion(texto) {
 // Un comando que registra una lección en el almacén común: guarda las correcciones pendientes, como escribir en la
 // memoria persistente.
 export function esRegistroDeLeccion(comando) {
-  return /(?:^|[\s;&|(/\\])nexakit(?:\.cmd)?\s+lecciones\s+registrar(?:\s|$)/u.test(String(comando ?? ''));
+  const texto = String(comando ?? '');
+  if (/(?:^|\s)(?:--help|-h)(?:\s|$)/u.test(texto)) return false;
+  return /(?:^|[\s;&|(/\\])nexakit(?:\.cmd)?\s+lecciones\s+registrar(?:\s|$)/u.test(texto);
 }
 
 export function claveDeComando(comando) {

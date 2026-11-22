@@ -10,6 +10,7 @@ import {
   esRegistroDeLeccion,
   esRutaDeMemoria,
   leerEventos,
+  notaRepeticion,
   podarEventos,
   sinGuardar,
   textoSeguro,
@@ -226,7 +227,7 @@ export async function handleAntigravityPostToolUse(payload, options = {}) {
           if (count === TOPE_MISMO_ERROR) {
             triggeredRepetition = true;
             state.lecciones.pendingRepetitionNotice =
-              `[nexakit: el mismo tipo de error salió ${count} veces en esta tarea («${errType}»). Para, explica la causa raíz antes de otro intento y cambia de enfoque; si es una lección que vale para el futuro, guárdala en tu memoria persistente.]`;
+              notaRepeticion(count, errType);
           }
         }
         return state;

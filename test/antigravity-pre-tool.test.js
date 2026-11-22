@@ -136,6 +136,8 @@ test('PreToolUse and PostToolUse enforce lecciones duplicate failure blocking an
   }, { homeDirectory, now: 1_700_000_005_000 });
   const text = nextTurn.injectSteps.map((s) => s.systemMessage.systemMessage).join('\n');
   assert.match(text, /mismo tipo de error salió 3 veces/u);
+  assert.match(text, /~\/\.nexakit\/nexakit lecciones registrar --regla/u);
+  assert.doesNotMatch(text, /memoria persistente/u);
 
   const ledger = await fs.readFile(path.join(homeDirectory, '.nexakit', 'lecciones.jsonl'), 'utf8');
   assert.match(ledger, /"tipo":"freno"/u);

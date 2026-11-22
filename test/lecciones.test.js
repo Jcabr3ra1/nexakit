@@ -24,6 +24,9 @@ test('esRegistroDeLeccion reconoce la orden de registrar y no otras', () => {
     assert.ok(esRegistroDeLeccion(c), c);
   for (const c of ['nexakit lecciones', 'nexakit lecciones aceptar abc', 'echo otronexakit lecciones registrar', 'nexakit lecciones registrarla', undefined])
     assert.equal(esRegistroDeLeccion(c), false, String(c));
+  // Pedir ayuda no registra nada.
+  for (const c of ['nexakit lecciones registrar --help', '~/.nexakit/nexakit lecciones registrar -h', 'nexakit lecciones registrar --regla a --porque b --help'])
+    assert.equal(esRegistroDeLeccion(c), false, c);
 });
 
 test('reconoce quejas repetidas escritas sin tildes ni signos y no las peticiones normales', () => {
@@ -172,8 +175,12 @@ test('registra los frenos y el error repetido tres veces', async () => {
   await bash($, { tool: 'Bash', command: 'git rebase origin/main' }, falla('error: cannot rebase: unstaged changes'));
   await bash($, { tool: 'Bash', command: 'git rebase origin/main' }, async () => assert.fail('no debía ejecutarse'));
   assert.deepEqual(eventos().map((e) => e.tipo), ['freno']);
-  for (const c of ['node a.js', 'node b.js', 'node c.js']) await bash($, { tool: 'Bash', command: c }, falla(`Error: Cannot find module '/tmp/${c}'`));
+  let ultima;
+  for (const c of ['node a.js', 'node b.js', 'node c.js']) ultima = await bash($, { tool: 'Bash', command: c }, falla(`Error: Cannot find module '/tmp/${c}'`));
   assert.deepEqual(eventos().map((e) => e.tipo), ['freno', 'repeticion']);
+  const nota = ultima.context.join('\n');
+  assert.match(nota, /~\/\.nexakit\/nexakit lecciones registrar --regla/u);
+  assert.doesNotMatch(nota, /memoria persistente/u);
   assert.equal(eventos().at(-1).clave, 'Error: Cannot find module <…>', 'la repetición lleva la clave del error, que usa el almacén de lecciones');
 });
 

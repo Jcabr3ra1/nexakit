@@ -384,6 +384,29 @@ test('fase 2: los finalistas salen de la evidencia de banco de la fase 1, con es
   assert.deepEqual(plan.coste, { llamadas: 5 * 3, tokensEstimados: 4 * 3 * TOKENS_POR_LLAMADA + 3 * 4000 });
 });
 
+test('fase 2: con empates en el máximo, cada IA medida aporta su mejor par aunque cueste más tokens', () => {
+  const variantes = (n) => ['low', 'medium', 'high'].map((e) => ({ modelo: `gemini-${n}-${e}`, esfuerzos: [] }));
+  const catalogos = {
+    codex: [{ modelo: 'gpt-a', esfuerzos: ['low', 'medium', 'high'] }],
+    antigravity: [...variantes(1), ...variantes(2), ...variantes(3)],
+  };
+  let ev = evidenciaVacia();
+  ev = medida(ev, 'codex', 'gpt-a', 'low', 'seguridad', 9, 1, 9000);
+  ev = medida(ev, 'antigravity', 'gemini-1-low', null, 'seguridad', 9, 1, 100);
+  ev = medida(ev, 'antigravity', 'gemini-2-low', null, 'seguridad', 9, 1, 200);
+  ev = medida(ev, 'antigravity', 'gemini-3-low', null, 'seguridad', 9, 1, 300);
+  const plan = planificarBanco({ fase: 2, catalogos, evidencia: ev, estaciones: ['seguridad'] });
+  const pares = [...new Set(plan.ejecuciones.map((e) => `${e.ia} ${e.modelo}`))];
+  // Finalistas: gemini-1 (el mejor de Antigravity), gpt-a (el mejor de Codex) y gemini-2 (el mejor restante).
+  assert.deepEqual(pares, [
+    'antigravity gemini-1-medium',
+    'antigravity gemini-1-high',
+    'antigravity gemini-2-medium',
+    'antigravity gemini-2-high',
+    'codex gpt-a',
+  ]);
+});
+
 test('fase 2: un finalista de codex sin esfuerzo medio ni alto en el catálogo no se lanza y se avisa', () => {
   const ev = medida(evidenciaVacia(), 'codex', 'gpt-b', 'minimal', 'seguridad', 5, 0, 100);
   const plan = planificarBanco({ fase: 2, catalogos: CATALOGOS, evidencia: ev, estaciones: ['seguridad'] });
