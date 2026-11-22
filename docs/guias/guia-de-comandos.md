@@ -5,7 +5,7 @@ NexaKit prepara Claude Code, Codex y Antigravity para trabajar contigo: la sesi�
 | Para | Escribe | Dónde |
 | --- | --- | --- |
 | Programar | Pide la tarea con tus palabras | en tu IA, sin comando especial |
-| Pasarlo por la fábrica | `/fabrica` o «pásalo por la fábrica» | en Claude Code; tú apruebas cada recorrido |
+| Pasarlo por la fábrica | `/fabrica` o «pásalo por la fábrica» | en Claude Code; el agente también la lanza solo al cerrar tareas con código y antes de un PR |
 | Retomar una tarea larga | Pide el traspaso (`project-handoff`) | antes de abrir una sesión nueva |
 | Cerrar el PR | `/cerrar-memoria` | si el proyecto tiene memoria |
 
@@ -27,7 +27,7 @@ Opcionales:
 | Antigravity CLI (agy) | Barra, agentes y hooks de Antigravity; también las skills gemini (investigar, analizar, imágenes) | `agy --version` |
 | GitHub CLI (gh) | Solo para actualizar la memoria con project-memory sync | `gh --version` |
 
-Necesitas la sesión iniciada en el cliente con el que trabajes. La revisión por otra IA es opcional y puede hacerla Codex, Claude o Antigravity.
+Necesitas la sesión iniciada en el cliente con el que trabajes. La revisión por otra IA (la fábrica) la lanza el agente por su cuenta y puede hacerla Codex, Claude o Antigravity.
 
 ## Instalar (una sola vez)
 
@@ -147,7 +147,7 @@ Para actualizar más adelante: `git pull --ff-only` y `npm ci --ignore-scripts` 
 2. **La sesión principal:** Entiende la tarea, la planifica y decide qué hace ella y qué delega. Lo que se resuelve en uno o dos pasos lo hace ella misma.
 3. **Los subagentes de nivel:** Ejecutan lo delegado con su propio modelo y esfuerzo (tabla de abajo) y devuelven un informe breve. En Claude Code la barra de `nexakit-modelo` muestra cada uno con el modelo que usó y sus tokens (por ejemplo `48k nuevos · 97% caché (148k en total)`: los nuevos son los que informa el sistema y los que más pesan en la cuota).
 4. **La sesión principal:** Comprueba cada informe, integra el resultado y pasa las pruebas antes de darlo por terminado.
-5. **Tú, si quieres:** Escribe `/fabrica` para pasarlo por la fábrica: propone un recorrido de estaciones con varias IA en solo lectura y espera tu aprobación. Nunca se lanza sola. En Codex, con el servidor `nexakit-fabrica` registrado, escribe `$fabrica` o pídela con tus palabras («pásalo por la fábrica»).
+5. **El agente, por su cuenta:** al cerrar una tarea con código y antes de un PR pasa el diff por la fábrica: un recorrido de estaciones con varias IA en solo lectura. Tú también puedes escribir `/fabrica`. En Codex, con el servidor `nexakit-fabrica` registrado, escribe `$fabrica` o pídela con tus palabras («pásalo por la fábrica»).
 6. **Tú:** Pides el commit y el PR, y decides el merge. Si el proyecto tiene memoria de Obsidian, `/cerrar-memoria` la pone al día.
 
 El modo tutor, en el que tú escribes el código y la IA te guía paso a paso, solo se activa si lo pides.
@@ -232,7 +232,7 @@ Conviene delegar solo cuando la tarea lee mucho o devuelve mucho ruido: lanzar u
 
 | Skill | Para qué |
 | --- | --- |
-| `fabrica` | Pasa tus cambios por la fábrica: un recorrido de estaciones con Claude, Codex y Antigravity que tú apruebas antes de lanzar. Solo cuando escribes `/fabrica` o pides «pásalo por la fábrica». |
+| `fabrica` | Pasa tus cambios por la fábrica: un recorrido de estaciones con Claude, Codex y Antigravity. La lanza el agente al cerrar tareas con código y antes de un PR, o tú con `/fabrica` o «pásalo por la fábrica». |
 | `project-handoff` | Escribe la nota de seguimiento para retomar una tarea larga en otra sesión o con otra IA. |
 | `gemini <lo que necesitas>` | Usa Gemini para explicar, investigar, analizar archivos o generar una imagen. `investigar` e `imagen` son atajos. Requiere `agy`. |
 | `cerrar-memoria` | Tras fusionar un PR, pone al día la memoria de Obsidian del proyecto. Solo si el proyecto tiene `project-memory.json`. |

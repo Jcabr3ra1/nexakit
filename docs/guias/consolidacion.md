@@ -31,8 +31,8 @@ los perfiles que encuentra y avisa de que no los evaluó.
 Que algo esté configurado no demuestra que una sesión nueva lo haya cargado.
 Superpowers es obligatorio: `npx nexakit` lo instala o activa con el gestor de
 plugins de cada IA, y `doctor` informa su estado por IA. Para agentes por nivel, usa
-`nexakit codex agentes`. La revisión por otra IA es opcional: solo con `/fabrica`
-o si la pides.
+`nexakit codex agentes`. La revisión por otra IA (la fábrica) la lanza el agente al cerrar
+tareas con código y antes de un PR; también con `/fabrica`.
 
 ## Medir sin inventar ahorro
 
@@ -117,7 +117,7 @@ separados para código, commits, publicación y sincronización. Un registro blo
 permanece pendiente; se retiró el antiguo fallback de marcarlo manualmente como
 revisado. También hay un flujo para eventos estables sin PR ni automatización.
 
-La plantilla de memoria nueva y la revisión por otra IA (opcional, con `/fabrica`) remiten al cierre global.
+La plantilla de memoria nueva y la revisión por otra IA (la fábrica) remiten al cierre global.
 `cerrar-avisens` conserva compatibilidad como alias del mismo flujo. Esta mejora
 no actualiza notas de las bóvedas reales ni modifica sus reglas de proyecto.
 

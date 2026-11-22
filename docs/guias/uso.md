@@ -68,9 +68,10 @@ Las equivalencias de proceso y reglas de convivencia con el plugin opcional Supe
 
 ## Pedir una revisión a otras IA
 
-La revisión por otras IA es opcional: solo ocurre cuando la pides. Con la skill
-`fabrica` (o `nexakit fabrica`) propones un recorrido por estaciones, lo apruebas y
-solo entonces se lanza; las IA externas leen el diff sin escribir. Detalles y
+La revisión por otras IA la lanza el agente por su cuenta al cerrar una tarea con
+código y antes de un PR; también puedes pedirla. Con la skill `fabrica` (o
+`nexakit fabrica`) se propone un recorrido por estaciones y se lanza con la huella de
+la propuesta; las IA externas leen el diff sin escribir. Detalles y
 límites en [la fábrica de revisión](../agentes/coordinacion/fabrica.md).
 
 ## Perfiles disponibles

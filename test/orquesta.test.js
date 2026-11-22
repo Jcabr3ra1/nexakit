@@ -7,7 +7,7 @@ import { applyReviewInstructions, planReviewInstructions } from '../src/review-i
 
 const leer = (rel) => fs.readFile(new URL(`../${rel}`, import.meta.url), 'utf8');
 
-test('el bloque global orquesta por niveles, revisa solo bajo demanda y deja el modo tutor a petición', async (t) => {
+test('el bloque global orquesta por niveles, lanza la fábrica por su cuenta y deja el modo tutor a petición', async (t) => {
   const homeDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'orquesta-'));
   t.after(() => fs.rm(homeDirectory, { recursive: true, force: true }));
   await applyReviewInstructions(await planReviewInstructions({ homeDirectory }), { assertHeld: async () => {} });
@@ -15,7 +15,8 @@ test('el bloque global orquesta por niveles, revisa solo bajo demanda y deja el 
     .match(/<!-- nexakit:review:start -->[\s\S]*?<!-- nexakit:review:end -->/u)[0];
   assert.doesNotMatch(block, /automáticamente UNA revisión/u);
   assert.doesNotMatch(block, /revision-cruzada/u);
-  assert.match(block, /solo con \/fabrica/u);
+  assert.match(block, /la lanzas tú, sin pedir permiso/u);
+  assert.match(block, /La persona también\s+puede pedirla con \/fabrica/u);
   assert.match(block, /Modo tutor[^.]*solo si (?:la persona )?lo pide/u);
   for (const nivel of ['ligero', 'normal', 'exigente', 'alto']) assert.match(block, new RegExp(nivel, 'u'));
   assert.match(block, /niveles:nivel-<nivel>/u);
