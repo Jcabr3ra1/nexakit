@@ -8,7 +8,8 @@ import { parseTOML, getStaticTOMLValue } from 'toml-eslint-parser';
 const setup = async (...args) => (await import('../src/codex-setup.js')).prepareCodex(...args);
 async function temporary(t) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'codex-setup-')));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  // Windows keeps a just-run node.exe copy locked for a moment (EBUSY); retry instead of failing the test.
+  t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }));
   return root;
 }
 test('preview is immutable and apply requires explicit new directory', async t => {

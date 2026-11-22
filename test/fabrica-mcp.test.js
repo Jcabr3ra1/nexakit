@@ -215,8 +215,11 @@ test('fabrica_lanzar rechaza una propuesta alterada a mano antes de aplicar camb
   assert.equal(r.texto, MENSAJE_SIN_PROPUESTA);
 });
 
+// Solo las carpetas visibles: activo.json y su temporal de escritura atómica pueden aparecer en cualquier momento.
 function readdirUnico(dir) {
-  const nombres = readdirSync(dir);
+  const nombres = readdirSync(dir, { withFileTypes: true })
+    .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
+    .map((d) => d.name);
   assert.equal(nombres.length, 1, nombres.join(','));
   return nombres[0];
 }
