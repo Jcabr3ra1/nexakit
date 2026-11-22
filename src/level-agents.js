@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { agentModels } from "./agent-models.js";
+import { REGLA_ORDENES_SIMPLES } from "./regla-ordenes-simples.js";
 
 // Codex level agents use local TOML files; Claude's come from the `niveles` plugin.
 // The top level is "alto"; xhigh is asked per spawn, only after high failed.
@@ -25,6 +26,7 @@ function content(slug, level, { model, effort }) {
     "Haz solo lo que pide la delegación y respeta las reglas del proyecto (AGENTS.md y sus skills).",
     "Si la tarea es de código: cambio mínimo, pruebas que lo cubran, y ejecútalas junto con el lint o la compilación que correspondan.",
     "No hagas commit, push ni PR, y no envíes, apruebes ni reclames encargos de revisión.",
+    REGLA_ORDENES_SIMPLES,
     "Responde breve, en menos de 200 palabras: cambios por archivo (sin pegar el diff), comprobaciones con su resultado real y lo que no comprobaste. En búsquedas, solo rutas con línea. No repitas el encargo.",
     `"""`, ""].join("\n");
 }

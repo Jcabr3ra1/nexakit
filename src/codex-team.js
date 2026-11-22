@@ -6,6 +6,7 @@ import path from 'node:path';
 import { getStaticTOMLValue, parseTOML } from 'toml-eslint-parser';
 import { agentModels } from './agent-models.js';
 import { levelAgentPlan } from './level-agents.js';
+import { REGLA_ORDENES_SIMPLES } from './regla-ordenes-simples.js';
 
 const MAX_BYTES = 128 * 1024;
 const MODEL = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/u;
@@ -137,7 +138,7 @@ export async function teamPlan(options = {}) {
     const pick = selected?.model && MODEL.test(selected.model) ? selected : null;
     let content = null;
     if (pick && codex.available) {
-      if (role) content = native(name, role.description, `${common}\nPresupuesto orientativo: ${role.steps} pasos; entrega avances y pendientes si se agota.\n${role.instructions}`, pick);
+      if (role) content = native(name, role.description, `${common}\nPresupuesto orientativo: ${role.steps} pasos; entrega avances y pendientes si se agota.\n${role.instructions}\n${REGLA_ORDENES_SIMPLES}`, pick);
       else if (legacy?.files[i]?.content) {
         const parsed = getStaticTOMLValue(parseTOML(legacy.files[i].content));
         content = native(name, parsed.description, `${parsed.developer_instructions.trim()}\n${common}\nPresupuesto orientativo: ${[15, 25, 30, 40][i]} pasos. Informe de máximo 200 palabras.`, pick);
