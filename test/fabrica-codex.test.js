@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readlinkSync, mkdtempSync, realpathSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Ajv } from 'ajv';
-import { crearConectorCodex, esShellDelSistema, ordenPermitida, versionTiposCodex } from '../dist/fabrica/conectores/codex.js';
+import { crearConectorCodex, crearHomeAislado, esShellDelSistema, ordenPermitida, versionTiposCodex } from '../dist/fabrica/conectores/codex.js';
 import { hallazgosJsonSchema } from '../dist/fabrica/esquemas.js';
 import { resolveCliInvocation } from '../src/cli-executable.js';
 
@@ -226,6 +226,11 @@ test('con escritura: { raiz } el hilo y el turno son workspace-write solo en esa
     // Sigue sin MCP ni funciones con herramientas fuera del sandbox.
     assert.deepEqual(hilo.config.mcp_servers, { memoria: { enabled: false }, railway: { enabled: false } });
     assert.equal(hilo.config.features.apps, false);
+    assert.deepEqual(hilo.config.sandbox_workspace_write, {
+      writable_roots: [canonica], network_access: false, exclude_tmpdir_env_var: true, exclude_slash_tmp: true,
+    });
+    assert.equal(hilo.cwd, canonica);
+    assert.equal(turno.cwd, canonica);
     assert.ok(mensajes.some((m) => m.method === 'mcpServerStatus/list'));
     // Si el servidor pidiera aprobaciones, se rechazan igual que en solo lectura.
     assert.deepEqual(respuesta(mensajes, 'srv-1').result, { decision: 'decline' });
@@ -234,6 +239,82 @@ test('con escritura: { raiz } el hilo y el turno son workspace-write solo en esa
   } finally {
     await p.limpiar();
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('en modo escritura, un encargo con otra raíz falla cerrado sin enviar thread/start', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'nexakit-codex-raiz-'));
+  const raiz = join(dir, 'worktree');
+  const otra = join(dir, 'repo-de-la-persona');
+  mkdirSync(raiz);
+  mkdirSync(otra);
+  const p = preparar('revision', {}, { escritura: { raiz } });
+  try {
+    const resultado = await (await p.conector).ejecutar(encargo(otra), new AbortController().signal);
+    assert.equal(resultado.estado, 'fallida');
+    assert.match(resultado.motivo, /raíz del encargo debe ser exactamente la carpeta escribible/);
+    assert.equal(p.mensajes().some((m) => m.method === 'thread/start'), false);
+  } finally {
+    await p.limpiar();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('en modo escritura, el app-server arranca con un CODEX_HOME aislado sin rules/, que se borra al cerrar', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'nexakit-codex-raiz-'));
+  const raiz = join(dir, 'worktree');
+  mkdirSync(raiz);
+  const p = preparar('revision', {}, { escritura: { raiz } });
+  const registroEnv = join(dir, 'env.json');
+  const guion = JSON.parse(readFileSync(p.rutaGuion, 'utf8'));
+  writeFileSync(p.rutaGuion, JSON.stringify({ ...guion, registroEnv }));
+  let home;
+  try {
+    const resultado = await (await p.conector).ejecutar(encargo(raiz), new AbortController().signal);
+    assert.equal(resultado.estado, 'ok', resultado.motivo);
+    const visto = JSON.parse(readFileSync(registroEnv, 'utf8'));
+    home = visto.home;
+    assert.ok(home && home !== join(process.env.HOME ?? '', '.codex'));
+    assert.equal(visto.modo, 0o700);
+    assert.equal(visto.archivos.includes('rules'), false);
+    assert.deepEqual(visto.archivos.filter((a) => a !== 'auth.json'), ['config.toml']);
+  } finally {
+    await p.limpiar();
+    rmSync(dir, { recursive: true, force: true });
+  }
+  assert.equal(existsSync(home), false, 'el home aislado se borra al cerrar');
+});
+
+test('en modo lectura el app-server no cambia CODEX_HOME', async () => {
+  const p = preparar('revision');
+  const registroEnv = join(p.dir, 'env.json');
+  const guion = JSON.parse(readFileSync(p.rutaGuion, 'utf8'));
+  writeFileSync(p.rutaGuion, JSON.stringify({ ...guion, registroEnv }));
+  try {
+    const resultado = await (await p.conector).ejecutar(encargo(p.dir), new AbortController().signal);
+    assert.equal(resultado.estado, 'ok', resultado.motivo);
+    assert.equal(JSON.parse(readFileSync(registroEnv, 'utf8')).home, process.env.CODEX_HOME ?? null);
+  } finally {
+    await p.limpiar();
+  }
+});
+
+test('crearHomeAislado enlaza solo auth.json del home real, con config mínima y sin rules/', async () => {
+  const base = mkdtempSync(join(tmpdir(), 'nexakit-home-base-'));
+  const real = join(base, 'real');
+  mkdirSync(join(real, 'rules'), { recursive: true });
+  writeFileSync(join(real, 'auth.json'), '{}');
+  writeFileSync(join(real, 'rules', 'default.rules'), 'prefix_rule(pattern=["git","push"], decision="allow")');
+  try {
+    const h = await crearHomeAislado({ CODEX_HOME: real }, base);
+    assert.equal(lstatSync(h.ruta).mode & 0o777, 0o700);
+    assert.deepEqual(readdirSync(h.ruta).sort(), ['auth.json', 'config.toml']);
+    assert.equal(readlinkSync(join(h.ruta, 'auth.json')), join(real, 'auth.json'));
+    await h.borrar();
+    assert.equal(existsSync(h.ruta), false);
+    assert.equal(existsSync(join(real, 'auth.json')), true, 'borrar no toca el home real');
+  } finally {
+    rmSync(base, { recursive: true, force: true });
   }
 });
 

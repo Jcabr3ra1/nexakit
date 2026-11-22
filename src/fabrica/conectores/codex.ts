@@ -1,9 +1,12 @@
 // Conector de la fábrica con Codex por `codex app-server` (JSON-RPC por stdio).
-// Frontera de seguridad: el revisor trabaja en un hilo de solo lectura y toda petición de escritura se deniega.
+// Frontera de seguridad: por defecto el revisor trabaja en un hilo de solo lectura y toda petición de escritura se
+// deniega. El modo escritura es opcional y explícito (`escritura: { raiz }`): `workspace-write` acotado a esa única
+// raíz (que debe ser también el cwd), sin red, sin aprobaciones y con un CODEX_HOME aislado sin reglas de execpolicy.
 // Las órdenes solo se aprueban si coinciden EXACTAMENTE con una de `ordenesPermitidas` de la estación.
 import { execFile } from 'node:child_process';
 import { realpathSync, statSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { resolveCliInvocation } from '../../../src/cli-executable.js';
@@ -115,6 +118,32 @@ async function resolverInvocacion(opciones: OpcionesConectorCodex): Promise<Invo
   } catch {
     throw new ErrorNoInstalado();
   }
+}
+
+/**
+ * CODEX_HOME desechable para el modo escritura. Las reglas `allow` de `~/.codex/rules` dejan correr órdenes fuera
+ * del sandbox y `codex app-server` no tiene opción para ignorarlas, así que el servidor arranca con un home propio
+ * (0o700) que solo enlaza `auth.json` del real y trae una configuración mínima, sin `rules/`.
+ */
+export async function crearHomeAislado(
+  entorno: NodeJS.ProcessEnv = process.env,
+  base: string = os.tmpdir(),
+): Promise<{ ruta: string; borrar: () => Promise<void> }> {
+  const ruta = await mkdtemp(path.join(base, 'nexakit-codex-home-'));
+  const borrar = () => rm(ruta, { recursive: true, force: true });
+  try {
+    const real = entorno['CODEX_HOME'] ?? path.join(os.homedir(), '.codex');
+    try {
+      await symlink(path.join(real, 'auth.json'), path.join(ruta, 'auth.json'));
+    } catch {
+      // Sin autenticación enlazada Codex fallará al iniciar sesión, nunca al revés.
+    }
+    await writeFile(path.join(ruta, 'config.toml'), '# Configuración mínima de un encargo de nexakit.\n', { mode: 0o600 });
+  } catch (error) {
+    await borrar();
+    throw error;
+  }
+  return { ruta, borrar };
 }
 
 function esObjeto(valor: unknown): valor is Record<string, unknown> {
@@ -276,6 +305,8 @@ class ConectorCodex implements Conector {
   readonly ia = 'codex' as const;
   private readonly opciones: OpcionesConectorCodex;
   private proceso: Proceso | undefined;
+  private homeAislado: { ruta: string; borrar: () => Promise<void> } | undefined;
+  private borrado: Promise<void> = Promise.resolve();
   private readonly hilos = new Map<string, EnCurso>();
   private cerrado = false;
   /** Ruta absoluta y canónica de la única carpeta escribible; undefined si el conector es de solo lectura. */
@@ -320,9 +351,13 @@ class ConectorCodex implements Conector {
       const cliente = await this.asegurarCliente();
       if (señal.aborted) return cancelada();
 
+      if (this.raizEscritura !== undefined && canonica(encargo.raiz) !== this.raizEscritura) {
+        return { ...resultado, motivo: 'En modo escritura la raíz del encargo debe ser exactamente la carpeta escribible; se rechaza para no tocar otro repositorio.' };
+      }
+      const cwd = this.raizEscritura ?? encargo.raiz;
       const paramsHilo: ThreadStartParams = {
         model: encargo.modelo,
-        cwd: encargo.raiz,
+        cwd,
         sandbox: this.raizEscritura === undefined ? 'read-only' : 'workspace-write',
         approvalPolicy: this.raizEscritura === undefined ? 'untrusted' : 'never',
         // Las aprobaciones las contesta este conector, nunca un revisor automático de Codex.
@@ -330,7 +365,7 @@ class ConectorCodex implements Conector {
         // Hilo efímero: no ensucia el historial de Codex de la persona.
         ephemeral: true,
         // Sin servidores MCP ni funciones con herramientas que corren fuera del sandbox.
-        config: await this.configAislada(cliente, encargo.raiz),
+        config: await this.configAislada(cliente, cwd),
       };
       const hilo: unknown = await cliente.solicitar('thread/start', paramsHilo, { timeoutMs: TIEMPO_PETICION_MS });
       const idHilo = esObjeto(hilo) && esObjeto(hilo['thread']) ? texto(hilo['thread']['id']) : null;
@@ -354,6 +389,7 @@ class ConectorCodex implements Conector {
       const paramsTurno: TurnStartParams = {
         threadId: idHilo,
         input: entrada,
+        ...(this.raizEscritura !== undefined ? { cwd: this.raizEscritura } : {}),
         model: encargo.modelo,
         ...(encargo.esfuerzo !== null ? { effort: encargo.esfuerzo } : {}),
         outputSchema: hallazgosJsonSchema() as JsonValue,
@@ -406,7 +442,19 @@ class ConectorCodex implements Conector {
     this.cerrado = true;
     const proceso = this.proceso;
     this.proceso = undefined;
-    if (proceso) await proceso.cliente.cerrar();
+    try {
+      if (proceso) await proceso.cliente.cerrar();
+    } finally {
+      await this.borrarHomeAislado();
+    }
+  }
+
+  /** Los borrados se encadenan: quien llama espera también al que ya estaba en marcha. */
+  private borrarHomeAislado(): Promise<void> {
+    const home = this.homeAislado;
+    this.homeAislado = undefined;
+    if (home) this.borrado = this.borrado.then(() => home.borrar().catch(() => undefined));
+    return this.borrado;
   }
 
   /**
@@ -422,6 +470,15 @@ class ConectorCodex implements Conector {
     return {
       mcp_servers: Object.fromEntries(servidores.map((nombre) => [nombre, { enabled: false }])),
       features: Object.fromEntries(FUNCIONES_DESACTIVADAS.map((funcion) => [funcion, false])),
+      ...(this.raizEscritura === undefined ? {} : {
+        // Defensa en profundidad: la configuración de la persona no ensancha la política hasta el primer turno.
+        sandbox_workspace_write: {
+          writable_roots: [this.raizEscritura],
+          network_access: false,
+          exclude_tmpdir_env_var: true,
+          exclude_slash_tmp: true,
+        },
+      }),
     };
   }
 
@@ -480,7 +537,21 @@ class ConectorCodex implements Conector {
       const invocacion = await resolverInvocacion(this.opciones);
       if (this.cerrado) throw new Error('El conector de Codex está cerrado');
       if (!this.proceso) {
-        const cliente = ClienteJsonRpc.lanzar(invocacion.orden, [...invocacion.argsPrefijo, 'app-server'], { cwd: process.cwd() });
+        let env: NodeJS.ProcessEnv | undefined;
+        if (this.raizEscritura !== undefined) {
+          await this.borrarHomeAislado();
+          const home = await crearHomeAislado();
+          this.homeAislado = home;
+          env = { ...process.env, CODEX_HOME: home.ruta };
+          if (this.cerrado) {
+            await this.borrarHomeAislado();
+            throw new Error('El conector de Codex está cerrado');
+          }
+        }
+        const cliente = ClienteJsonRpc.lanzar(invocacion.orden, [...invocacion.argsPrefijo, 'app-server'], {
+          cwd: process.cwd(),
+          ...(env !== undefined ? { env } : {}),
+        });
         cliente.alNotificar((metodo, params) => this.alNotificar(metodo, params));
         cliente.alSolicitar((metodo, params) => Promise.resolve(this.alSolicitar(metodo, params)));
         const proceso: Proceso = { cliente, listo: this.inicializar(cliente) };
@@ -488,7 +559,10 @@ class ConectorCodex implements Conector {
         const olvidar = () => {
           if (this.proceso === proceso) this.proceso = undefined;
         };
-        void cliente.terminado.then(olvidar);
+        void cliente.terminado.then(() => {
+          olvidar();
+          if (this.proceso === undefined) void this.borrarHomeAislado();
+        });
         proceso.listo.catch(olvidar);
       }
     }
