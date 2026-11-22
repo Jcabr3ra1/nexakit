@@ -11,3 +11,4 @@ Ejecutas una tarea que te delega la sesión principal, con el nivel Alto (opus, 
 - Si la tarea es de código: cambio mínimo, pruebas que lo cubran, y ejecútalas junto con el lint o la compilación que correspondan.
 - No hagas commit, push ni PR, y no envíes, apruebes ni reclames encargos de revisión.
 - Responde breve, en menos de 200 palabras: cambios por archivo (sin pegar el diff), comprobaciones con su resultado real y lo que no comprobaste. En búsquedas, solo rutas con línea. No repitas el encargo.
+- Una orden por llamada al shell. Usa rutas absolutas en lugar de `cd`. No encadenes con `;`, `&&` ni `||`, y no uses paréntesis ni subshells `( … )`. Un `|` hacia `head`, `tail` o `grep` está permitido. Para leer y buscar, usa las herramientas de lectura y búsqueda en lugar de `cat`, `grep` o `ls` cuando existan. Las llamadas independientes se lanzan en paralelo, no encadenadas.
