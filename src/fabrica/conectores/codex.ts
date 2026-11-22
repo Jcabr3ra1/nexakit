@@ -2,7 +2,7 @@
 // Frontera de seguridad: el revisor trabaja en un hilo de solo lectura y toda petición de escritura se deniega.
 // Las órdenes solo se aprueban si coinciden EXACTAMENTE con una de `ordenesPermitidas` de la estación.
 import { execFile } from 'node:child_process';
-import { realpathSync } from 'node:fs';
+import { realpathSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -72,6 +72,11 @@ export interface OpcionesConectorCodex {
   orden?: string;
   /** Argumentos previos a `app-server` o `--version` (solo con `orden`). */
   argsPrefijo?: string[];
+  /**
+   * Modo escritura, explícito y acotado: el hilo y el turno usan `workspace-write` con esa única carpeta escribible,
+   * sin red y sin aprobaciones. Sin esta opción el conector es de solo lectura, como siempre.
+   */
+  escritura?: { raiz: string };
 }
 
 export interface VersionTiposCodex {
@@ -273,9 +278,12 @@ class ConectorCodex implements Conector {
   private proceso: Proceso | undefined;
   private readonly hilos = new Map<string, EnCurso>();
   private cerrado = false;
+  /** Ruta absoluta y canónica de la única carpeta escribible; undefined si el conector es de solo lectura. */
+  private readonly raizEscritura: string | undefined;
 
-  constructor(opciones: OpcionesConectorCodex) {
+  constructor(opciones: OpcionesConectorCodex, raizEscritura?: string) {
     this.opciones = opciones;
+    this.raizEscritura = raizEscritura;
   }
 
   async catalogo(): Promise<Array<{ modelo: string; esfuerzos: string[] }>> {
@@ -315,8 +323,8 @@ class ConectorCodex implements Conector {
       const paramsHilo: ThreadStartParams = {
         model: encargo.modelo,
         cwd: encargo.raiz,
-        sandbox: 'read-only',
-        approvalPolicy: 'untrusted',
+        sandbox: this.raizEscritura === undefined ? 'read-only' : 'workspace-write',
+        approvalPolicy: this.raizEscritura === undefined ? 'untrusted' : 'never',
         // Las aprobaciones las contesta este conector, nunca un revisor automático de Codex.
         approvalsReviewer: 'user',
         // Hilo efímero: no ensucia el historial de Codex de la persona.
@@ -349,8 +357,17 @@ class ConectorCodex implements Conector {
         model: encargo.modelo,
         ...(encargo.esfuerzo !== null ? { effort: encargo.esfuerzo } : {}),
         outputSchema: hallazgosJsonSchema() as JsonValue,
-        sandboxPolicy: { type: 'readOnly', networkAccess: false },
-        approvalPolicy: 'untrusted',
+        sandboxPolicy: this.raizEscritura === undefined
+          ? { type: 'readOnly', networkAccess: false }
+          : {
+            type: 'workspaceWrite',
+            writableRoots: [this.raizEscritura],
+            networkAccess: false,
+            // Solo la raíz: ni el directorio temporal de la persona ni /tmp.
+            excludeTmpdirEnvVar: true,
+            excludeSlashTmp: true,
+          },
+        approvalPolicy: this.raizEscritura === undefined ? 'untrusted' : 'never',
         approvalsReviewer: 'user',
       };
       const turno: unknown = await cliente.solicitar('turn/start', paramsTurno, { timeoutMs: TIEMPO_PETICION_MS });
@@ -593,8 +610,22 @@ class ConectorCodex implements Conector {
   }
 }
 
+/** La raíz del modo escritura debe ser una carpeta absoluta y existente; se devuelve su ruta canónica. */
+function validarRaizEscritura(raiz: string): string {
+  if (typeof raiz !== 'string' || !path.isAbsolute(raiz)) {
+    throw new Error(`La raíz de escritura debe ser una ruta absoluta: ${recortar(String(raiz))}`);
+  }
+  try {
+    if (!statSync(raiz).isDirectory()) throw new Error('no es una carpeta');
+    return realpathSync(raiz);
+  } catch {
+    throw new Error(`La raíz de escritura no existe o no es una carpeta: ${recortar(raiz)}`);
+  }
+}
+
 export async function crearConectorCodex(opciones: OpcionesConectorCodex = {}): Promise<Conector> {
-  return new ConectorCodex(opciones);
+  const raiz = opciones.escritura === undefined ? undefined : validarRaizEscritura(opciones.escritura.raiz);
+  return new ConectorCodex(opciones, raiz);
 }
 
 const ejecutarArchivo = promisify(execFile);

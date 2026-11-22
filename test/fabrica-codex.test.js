@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,13 +15,13 @@ const GUIONES = fileURLToPath(new URL('../test-support/fabrica/', import.meta.ur
 const VERSION_TIPOS = readFileSync(new URL('../src/fabrica/protocolos/codex/VERSION', import.meta.url), 'utf8').trim();
 
 /** Prepara un guion con registro de mensajes y una carpeta de trabajo que hace de raíz del repo. */
-function preparar(nombre, cambios = {}) {
+function preparar(nombre, cambios = {}, opcionesConector = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'nexakit-codex-'));
   const guion = { ...JSON.parse(readFileSync(join(GUIONES, `codex-${nombre}.json`), 'utf8')), ...cambios };
   guion.registro = join(dir, 'registro.ndjson');
   const rutaGuion = join(dir, 'guion.json');
   writeFileSync(rutaGuion, JSON.stringify(guion));
-  const conector = crearConectorCodex({ orden: process.execPath, argsPrefijo: [SERVIDOR, rutaGuion] });
+  const conector = crearConectorCodex({ orden: process.execPath, argsPrefijo: [SERVIDOR, rutaGuion], ...opcionesConector });
   return {
     dir,
     rutaGuion,
@@ -178,6 +178,78 @@ test('ejecutar abre un hilo de solo lectura y pide hallazgos con el esquema; den
     assert.equal(resultado.denegaciones.length, 14);
   } finally {
     await p.limpiar();
+  }
+});
+
+test('sin la opción escritura, la petición sigue siendo de solo lectura, sin política de escritura', async () => {
+  const p = preparar('revision');
+  try {
+    const resultado = await (await p.conector).ejecutar(encargo(p.dir), new AbortController().signal);
+    assert.equal(resultado.estado, 'ok', resultado.motivo);
+    const mensajes = p.mensajes();
+    const hilo = mensajes.find((m) => m.method === 'thread/start').params;
+    const turno = mensajes.find((m) => m.method === 'turn/start').params;
+    assert.deepEqual(Object.keys(hilo).sort(), ['approvalPolicy', 'approvalsReviewer', 'config', 'cwd', 'ephemeral', 'model', 'sandbox']);
+    assert.equal(hilo.sandbox, 'read-only');
+    assert.equal(hilo.approvalPolicy, 'untrusted');
+    assert.equal(JSON.stringify(turno.sandboxPolicy), '{"type":"readOnly","networkAccess":false}');
+    assert.equal(turno.approvalPolicy, 'untrusted');
+    assert.equal(JSON.stringify(turno).includes('workspaceWrite'), false);
+  } finally {
+    await p.limpiar();
+  }
+});
+
+test('con escritura: { raiz } el hilo y el turno son workspace-write solo en esa raíz, sin red ni aprobaciones', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'nexakit-codex-raiz-'));
+  const raiz = join(dir, 'worktree');
+  mkdirSync(raiz);
+  const p = preparar('revision', {}, { escritura: { raiz } });
+  try {
+    const resultado = await (await p.conector).ejecutar(encargo(raiz), new AbortController().signal);
+    assert.equal(resultado.estado, 'ok', resultado.motivo);
+    const mensajes = p.mensajes();
+    const hilo = mensajes.find((m) => m.method === 'thread/start').params;
+    const turno = mensajes.find((m) => m.method === 'turn/start').params;
+    const canonica = realpathSync(raiz);
+    assert.equal(hilo.sandbox, 'workspace-write');
+    assert.equal(hilo.approvalPolicy, 'never');
+    assert.equal(hilo.approvalsReviewer, 'user');
+    assert.deepEqual(turno.sandboxPolicy, {
+      type: 'workspaceWrite',
+      writableRoots: [canonica],
+      networkAccess: false,
+      excludeTmpdirEnvVar: true,
+      excludeSlashTmp: true,
+    });
+    assert.equal(turno.approvalPolicy, 'never');
+    // Sigue sin MCP ni funciones con herramientas fuera del sandbox.
+    assert.deepEqual(hilo.config.mcp_servers, { memoria: { enabled: false }, railway: { enabled: false } });
+    assert.equal(hilo.config.features.apps, false);
+    assert.ok(mensajes.some((m) => m.method === 'mcpServerStatus/list'));
+    // Si el servidor pidiera aprobaciones, se rechazan igual que en solo lectura.
+    assert.deepEqual(respuesta(mensajes, 'srv-1').result, { decision: 'decline' });
+    assert.equal(respuesta(mensajes, 'srv-2').result.decision.denied !== undefined, true);
+    assert.deepEqual(respuesta(mensajes, 'srv-3').result, { permissions: {}, scope: 'turn' });
+  } finally {
+    await p.limpiar();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('escritura.raiz debe ser absoluta y existir, con un error claro en español', async () => {
+  await assert.rejects(crearConectorCodex({ escritura: { raiz: 'relativa/carpeta' } }), /raíz de escritura debe ser una ruta absoluta/);
+  await assert.rejects(
+    crearConectorCodex({ escritura: { raiz: join(tmpdir(), 'nexakit-no-existe-xyz') } }),
+    /raíz de escritura no existe o no es una carpeta/,
+  );
+  const dir = mkdtempSync(join(tmpdir(), 'nexakit-codex-raiz-'));
+  try {
+    const archivo = join(dir, 'a.txt');
+    writeFileSync(archivo, 'x');
+    await assert.rejects(crearConectorCodex({ escritura: { raiz: archivo } }), /no existe o no es una carpeta/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
