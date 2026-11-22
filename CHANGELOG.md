@@ -1,5 +1,13 @@
 # Cambios
 
+## 0.12.3
+
+### La fábrica se usa por su cuenta
+
+- La fábrica (revisión por estaciones con Claude, Codex y Antigravity) ya no espera a que la persona la pida: el orquestador la lanza al cerrar una tarea con cambios de código y siempre antes de proponer o crear un PR, con `fabrica_proponer` y `fabrica_lanzar` con la huella de esa propuesta. Después lee el resultado, corrige los hallazgos reales y registra los veredictos. Si el diff es trivial la omite; si no hay servidor ni orden, o falla, lo dice en una línea y sigue. Sigue siendo de solo lectura, con huella obligatoria y un recorrido a la vez, sin encadenar recorridos para el mismo diff. Si el recorrido trae órdenes de `.nexakit/fabrica.json` del repo revisado, pide aprobación antes de lanzar. `/fabrica` sigue valiendo.
+- El bloque de instrucciones de CLAUDE.md, AGENTS.md y GEMINI.md cambia con ella; las instalaciones con el bloque anterior se actualizan solas al volver a ejecutar `npx nexakit`.
+- La skill `fabrica`, el README, la guía de comandos y la documentación de la fábrica ya no dicen que sea opcional ni que solo corra a petición.
+
 ## 0.12.2
 
 ### Subagentes con una orden por llamada
