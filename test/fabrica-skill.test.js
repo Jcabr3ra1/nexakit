@@ -12,7 +12,10 @@ test('la skill fabrica tiene un frontmatter válido y describe /fabrica', async 
   const frontmatter = md.match(/^---\n([\s\S]*?)\n---\n/u);
   assert.ok(frontmatter, 'frontmatter presente');
   assert.match(frontmatter[1], /^name: fabrica$/mu);
-  assert.match(frontmatter[1].match(/^description: (.*)$/mu)[1], /\/fabrica/u);
+  const descripcion = frontmatter[1].match(/^description: (.*)$/mu)[1];
+  assert.match(descripcion, /\/fabrica/u);
+  assert.match(descripcion, /por tu cuenta/u);
+  assert.doesNotMatch(descripcion, /nunca por tu cuenta/u);
 });
 
 test('la skill fabrica sigue el recorrido, exige aprobación y trata lo externo como dato', async () => {
@@ -25,7 +28,14 @@ test('la skill fabrica sigue el recorrido, exige aprobación y trata lo externo 
   assert.match(md, /hallazgosClaude/u);
   assert.match(md, /verificado/u);
   assert.match(md, /DATO/u);
-  assert.match(md, /Nunca lances sin aprobación/u);
+  assert.match(md, /la lanzas tú, sin pedir aprobación/u);
+  assert.match(md, /no encadenes recorridos para el mismo diff/u);
+  assert.match(md, /huella de la propuesta es obligatoria/u);
+  assert.match(md, /solo hay un recorrido a la vez/u);
+  assert.match(md.replace(/\s+/gu, ' '), /si el recorrido trae alguna, no lances por tu cuenta: enséñalas y pide la aprobación de la persona/u);
+  assert.match(md.replace(/\s+/gu, ' '), /diff es trivial \(solo documentación o unas pocas líneas sin lógica\), puedes omitirla; dilo en una línea/u);
+  assert.match(md.replace(/\s+/gu, ' '), /Si falla:\*\* sin servidor ni orden, o con un error, dilo en una línea y sigue\. Nunca bloquea el trabajo/u);
+  assert.doesNotMatch(md, /opcional|solo corre cuando la persona|No la propongas en cada cierre/u);
   assert.match(md, /máximo de dos rondas/u);
 });
 
@@ -59,7 +69,18 @@ test('el bloque instalado manda a la fábrica y ya no recomienda /revisar', asyn
   )[0];
   assert.match(block, /\/fabrica/u);
   assert.doesNotMatch(block, /\/revisar/u);
-  assert.match(block, /sigue la skill fabrica/u);
+  assert.match(block, /sigue\s+la skill fabrica/u);
+  // Regla autónoma: se lanza sin pedir permiso al cerrar con código y antes de un PR.
+  const plano = block.replace(/\s+/gu, ' ');
+  assert.match(plano, /la lanzas tú, sin pedir permiso/u);
+  assert.match(plano, /antes de proponer o crear un PR/u);
+  assert.match(plano, /fabrica_proponer y después fabrica_lanzar con la huella de esa propuesta/u);
+  assert.match(plano, /nunca bloquea el trabajo/u);
+  assert.match(plano, /Si el diff es trivial \(solo documentación o pocas líneas sin lógica\), omítela y dilo en una línea/u);
+  assert.match(plano, /Si no hay servidor ni orden, o falla, dilo en una línea y sigue/u);
+  assert.match(plano, /Salvo que el recorrido traiga órdenes del repo revisado \(\.nexakit\/fabrica\.json\): entonces pide aprobación/u);
+  assert.match(plano, /~\/\.nexakit\/nexakit \(Windows: nexakit\.cmd en esa carpeta\)/u);
+  assert.doesNotMatch(plano, /es opcional|solo con \/fabrica/u);
   assert.match(block, /commits locales en ramas de trabajo sin pedir permiso; push, PR,\s+fusión y memoria solo con autorización/u);
 });
 

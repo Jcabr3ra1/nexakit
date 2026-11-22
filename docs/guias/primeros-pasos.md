@@ -47,8 +47,8 @@ node bin/nexakit.js --help
 - `project-memory` trabaja con memorias de proyecto: crear, diagnosticar,
   preparar conexiones y revisar cambios con controles.
 - `nexakit` deja listas tus IA y consulta modelos y consumo. Su orden
-  `nexakit fabrica` propone y lanza una revisión por otras IA, pero solo cuando
-  la pides.
+  `nexakit fabrica` propone y lanza una revisión por otras IA; el agente la usa
+  por su cuenta al cerrar tareas con código y antes de un PR.
 
 Se espera la ayuda de cada herramienta y exit 0. Estos comandos no crean una
 bóveda, conectan clientes ni consultan una cuenta. Usar `node bin/...` evita
@@ -56,10 +56,11 @@ suponer que ya instalaste un comando global.
 
 ## 3. Entiende cómo se pide una revisión
 
-La revisión por otras IA no ocurre sola. Cuando quieras una, pide `/fabrica`
-(o `$fabrica` en Codex): primero verás un recorrido propuesto, con las IA, los
-modelos y el coste en llamadas, y solo se lanza si lo apruebas. Las IA externas
-leen el diff sin escribir. Consulta [la fábrica de revisión](../agentes/coordinacion/fabrica.md)
+La revisión por otras IA la lanza el agente por su cuenta al cerrar una tarea con
+código y antes de un PR; también puedes pedirla con `/fabrica` (o `$fabrica` en
+Codex). Propone un recorrido, con las IA, los modelos y el coste en llamadas, y lo
+lanza con su huella; solo pide tu aprobación si trae órdenes del repo revisado.
+Las IA externas leen el diff sin escribir. Consulta [la fábrica de revisión](../agentes/coordinacion/fabrica.md)
 antes de usarla con un proyecto real; esta guía no la ejecuta.
 
 ## 4. Elige el siguiente uso real

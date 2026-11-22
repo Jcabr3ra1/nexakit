@@ -452,6 +452,7 @@ test('quitar --global no sigue enlaces: un workflows enlazado y un revisores.jso
 // Los textos de cada versión anterior del bloque van como fixtures (test-support/bloques-anteriores), sacados del
 // historial de src/review-instructions.js: la prueba no depende de git.
 const PREVIOUS = {
+  b42b5bf: '986f429cf9e0625cc45d0ea1afb02ed45fe9c359ef1e32897b387dbb21bc1dde',
   '3fa5d18': 'f1d67fb2be192ddcade136409ee59302e926c6bf41c883f6125ffb8075be41d5',
   f151a93: 'b02861cef24be0e67afc1870d829f375ab752980babc30a98fa187736a5247a4',
   f3b8bca: '7f5be5b768fa60fcb785fae74492271772e4befcadf5e3d5dc60ba8203062391',
@@ -460,7 +461,7 @@ const PREVIOUS = {
   d815d60: 'a59f9d7f20e328a0e990566dee78e9fe90623598bc8bd85eb593808217aae123',
   d73e44a: 'b9ed8e99a370f760c46574fa0e1854768d35498eb70fc619337851843d97c32a',
 };
-test('cada una de las 7 versiones anteriores del bloque se reconoce por su texto y se actualiza', async (t) => {
+test('cada una de las 8 versiones anteriores del bloque se reconoce por su texto y se actualiza', async (t) => {
   const { planReviewInstructions } = await import('../src/review-instructions.js');
   const fixtures = fileURLToPath(new URL('../test-support/bloques-anteriores/', import.meta.url));
   assert.deepEqual((await fs.readdir(fixtures)).sort(), Object.keys(PREVIOUS).map((sha) => `${sha}.md`).sort());
@@ -478,6 +479,7 @@ test('cada una de las 7 versiones anteriores del bloque se reconoce por su texto
     assert.equal(item.update, true, sha);
     assert.match(item.after, /^REGLAS\n\n/u);
     assert.match(item.after, /\/fabrica/u);
+    assert.match(item.after, /la lanzas tú, sin pedir permiso/u);
     await fs.writeFile(target, `${text.replace(`${START}\n`, `${START}\nNota mía.\n`)}\n`);
     const edited = (await planReviewInstructions({ homeDirectory: home, agents: ['codex'] })).items[0];
     assert.deepEqual([edited.state, edited.reason], ['conflict', 'editado'], sha);

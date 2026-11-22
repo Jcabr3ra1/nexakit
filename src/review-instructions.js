@@ -30,9 +30,16 @@ por bueno. Si el encargo necesita el mismo contexto que ya llevas, bifurca la
 sesión (fork) en vez de crear un subagente nuevo. Usa elegir-modelo para nombres reales; nunca cambies el modelo de
 la sesión por tu cuenta. Sin subagentes de nivel, trabaja tú.
 
-La revisión con varias IA es opcional: solo con /fabrica o si la persona pide
-pasarlo por la fábrica; sigue la skill fabrica. Usa la orden estable
-~/.nexakit/nexakit (Windows: nexakit.cmd en esa carpeta).
+La fábrica (revisión con varias IA) la lanzas tú, sin pedir permiso: al cerrar
+una tarea con cambios de código y siempre antes de proponer o crear un PR, con
+fabrica_proponer y después fabrica_lanzar con la huella de esa propuesta; sigue
+la skill fabrica. Lee el resultado, corrige los hallazgos reales y registra los
+veredictos, reales y falsos. Si el diff es trivial (solo documentación o pocas
+líneas sin lógica), omítela y dilo en una línea. Si no hay servidor ni orden, o
+falla, dilo en una línea y sigue: nunca bloquea el trabajo. Salvo que el recorrido
+traiga órdenes del repo revisado (.nexakit/fabrica.json): entonces pide
+aprobación. La persona también puede pedirla con /fabrica. Usa la orden estable ~/.nexakit/nexakit (Windows:
+nexakit.cmd en esa carpeta).
 
 Si una tarea larga queda a medias —pausa, cambio de IA, bloqueo o cierre— escribe o actualiza la nota de seguimiento con project-handoff; recomienda sesión nueva en los casos de project-handoff, y cierra el seguimiento al integrar con cerrar-memoria.
 ${END}`;
@@ -41,6 +48,7 @@ ${END}`;
 // that matches one of them was written by nexakit even without its record in review-instructions.json, so it is
 // replaced by the current one; any other text between the marks was edited by the person and is never touched.
 const PREVIOUS_BODY_HASHES = new Set([
+  '986f429cf9e0625cc45d0ea1afb02ed45fe9c359ef1e32897b387dbb21bc1dde', // b42b5bf: fábrica solo a petición
   'f1d67fb2be192ddcade136409ee59302e926c6bf41c883f6125ffb8075be41d5', // 3fa5d18: Antigravity en la orquesta
   'b02861cef24be0e67afc1870d829f375ab752980babc30a98fa187736a5247a4', // f151a93: revisión bajo demanda e informes breves
   '7f5be5b768fa60fcb785fae74492271772e4befcadf5e3d5dc60ba8203062391', // f3b8bca: subagentes de nivel

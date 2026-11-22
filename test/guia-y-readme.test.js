@@ -38,8 +38,11 @@ test('HTML command guide presents a 3-step route, the new auto-review and handof
   assert.match(html, /Antigravity/u);
 
   // Explains the new workflow
-  assert.match(html, /solo cuando la pides/u);
+  assert.match(html, /Revisión con varias IA, por su cuenta/u);
   assert.match(html, /\/fabrica/u);
+  assert.match(html, /Propone y lanza un recorrido de estaciones/u);
+  assert.match(html, /Lanzar el recorrido propuesto/u);
+  assert.doesNotMatch(html, /espera tu aprobación|recorrido aprobado/u);
   assert.match(html, /seguimiento/u);
   assert.match(html, /\/cerrar-memoria/u);
 
@@ -74,7 +77,7 @@ test('README.md documents the 3 AIs, 3-step setup, on-demand review workflow, Sp
   assert.match(readme, /Claude Code/u);
   assert.match(readme, /Codex/u);
   assert.match(readme, /Antigravity/u);
-  assert.match(readme, /solo cuando la pides/u);
+  assert.match(readme, /Revisión con varias IA, por su cuenta/u);
   assert.match(readme, /\/fabrica/u);
 
   for (const cmd of [

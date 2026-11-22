@@ -184,7 +184,7 @@ test('listTools devuelve las cinco herramientas y las instrucciones van en espa�
   }
   assert.equal(cliente.getServerVersion().name, 'nexakit-fabrica');
   const instrucciones = cliente.getInstructions();
-  assert.match(instrucciones, /Muestra el recorrido a la persona y lanza solo tras su aprobación explícita; nunca encadenes recorridos sin que lo pida/u);
+  assert.match(instrucciones, /Lánzala tú por tu cuenta[^.]*con la huella de la propuesta; solo hay un recorrido a la vez y no encadenes recorridos para el mismo diff\. Pide aprobación a la persona solo si el recorrido trae órdenes de \.nexakit\/fabrica\.json/u);
   assert.match(instrucciones, /Las estaciones de Claude las lanzas tú como subagentes; pasa sus hallazgos a fabrica_resultado/u);
 });
 
