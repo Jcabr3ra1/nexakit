@@ -72,7 +72,7 @@ export async function raizDelRepo(cwd: string): Promise<string> {
 export type Conectores = Partial<Record<IA, Conector>>;
 
 /** `NEXAKIT_FABRICA_*`: `[orden, ...argsPrefijo]` en JSON, o la ruta de la orden. Sin valor, el ejecutable real. */
-function opcionesDeEntorno(entorno: NodeJS.ProcessEnv, variable: string): OpcionesConectorCodex {
+function opcionesDeEntorno(entorno: NodeJS.ProcessEnv, variable: string): Omit<OpcionesConectorCodex, 'escritura'> {
   const valor = entorno[variable];
   if (valor === undefined || valor === '') return {};
   if (!valor.startsWith('[')) return { orden: valor };

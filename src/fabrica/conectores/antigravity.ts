@@ -19,9 +19,15 @@
 // - El modo `default` pide permiso antes de editar y de ejecutar órdenes. Si la sesión abre o pasa a otro modo, se
 //   cancela. `/teamwork`, `/boost` y `/swarm` son órdenes de barra que la fábrica no envía; que sus subagentes pasen
 //   por los mismos permisos no se puede comprobar sin llamar al modelo.
+// Modo escritura (opción explícita `escritura: { raiz, ordenesPermitidas }`, usada por `nexakit encargar`): la sesión
+// se abre con `cwd` exactamente en la raíz canónica y `session/request_permission` se aprueba (siempre con la opción
+// «permitir una vez», nunca «siempre») solo si todas las rutas están dentro de la raíz, sin enlaces simbólicos ni `..`,
+// y, si es una orden, coincide exactamente con `ordenesPermitidas` y no está encadenada. El resto se rechaza y se
+// anota. Las reglas persistentes de la persona (`permissions.allow`) no se aplican gracias a `--gemini-dir`; las del
+// repo (`.gemini/`) se rechazan por la lista blanca de personalizaciones, que sigue vigente en este modo.
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { lstatSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -80,6 +86,97 @@ export interface OpcionesConectorAntigravity {
   orden?: string;
   /** Argumentos previos a `acp` (solo con `orden`). */
   argsPrefijo?: string[];
+  /**
+   * Modo escritura, explícito y acotado: solo se aprueban permisos sobre rutas dentro de `raiz` y órdenes que
+   * coincidan exactamente con `ordenesPermitidas`. Sin esta opción se rechaza todo permiso.
+   */
+  escritura?: { raiz: string; ordenesPermitidas: string[] };
+}
+
+/** Modo escritura ya validado: raíz canónica y órdenes recortadas. */
+interface Escritura {
+  raiz: string;
+  /** La raíz tal como se pidió (absoluta, normalizada), para aceptar rutas que la usen como prefijo. */
+  raizPedida: string;
+  ordenes: Set<string>;
+}
+
+/** Tipos de petición de permiso que el modo escritura puede llegar a aprobar. */
+const TIPOS_APROBABLES = new Set(['read', 'edit', 'delete', 'move', 'search', 'execute']);
+/** Campos de `rawInput` que contienen una ruta. */
+const CAMPOS_RUTA = ['path', 'file_path', 'filePath', 'absolute_path', 'absolutePath', 'target_file', 'file', 'old_path', 'new_path', 'source', 'destination'];
+/** Encadenados, redirecciones y sustituciones: una orden con cualquiera se rechaza aunque empiece por una permitida. */
+const ENCADENADO = /[;&|<>`\n\r]|\$\(/u;
+
+/** Ruta absoluta y existente de una carpeta; devuelve su ruta canónica. */
+function validarRaizEscritura(raiz: unknown): string {
+  if (typeof raiz !== 'string' || !path.isAbsolute(raiz)) {
+    throw new Error(`La raíz de escritura debe ser una ruta absoluta: ${recortar(String(raiz))}`);
+  }
+  try {
+    if (!statSync(raiz).isDirectory()) throw new Error('no es una carpeta');
+    return realpathSync(raiz);
+  } catch {
+    throw new Error(`La raíz de escritura no existe o no es una carpeta: ${recortar(raiz)}`);
+  }
+}
+
+function dentroDe(raiz: string, ruta: string): boolean {
+  const relativa = path.relative(raiz, ruta);
+  return relativa === '' || (!relativa.startsWith('..') && !path.isAbsolute(relativa));
+}
+
+/**
+ * Comprueba una ruta pedida por el agente: devuelve el motivo del rechazo o null si es aceptable. Sin seguir enlaces:
+ * cada componente existente entre la raíz y la ruta se mira con `lstat`; uno que sea un enlace simbólico la rechaza.
+ * Una ruta que aún no existe vale si su ancestro existente más cercano está dentro y no es un enlace.
+ */
+export function motivoRutaRechazada(escritura: { raiz: string; raizPedida?: string }, pedida: string): string | null {
+  if (pedida.length === 0 || pedida.includes('\0')) return 'ruta vacía o inválida';
+  if (pedida.split(/[\\/]+/u).includes('..')) return `la ruta contiene «..»: ${recortar(pedida)}`;
+  let absoluta = path.isAbsolute(pedida) ? path.normalize(pedida) : path.join(escritura.raiz, pedida);
+  const alias = escritura.raizPedida;
+  if (alias !== undefined && alias !== escritura.raiz && dentroDe(alias, absoluta)) {
+    absoluta = path.join(escritura.raiz, path.relative(alias, absoluta));
+  }
+  if (!dentroDe(escritura.raiz, absoluta)) return `la ruta queda fuera de la raíz del encargo: ${recortar(pedida)}`;
+  const partes = path.relative(escritura.raiz, absoluta).split(path.sep).filter(Boolean);
+  let actual = escritura.raiz;
+  for (const parte of partes) {
+    actual = path.join(actual, parte);
+    let datos;
+    try {
+      datos = lstatSync(actual);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      return `no se pudo comprobar la ruta: ${recortar(pedida)}`;
+    }
+    if (datos.isSymbolicLink()) return `la ruta pasa por un enlace simbólico: ${recortar(pedida)}`;
+  }
+  return null;
+}
+
+/** Rutas que declara una petición de permiso (`locations`, `content` de tipo diff y campos de ruta de `rawInput`). */
+function rutasDePermiso(llamada: Record<string, unknown>): string[] {
+  const rutas: string[] = [];
+  const nueva = (valor: unknown) => {
+    if (typeof valor === 'string') rutas.push(valor);
+  };
+  if (Array.isArray(llamada['locations'])) for (const l of llamada['locations']) if (esObjeto(l)) nueva(l['path']);
+  if (Array.isArray(llamada['content'])) for (const c of llamada['content']) if (esObjeto(c) && c['type'] === 'diff') nueva(c['path']);
+  if (esObjeto(llamada['rawInput'])) {
+    const entrada = llamada['rawInput'];
+    for (const campo of CAMPOS_RUTA) nueva(entrada[campo]);
+    if (Array.isArray(entrada['paths'])) for (const r of entrada['paths']) nueva(r);
+  }
+  return rutas;
+}
+
+/** Orden que declara una petición de permiso: `rawInput.command` (texto) o, si no, el título. */
+function ordenDePermiso(llamada: Record<string, unknown>): string | null {
+  const entrada = esObjeto(llamada['rawInput']) ? llamada['rawInput'] : {};
+  const orden = texto(entrada['command']) ?? texto(entrada['cmd']) ?? texto(llamada['title']);
+  return orden === null ? null : orden.trim();
 }
 
 class ErrorNoInstalado extends Error {
@@ -322,9 +419,11 @@ class ConectorAntigravity implements Conector {
    */
   private readonly modosSinSesion = new Map<string, string | null>();
   private cerrado = false;
+  private readonly escritura: Escritura | undefined;
 
-  constructor(opciones: OpcionesConectorAntigravity) {
+  constructor(opciones: OpcionesConectorAntigravity, escritura?: Escritura) {
     this.opciones = opciones;
+    this.escritura = escritura;
   }
 
   async catalogo(): Promise<Array<{ modelo: string; esfuerzos: string[] }>> {
@@ -364,12 +463,26 @@ class ConectorAntigravity implements Conector {
           `El repo tiene personalizaciones de Antigravity que la fábrica no admite (solo skills, rules y workflows en .agents/, sin .gemini/ ni enlaces simbólicos): ${peligrosas.join(', ')}`,
         );
       }
+      // Modo escritura: la sesión se abre exactamente en la raíz autorizada; si el encargo apunta a otra, falla cerrado.
+      let cwd = encargo.raiz;
+      if (this.escritura !== undefined) {
+        let canonica: string | null = null;
+        try {
+          canonica = realpathSync(encargo.raiz);
+        } catch {
+          canonica = null;
+        }
+        if (canonica !== this.escritura.raiz) {
+          throw new ErrorAislamiento('En modo escritura la raíz del encargo debe ser exactamente la carpeta escribible; se rechaza para no tocar otro repositorio.');
+        }
+        cwd = this.escritura.raiz;
+      }
       const imagenes = await leerImagenes(encargo.imagenes ?? []);
       proceso = await this.asegurarProceso();
       if (imagenes.length > 0 && !proceso.imagenes) throw new Error('el agente no admite imágenes');
       if (señal.aborted) return cancelada();
 
-      const sesion = await this.pedir(proceso, 'session/new', { cwd: encargo.raiz, mcpServers: [] } satisfies NewSessionRequest);
+      const sesion = await this.pedir(proceso, 'session/new', { cwd, mcpServers: [] } satisfies NewSessionRequest);
       const id = esObjeto(sesion) ? texto(sesion['sessionId']) : null;
       if (id === null || !esObjeto(sesion)) throw new Error('Antigravity no devolvió el identificador de la sesión');
       sessionId = id;
@@ -662,20 +775,55 @@ class ConectorAntigravity implements Conector {
     if (modo !== MODO_CON_PERMISOS) enCurso.alertarModo(modo ?? 'desconocido');
   }
 
-  /** Toda petición de permiso se rechaza: la opción de rechazo si la hay; si no, `cancelled`. */
+  /**
+   * Petición de permiso. Sin modo escritura se rechaza siempre: la opción de rechazo si la hay; si no, `cancelled`.
+   * Con él, se aprueba (opción «permitir una vez») solo lo que `motivoDenegacion` no objeta; lo demás se anota.
+   */
   private rechazarPermiso(params: unknown): RequestPermissionResponse {
     const p = esObjeto(params) ? params : {};
     const sessionId = texto(p['sessionId']);
     const enCurso = sessionId === null ? undefined : this.sesiones.get(sessionId);
     const llamada = esObjeto(p['toolCall']) ? p['toolCall'] : {};
     const detalle = texto(llamada['title']) ?? texto(llamada['kind']) ?? 'sin detalle';
-    enCurso?.resultado.denegaciones.push({ tipo: 'session/request_permission', detalle: recortar(`Permiso denegado: ${detalle}`) });
     const opciones = Array.isArray(p['options']) ? p['options'].filter(esObjeto) : [];
+    let motivo: string | null = null;
+    if (this.escritura !== undefined) {
+      motivo = enCurso === undefined ? 'sesión desconocida' : this.motivoDenegacion(this.escritura, llamada);
+      if (motivo === null) {
+        const permitir = opciones.find((o) => o['kind'] === 'allow_once' && typeof o['optionId'] === 'string');
+        if (permitir) return { outcome: { outcome: 'selected', optionId: permitir['optionId'] as string } };
+        motivo = 'no hay opción de permitir una vez';
+      }
+    }
+    enCurso?.resultado.denegaciones.push({
+      tipo: 'session/request_permission',
+      detalle: recortar(`Permiso denegado: ${detalle}${motivo === null ? '' : ` (${motivo})`}`),
+    });
     for (const tipo of ['reject_once', 'reject_always']) {
       const opcion = opciones.find((o) => o['kind'] === tipo && typeof o['optionId'] === 'string');
       if (opcion) return { outcome: { outcome: 'selected', optionId: opcion['optionId'] as string } };
     }
     return { outcome: { outcome: 'cancelled' } };
+  }
+
+  /** Motivo por el que el modo escritura rechaza la petición, o null si se puede aprobar. */
+  private motivoDenegacion(escritura: Escritura, llamada: Record<string, unknown>): string | null {
+    const tipo = texto(llamada['kind']);
+    if (tipo === null || !TIPOS_APROBABLES.has(tipo)) return `tipo de petición no admitido: ${tipo ?? 'desconocido'}`;
+    const rutas = rutasDePermiso(llamada);
+    for (const ruta of rutas) {
+      const motivo = motivoRutaRechazada(escritura, ruta);
+      if (motivo !== null) return motivo;
+    }
+    if (tipo === 'execute') {
+      const orden = ordenDePermiso(llamada);
+      if (orden === null || orden === '') return 'orden no reconocible';
+      if (ENCADENADO.test(orden)) return `orden encadenada o con redirección: ${recortar(orden)}`;
+      if (!escritura.ordenes.has(orden)) return `orden no permitida: ${recortar(orden)}`;
+      return null;
+    }
+    if (rutas.length === 0) return 'la petición no declara ninguna ruta';
+    return null;
   }
 
   /** Cualquier otra petición del agente (escribir archivos, terminales, preguntas...) se contesta con error. */
@@ -688,5 +836,13 @@ class ConectorAntigravity implements Conector {
 }
 
 export async function crearConectorAntigravity(opciones: OpcionesConectorAntigravity = {}): Promise<Conector> {
-  return new ConectorAntigravity(opciones);
+  let escritura: Escritura | undefined;
+  if (opciones.escritura !== undefined) {
+    escritura = {
+      raiz: validarRaizEscritura(opciones.escritura.raiz),
+      raizPedida: path.normalize(opciones.escritura.raiz),
+      ordenes: new Set(opciones.escritura.ordenesPermitidas.map((o) => o.trim()).filter((o) => o !== '' && !ENCADENADO.test(o))),
+    };
+  }
+  return new ConectorAntigravity(opciones, escritura);
 }

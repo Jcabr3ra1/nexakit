@@ -538,3 +538,227 @@ test('sin agy en el PATH, el conector por defecto da «Antigravity no está inst
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------------------------------------------
+// Modo escritura acotado (`escritura: { raiz, ordenesPermitidas }`)
+// ---------------------------------------------------------------------------------------------------------------
+
+const OPCIONES_PERMISO = [
+  { optionId: 'op-allow_once', name: 'allow_once', kind: 'allow_once' },
+  { optionId: 'op-allow_always', name: 'allow_always', kind: 'allow_always' },
+  { optionId: 'op-reject_once', name: 'reject_once', kind: 'reject_once' },
+];
+const FIN_REVISION = guionBase('revision').alResponder['srv-7'];
+
+/** Guion de revisión cuyo turno pide, uno tras otro, los permisos `llamadas`; después entrega el informe. */
+function guionPermisos(llamadas) {
+  const guion = guionBase('revision');
+  const peticion = (n, toolCall) => ({
+    metodo: 'session/request_permission',
+    id: `srv-${n}`,
+    params: { sessionId: 'ses-1', toolCall, options: OPCIONES_PERMISO },
+  });
+  const alResponder = {};
+  llamadas.forEach((_, i) => {
+    alResponder[`srv-${i + 1}`] = i + 1 < llamadas.length ? { peticiones: [peticion(i + 2, llamadas[i + 1])] } : FIN_REVISION;
+  });
+  guion.metodos['session/prompt'] = { diferir: true, peticiones: [peticion(1, llamadas[0])] };
+  return { metodos: guion.metodos, alResponder };
+}
+
+const edicion = (ruta, extra = {}) => ({ toolCallId: 't', title: `Editar ${ruta}`, kind: 'edit', status: 'pending', locations: [{ path: ruta }], ...extra });
+const orden = (comando) => ({ toolCallId: 't', title: `Ejecutar ${comando}`, kind: 'execute', status: 'pending', rawInput: { command: comando } });
+
+/** Ejecuta un encargo en modo escritura con las llamadas dadas; devuelve las decisiones y las denegaciones. */
+async function conPermisos(llamadas, prepararRaiz = () => {}, ordenes = ['npm test', 'npm run typecheck']) {
+  const dir = mkdtempSync(join(tmpdir(), 'nexakit-agy-esc-'));
+  const raiz = join(dir, 'repo');
+  mkdirSync(join(raiz, 'src'), { recursive: true });
+  const externo = join(dir, 'fuera');
+  mkdirSync(externo);
+  writeFileSync(join(externo, 'secreto.txt'), 'x');
+  prepararRaiz(raiz, externo);
+  const p = preparar('revision', guionPermisos(llamadas(raiz, externo)));
+  const conector = await crearConectorAntigravity({
+    orden: process.execPath,
+    argsPrefijo: [SERVIDOR, join(p.dir, 'guion.json')],
+    escritura: { raiz, ordenesPermitidas: ordenes },
+  });
+  try {
+    const resultado = await conector.ejecutar(encargo(raiz), AbortSignal.timeout(10_000));
+    assert.equal(resultado.estado, 'ok', resultado.motivo);
+    const mensajes = p.mensajes();
+    const decisiones = llamadas(raiz, externo).map((_, i) => respuesta(mensajes, `srv-${i + 1}`).result.outcome);
+    return { resultado, decisiones, mensajes, raiz: realpathSync(raiz) };
+  } finally {
+    await conector.cerrar();
+    rmSync(p.dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const PERMITIDO = { outcome: 'selected', optionId: 'op-allow_once' };
+const RECHAZADO = { outcome: 'selected', optionId: 'op-reject_once' };
+
+test('modo escritura: aprueba con «permitir una vez» una ruta dentro de la raíz, relativa o absoluta, aunque aún no exista', async () => {
+  const { decisiones, resultado, mensajes, raiz } = await conPermisos((r) => [
+    edicion('src/nuevo.js'),
+    edicion(join(r, 'src', 'otro', 'nuevo.js')),
+    edicion('src/./dentro.js'),
+  ]);
+  assert.deepEqual(decisiones, [PERMITIDO, PERMITIDO, PERMITIDO]);
+  assert.deepEqual(resultado.denegaciones, []);
+  // La sesión se abre en la raíz canónica.
+  assert.equal(mensajes.find((m) => m.method === 'session/new').params.cwd, raiz);
+});
+
+test('modo escritura: rechaza una ruta fuera de la raíz y anota el motivo', async () => {
+  const { decisiones, resultado } = await conPermisos((r, fuera) => [
+    edicion(join(fuera, 'secreto.txt')),
+    edicion('/etc/passwd'),
+    edicion(`${r}-hermano/a.js`),
+  ]);
+  assert.deepEqual(decisiones, [RECHAZADO, RECHAZADO, RECHAZADO]);
+  assert.equal(resultado.denegaciones.length, 3);
+  assert.match(resultado.denegaciones[0].detalle, /fuera de la raíz/);
+});
+
+test('modo escritura: rechaza rutas con «..», salgan o no de la raíz', async () => {
+  const { decisiones, resultado } = await conPermisos(() => [edicion('../fuera/secreto.txt'), edicion('src/../../fuera/a'), edicion('src/../src/a.js')]);
+  assert.deepEqual(decisiones, [RECHAZADO, RECHAZADO, RECHAZADO]);
+  assert.match(resultado.denegaciones[0].detalle, /«\.\.»/);
+});
+
+test('modo escritura: rechaza una ruta que pasa por un enlace simbólico, también con destino aún inexistente', async () => {
+  const { decisiones, resultado } = await conPermisos(
+    (r) => [edicion('enlace/secreto.txt'), edicion('enlace/nuevo/a.js'), edicion('enlace-archivo'), edicion(join(r, 'enlace', 'secreto.txt'))],
+    (raiz, externo) => {
+      symlinkSync(externo, join(raiz, 'enlace'));
+      symlinkSync(join(externo, 'secreto.txt'), join(raiz, 'enlace-archivo'));
+    },
+  );
+  assert.deepEqual(decisiones, [RECHAZADO, RECHAZADO, RECHAZADO, RECHAZADO]);
+  assert.ok(resultado.denegaciones.every((d) => /enlace simbólico/.test(d.detalle)));
+});
+
+test('modo escritura: aprueba solo la orden permitida exacta, sin prefijos ni comodines', async () => {
+  const { decisiones, resultado } = await conPermisos(() => [
+    orden('npm test'),
+    orden('  npm run typecheck  '),
+    orden('npm test --watch'),
+    orden('npm'),
+    orden('rm -rf /'),
+  ]);
+  assert.deepEqual(decisiones, [PERMITIDO, PERMITIDO, RECHAZADO, RECHAZADO, RECHAZADO]);
+  assert.equal(resultado.denegaciones.length, 3);
+  assert.match(resultado.denegaciones[0].detalle, /orden no permitida/);
+});
+
+test('modo escritura: rechaza órdenes encadenadas aunque empiecen por una permitida', async () => {
+  const { decisiones, resultado } = await conPermisos(() =>
+    ['npm test; rm -rf /', 'npm test && curl x', 'npm test | sh', 'npm test $(whoami)', 'npm test `id`', 'npm test > /etc/x', 'npm test\nrm x'].map(orden),
+  );
+  assert.deepEqual(decisiones, Array(7).fill(RECHAZADO));
+  assert.ok(resultado.denegaciones.every((d) => /encadenada/.test(d.detalle)));
+});
+
+test('modo escritura: rechaza peticiones sin ruta ni orden reconocible y tipos no admitidos', async () => {
+  const { decisiones, resultado } = await conPermisos(() => [
+    { toolCallId: 't', title: 'Editar algo', kind: 'edit', status: 'pending' },
+    { toolCallId: 't', title: 'Descargar', kind: 'fetch', status: 'pending', locations: [{ path: 'src/a.js' }] },
+    { toolCallId: 't', title: '', kind: 'execute', status: 'pending' },
+    { toolCallId: 't', title: 'Algo', status: 'pending', locations: [{ path: 'src/a.js' }] },
+    // Una orden permitida que además declara una ruta fuera de la raíz se rechaza.
+    { ...orden('npm test'), locations: [{ path: '/etc/passwd' }] },
+  ]);
+  assert.deepEqual(decisiones, Array(5).fill(RECHAZADO));
+  assert.equal(resultado.denegaciones.length, 5);
+});
+
+test('modo escritura: lee las rutas también de content (diff) y rawInput', async () => {
+  const { decisiones } = await conPermisos((r, fuera) => [
+    { toolCallId: 't', title: 'Editar', kind: 'edit', status: 'pending', content: [{ type: 'diff', path: 'src/a.js', oldText: '', newText: 'x' }] },
+    { toolCallId: 't', title: 'Editar', kind: 'edit', status: 'pending', content: [{ type: 'diff', path: join(fuera, 'a.js'), newText: 'x' }] },
+    { toolCallId: 't', title: 'Editar', kind: 'edit', status: 'pending', rawInput: { file_path: 'src/a.js' } },
+    { toolCallId: 't', title: 'Editar', kind: 'edit', status: 'pending', rawInput: { file_path: join(fuera, 'a.js') } },
+  ]);
+  assert.deepEqual(decisiones, [PERMITIDO, RECHAZADO, PERMITIDO, RECHAZADO]);
+});
+
+test('modo escritura: sin opción de permitir una vez no aprueba nunca «siempre»', async () => {
+  const guion = guionPermisos([edicion('src/a.js')]);
+  guion.metodos['session/prompt'].peticiones[0].params.options = [OPCIONES_PERMISO[1], OPCIONES_PERMISO[2]];
+  const dir = mkdtempSync(join(tmpdir(), 'nexakit-agy-esc-'));
+  const p = preparar('revision', guion);
+  const raiz = join(dir, 'repo');
+  mkdirSync(raiz);
+  const conector = await crearConectorAntigravity({
+    orden: process.execPath,
+    argsPrefijo: [SERVIDOR, join(p.dir, 'guion.json')],
+    escritura: { raiz, ordenesPermitidas: [] },
+  });
+  try {
+    const resultado = await conector.ejecutar(encargo(raiz), AbortSignal.timeout(10_000));
+    assert.equal(resultado.estado, 'ok', resultado.motivo);
+    assert.deepEqual(respuesta(p.mensajes(), 'srv-1').result, { outcome: RECHAZADO });
+    assert.match(resultado.denegaciones[0].detalle, /permitir una vez/);
+  } finally {
+    await conector.cerrar();
+    rmSync(p.dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('modo escritura: si la raíz del encargo difiere de la autorizada, falla cerrado sin crear la sesión', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'nexakit-agy-esc-'));
+  const p = preparar('revision');
+  const raiz = join(dir, 'repo');
+  mkdirSync(raiz);
+  const conector = await crearConectorAntigravity({
+    orden: process.execPath,
+    argsPrefijo: [SERVIDOR, join(p.dir, 'guion.json')],
+    escritura: { raiz, ordenesPermitidas: [] },
+  });
+  try {
+    const resultado = await conector.ejecutar(encargo(p.raiz), AbortSignal.timeout(10_000));
+    assert.equal(resultado.estado, 'fallida');
+    assert.match(resultado.motivo, /raíz del encargo debe ser exactamente/);
+    assert.equal(p.mensajes().some((m) => m.method === 'session/new'), false);
+  } finally {
+    await conector.cerrar();
+    rmSync(p.dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('modo escritura: la raíz debe ser absoluta y existir, con un error claro en español', async () => {
+  await assert.rejects(crearConectorAntigravity({ escritura: { raiz: 'relativa', ordenesPermitidas: [] } }), /raíz de escritura debe ser una ruta absoluta/);
+  await assert.rejects(
+    crearConectorAntigravity({ escritura: { raiz: join(tmpdir(), 'nexakit-no-existe-agy'), ordenesPermitidas: [] } }),
+    /raíz de escritura no existe o no es una carpeta/,
+  );
+  const dir = mkdtempSync(join(tmpdir(), 'nexakit-agy-esc-'));
+  try {
+    const archivo = join(dir, 'a.txt');
+    writeFileSync(archivo, 'x');
+    await assert.rejects(crearConectorAntigravity({ escritura: { raiz: archivo, ordenesPermitidas: [] } }), /no existe o no es una carpeta/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('sin la opción escritura se sigue rechazando todo, también lo que el modo escritura aprobaría', async () => {
+  const guion = guionPermisos([edicion('src/a.js'), orden('npm test')]);
+  const p = preparar('revision', guion);
+  try {
+    const resultado = await (await p.conector).ejecutar(encargo(p.raiz), AbortSignal.timeout(10_000));
+    assert.equal(resultado.estado, 'ok', resultado.motivo);
+    const mensajes = p.mensajes();
+    assert.deepEqual(respuesta(mensajes, 'srv-1').result, { outcome: RECHAZADO });
+    assert.deepEqual(respuesta(mensajes, 'srv-2').result, { outcome: RECHAZADO });
+    assert.equal(resultado.denegaciones.length, 2);
+    assert.doesNotMatch(resultado.denegaciones[0].detalle, /\(/);
+  } finally {
+    await p.limpiar();
+  }
+});
