@@ -103,10 +103,38 @@ interface Escritura {
 
 /** Tipos de petición de permiso que el modo escritura puede llegar a aprobar. */
 const TIPOS_APROBABLES = new Set(['read', 'edit', 'delete', 'move', 'search', 'execute']);
-/** Campos de `rawInput` que contienen una ruta. */
-const CAMPOS_RUTA = ['path', 'file_path', 'filePath', 'absolute_path', 'absolutePath', 'target_file', 'file', 'old_path', 'new_path', 'source', 'destination'];
+/**
+ * Interruptor interno: mientras no se verifique qué confina el `--sandbox` de `agy`, el modo escritura no aprueba
+ * ninguna orden (una orden permitida, como `npm test`, ejecuta código del worktree con los permisos de la persona).
+ * Con `true` se reactiva la lista `ordenesPermitidas` (coincidencia exacta).
+ */
+const ORDENES_ACTIVAS = false;
+const MOTIVO_ORDENES_DESACTIVADAS = 'órdenes desactivadas en Antigravity hasta verificar su sandbox';
 /** Encadenados, redirecciones y sustituciones: una orden con cualquiera se rechaza aunque empiece por una permitida. */
 const ENCADENADO = /[;&|<>`\n\r]|\$\(/u;
+/** Componentes que el agente no puede escribir dentro de la raíz (personalización, hooks y metadatos de git). */
+const COMPONENTES_PROTEGIDOS = new Set(['.git', '.gemini', '.agents', '.agent', '_agents', '_agent', '.claude', '.codex', '.nexakit', '.vscode', '.husky']);
+
+/** Claves de `rawInput` que contienen una ruta (nombres normalizados: minúsculas y sin `_` ni `-`). */
+const CLAVES_RUTA = new Set(['path', 'filepath', 'absolutepath', 'targetfile', 'file', 'directory', 'directorypath', 'dir', 'searchpath', 'oldpath', 'newpath', 'from', 'to', 'source', 'destination', 'dest']);
+const CLAVES_TEXTO = ['content', 'contents', 'text', 'newtext', 'oldtext', 'newstring', 'oldstring', 'replacement', 'diff', 'patch', 'description', 'instruction'];
+const CLAVES_LECTURA = ['offset', 'limit', 'line', 'startline', 'endline'];
+const CLAVES_BUSQUEDA = ['query', 'pattern', 'glob', 'include', 'exclude', 'regex', 'casesensitive'];
+/** Lista cerrada de claves de `rawInput` admitidas por tipo de petición; cualquier otra rechaza la petición. */
+const CLAVES_ADMITIDAS: Record<string, Set<string>> = {
+  edit: new Set([...CLAVES_RUTA, ...CLAVES_TEXTO]),
+  delete: new Set(CLAVES_RUTA),
+  move: new Set(CLAVES_RUTA),
+  read: new Set([...CLAVES_RUTA, ...CLAVES_LECTURA]),
+  search: new Set([...CLAVES_RUTA, ...CLAVES_BUSQUEDA]),
+  execute: new Set(['command', 'cwd']),
+};
+/** Tipos que escriben: sus rutas no pueden tocar los componentes protegidos. */
+const TIPOS_ESCRITURA = new Set(['edit', 'delete', 'move']);
+
+function normalizarClave(clave: string): string {
+  return clave.toLowerCase().replace(/[_-]/gu, '');
+}
 
 /** Ruta absoluta y existente de una carpeta; devuelve su ruta canónica. */
 function validarRaizEscritura(raiz: unknown): string {
@@ -131,8 +159,15 @@ function dentroDe(raiz: string, ruta: string): boolean {
  * cada componente existente entre la raíz y la ruta se mira con `lstat`; uno que sea un enlace simbólico la rechaza.
  * Una ruta que aún no existe vale si su ancestro existente más cercano está dentro y no es un enlace.
  */
-export function motivoRutaRechazada(escritura: { raiz: string; raizPedida?: string }, pedida: string): string | null {
+export function motivoRutaRechazada(escritura: { raiz: string; raizPedida?: string }, pedida: string, escribe = false): string | null {
   if (pedida.length === 0 || pedida.includes('\0')) return 'ruta vacía o inválida';
+  // `~`, variables y URIs los expandiría la herramienta del agente, no el sistema de archivos: no se aceptan.
+  if (pedida.startsWith('~') || pedida.includes('$') || pedida.includes('%')) return `ruta con expansión de ~ o de variables: ${recortar(pedida)}`;
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:/u.test(pedida)) {
+    const unidad = process.platform === 'win32' && /^[A-Za-z]:[\\/]/u.test(pedida);
+    if (!unidad) return `ruta con esquema o unidad no admitida: ${recortar(pedida)}`;
+  }
+  if (process.platform === 'win32' && pedida.slice(2).includes(':')) return `ruta con «:» no admitido: ${recortar(pedida)}`;
   if (pedida.split(/[\\/]+/u).includes('..')) return `la ruta contiene «..»: ${recortar(pedida)}`;
   let absoluta = path.isAbsolute(pedida) ? path.normalize(pedida) : path.join(escritura.raiz, pedida);
   const alias = escritura.raizPedida;
@@ -141,6 +176,10 @@ export function motivoRutaRechazada(escritura: { raiz: string; raizPedida?: stri
   }
   if (!dentroDe(escritura.raiz, absoluta)) return `la ruta queda fuera de la raíz del encargo: ${recortar(pedida)}`;
   const partes = path.relative(escritura.raiz, absoluta).split(path.sep).filter(Boolean);
+  if (escribe) {
+    const protegida = partes.find((parte) => COMPONENTES_PROTEGIDOS.has(parte.toLowerCase()));
+    if (protegida !== undefined) return `escritura en un componente protegido «${protegida}»: ${recortar(pedida)}`;
+  }
   let actual = escritura.raiz;
   for (const parte of partes) {
     actual = path.join(actual, parte);
@@ -156,27 +195,91 @@ export function motivoRutaRechazada(escritura: { raiz: string; raizPedida?: stri
   return null;
 }
 
-/** Rutas que declara una petición de permiso (`locations`, `content` de tipo diff y campos de ruta de `rawInput`). */
-function rutasDePermiso(llamada: Record<string, unknown>): string[] {
-  const rutas: string[] = [];
-  const nueva = (valor: unknown) => {
-    if (typeof valor === 'string') rutas.push(valor);
-  };
-  if (Array.isArray(llamada['locations'])) for (const l of llamada['locations']) if (esObjeto(l)) nueva(l['path']);
-  if (Array.isArray(llamada['content'])) for (const c of llamada['content']) if (esObjeto(c) && c['type'] === 'diff') nueva(c['path']);
-  if (esObjeto(llamada['rawInput'])) {
-    const entrada = llamada['rawInput'];
-    for (const campo of CAMPOS_RUTA) nueva(entrada[campo]);
-    if (Array.isArray(entrada['paths'])) for (const r of entrada['paths']) nueva(r);
-  }
-  return rutas;
+/** Rutas y órdenes que declara una petición de permiso, con el motivo de rechazo si algo no se reconoce. */
+interface PeticionAnalizada {
+  rutas: string[];
+  orden: string | null;
+  cwd: string | null;
+  motivo: string | null;
 }
 
-/** Orden que declara una petición de permiso: `rawInput.command` (texto) o, si no, el título. */
-function ordenDePermiso(llamada: Record<string, unknown>): string | null {
-  const entrada = esObjeto(llamada['rawInput']) ? llamada['rawInput'] : {};
-  const orden = texto(entrada['command']) ?? texto(entrada['cmd']) ?? texto(llamada['title']);
-  return orden === null ? null : orden.trim();
+/**
+ * Lee la petición con una lista cerrada de claves por tipo: una clave desconocida, un valor de ruta que no es texto
+ * o una orden que no es un texto de `rawInput.command` rechazan la petición (nunca se usa el título).
+ */
+function analizarPeticion(tipo: string, llamada: Record<string, unknown>): PeticionAnalizada {
+  const resultado: PeticionAnalizada = { rutas: [], orden: null, cwd: null, motivo: null };
+  const rechazo = (motivo: string): PeticionAnalizada => ({ ...resultado, motivo });
+  if (Array.isArray(llamada['locations'])) {
+    for (const l of llamada['locations']) {
+      if (!esObjeto(l) || typeof l['path'] !== 'string') return rechazo('ubicación sin ruta de texto');
+      resultado.rutas.push(l['path']);
+    }
+  }
+  if (Array.isArray(llamada['content'])) {
+    for (const c of llamada['content']) {
+      if (esObjeto(c) && c['type'] === 'diff') {
+        if (typeof c['path'] !== 'string') return rechazo('diff sin ruta de texto');
+        resultado.rutas.push(c['path']);
+      }
+    }
+  }
+  const crudo = llamada['rawInput'];
+  if (crudo === undefined || crudo === null) return resultado;
+  if (!esObjeto(crudo)) return rechazo('rawInput no es un objeto');
+  const admitidas = CLAVES_ADMITIDAS[tipo] ?? new Set<string>();
+  for (const [clave, valor] of Object.entries(crudo)) {
+    const normal = normalizarClave(clave);
+    if (!admitidas.has(normal)) return rechazo(`campo no reconocido: ${recortar(clave)}`);
+    if (tipo === 'execute') {
+      if (typeof valor !== 'string') return rechazo(`el campo ${clave} no es un texto`);
+      if (normal === 'command') resultado.orden = valor.trim();
+      else resultado.cwd = valor;
+    } else if (CLAVES_RUTA.has(normal)) {
+      if (typeof valor !== 'string') return rechazo(`el campo ${clave} no es un texto`);
+      resultado.rutas.push(valor);
+    }
+  }
+  return resultado;
+}
+
+/**
+ * Motivo por el que el modo escritura rechaza una petición de permiso, o null si se puede aprobar. Función pura
+ * (`ordenesActivas` solo se cambia en pruebas).
+ */
+export function motivoPermisoRechazado(
+  escritura: { raiz: string; raizPedida?: string; ordenes: ReadonlySet<string> },
+  llamada: Record<string, unknown>,
+  ordenesActivas: boolean = ORDENES_ACTIVAS,
+): string | null {
+  const tipo = texto(llamada['kind']);
+  if (tipo === null || !TIPOS_APROBABLES.has(tipo)) return `tipo de petición no admitido: ${tipo ?? 'desconocido'}`;
+  if (tipo === 'execute' && !ordenesActivas) return MOTIVO_ORDENES_DESACTIVADAS;
+  const peticion = analizarPeticion(tipo, llamada);
+  if (peticion.motivo !== null) return peticion.motivo;
+  const escribe = TIPOS_ESCRITURA.has(tipo);
+  for (const ruta of peticion.rutas) {
+    const motivo = motivoRutaRechazada(escritura, ruta, escribe);
+    if (motivo !== null) return motivo;
+  }
+  if (tipo === 'execute') {
+    const orden = peticion.orden;
+    if (orden === null || orden === '') return 'orden no reconocible';
+    if (ENCADENADO.test(orden)) return `orden encadenada o con redirección: ${recortar(orden)}`;
+    if (!escritura.ordenes.has(orden)) return `orden no permitida: ${recortar(orden)}`;
+    if (peticion.cwd !== null) {
+      let canonica: string | null = null;
+      try {
+        canonica = path.isAbsolute(peticion.cwd) ? realpathSync(peticion.cwd) : null;
+      } catch {
+        canonica = null;
+      }
+      if (canonica !== escritura.raiz) return `el directorio de la orden no es la raíz del encargo: ${recortar(peticion.cwd)}`;
+    }
+    return null;
+  }
+  if (peticion.rutas.length === 0) return 'la petición no declara ninguna ruta';
+  return null;
 }
 
 class ErrorNoInstalado extends Error {
@@ -450,6 +553,7 @@ class ConectorAntigravity implements Conector {
 
   async ejecutar(encargo: Encargo, señal: AbortSignal, alProgreso?: AlProgreso): Promise<ResultadoEstacion> {
     const resultado: ResultadoEstacion = { estado: 'fallida', crudo: '', modeloInformado: null, tokens: null, denegaciones: [] };
+    if (this.escritura !== undefined) resultado.aprobaciones = [];
     const cancelada = (): ResultadoEstacion => ({ ...resultado, estado: 'cancelada', motivo: CANCELADA });
     if (señal.aborted) return cancelada();
     let sessionId: string | null = null;
@@ -788,10 +892,13 @@ class ConectorAntigravity implements Conector {
     const opciones = Array.isArray(p['options']) ? p['options'].filter(esObjeto) : [];
     let motivo: string | null = null;
     if (this.escritura !== undefined) {
-      motivo = enCurso === undefined ? 'sesión desconocida' : this.motivoDenegacion(this.escritura, llamada);
+      motivo = enCurso === undefined ? 'sesión desconocida' : motivoPermisoRechazado(this.escritura, llamada);
       if (motivo === null) {
         const permitir = opciones.find((o) => o['kind'] === 'allow_once' && typeof o['optionId'] === 'string');
-        if (permitir) return { outcome: { outcome: 'selected', optionId: permitir['optionId'] as string } };
+        if (permitir) {
+          enCurso?.resultado.aprobaciones?.push({ tipo: 'session/request_permission', detalle: recortar(`Permiso aprobado: ${detalle}`) });
+          return { outcome: { outcome: 'selected', optionId: permitir['optionId'] as string } };
+        }
         motivo = 'no hay opción de permitir una vez';
       }
     }
@@ -804,26 +911,6 @@ class ConectorAntigravity implements Conector {
       if (opcion) return { outcome: { outcome: 'selected', optionId: opcion['optionId'] as string } };
     }
     return { outcome: { outcome: 'cancelled' } };
-  }
-
-  /** Motivo por el que el modo escritura rechaza la petición, o null si se puede aprobar. */
-  private motivoDenegacion(escritura: Escritura, llamada: Record<string, unknown>): string | null {
-    const tipo = texto(llamada['kind']);
-    if (tipo === null || !TIPOS_APROBABLES.has(tipo)) return `tipo de petición no admitido: ${tipo ?? 'desconocido'}`;
-    const rutas = rutasDePermiso(llamada);
-    for (const ruta of rutas) {
-      const motivo = motivoRutaRechazada(escritura, ruta);
-      if (motivo !== null) return motivo;
-    }
-    if (tipo === 'execute') {
-      const orden = ordenDePermiso(llamada);
-      if (orden === null || orden === '') return 'orden no reconocible';
-      if (ENCADENADO.test(orden)) return `orden encadenada o con redirección: ${recortar(orden)}`;
-      if (!escritura.ordenes.has(orden)) return `orden no permitida: ${recortar(orden)}`;
-      return null;
-    }
-    if (rutas.length === 0) return 'la petición no declara ninguna ruta';
-    return null;
   }
 
   /** Cualquier otra petición del agente (escribir archivos, terminales, preguntas...) se contesta con error. */
