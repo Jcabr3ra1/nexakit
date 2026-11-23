@@ -736,6 +736,33 @@ test('I1: rechaza rutas con ~, variables, esquemas de URI y unidades', () => {
   });
 });
 
+test('corrección 2: delete, edit y move sobre la raíz misma se rechazan; leerla vale', () => {
+  conRaiz((raiz, e) => {
+    for (const ruta of ['.', './', raiz, `${raiz}/`]) {
+      for (const kind of ['delete', 'edit']) assert.match(motivo(e, { ...edicion(ruta), kind }), /raíz del encargo/, `${kind} ${ruta}`);
+    }
+    assert.match(motivo(e, { toolCallId: 't', title: 'm', kind: 'move', locations: [{ path: 'src/a.js' }], rawInput: { from: 'src/a.js', to: '.' } }), /raíz del encargo/);
+    assert.equal(motivo(e, { ...edicion('.'), kind: 'read' }), null);
+  });
+});
+
+test('corrección 2: patch y diff ya no son claves de texto admitidas en edit', () => {
+  conRaiz((raiz, e) => {
+    for (const clave of ['patch', 'diff', 'Patch']) {
+      assert.match(motivo(e, { ...edicion('src/a.js'), rawInput: { path: 'src/a.js', [clave]: 'x' } }), /campo no reconocido/, clave);
+    }
+  });
+});
+
+test('corrección 2: puntos y espacios finales en componentes protegidos, y metacaracteres de glob', () => {
+  conRaiz((raiz, e) => {
+    for (const ruta of ['.git./x', '.git /x', '.GIT.. /x', 'src/.agents. /x']) assert.match(motivo(e, edicion(ruta)), /componente protegido/, ruta);
+    for (const ruta of ['src/*.js', 'src/a?.js', 'src/[ab].js', '*']) assert.match(motivo(e, edicion(ruta)), /glob/, ruta);
+    assert.match(motivo(e, { ...edicion('src/*'), kind: 'delete' }), /glob/);
+    assert.equal(motivo(e, { ...edicion('src/*.js'), kind: 'read' }), null);
+  });
+});
+
 test('I2: rechaza escrituras en componentes protegidos, sin distinguir mayúsculas, pero deja leer', () => {
   conRaiz((raiz, e) => {
     for (const comp of ['.git', '.gemini', '.agents', '.claude', '.codex', '.nexakit', '.vscode', '.husky', '.GIT', '.Agents']) {

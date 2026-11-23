@@ -117,7 +117,7 @@ const COMPONENTES_PROTEGIDOS = new Set(['.git', '.gemini', '.agents', '.agent', 
 
 /** Claves de `rawInput` que contienen una ruta (nombres normalizados: minúsculas y sin `_` ni `-`). */
 const CLAVES_RUTA = new Set(['path', 'filepath', 'absolutepath', 'targetfile', 'file', 'directory', 'directorypath', 'dir', 'searchpath', 'oldpath', 'newpath', 'from', 'to', 'source', 'destination', 'dest']);
-const CLAVES_TEXTO = ['content', 'contents', 'text', 'newtext', 'oldtext', 'newstring', 'oldstring', 'replacement', 'diff', 'patch', 'description', 'instruction'];
+const CLAVES_TEXTO = ['content', 'contents', 'text', 'newtext', 'oldtext', 'newstring', 'oldstring', 'replacement', 'description', 'instruction'];
 const CLAVES_LECTURA = ['offset', 'limit', 'line', 'startline', 'endline'];
 const CLAVES_BUSQUEDA = ['query', 'pattern', 'glob', 'include', 'exclude', 'regex', 'casesensitive'];
 /** Lista cerrada de claves de `rawInput` admitidas por tipo de petición; cualquier otra rechaza la petición. */
@@ -177,7 +177,10 @@ export function motivoRutaRechazada(escritura: { raiz: string; raizPedida?: stri
   if (!dentroDe(escritura.raiz, absoluta)) return `la ruta queda fuera de la raíz del encargo: ${recortar(pedida)}`;
   const partes = path.relative(escritura.raiz, absoluta).split(path.sep).filter(Boolean);
   if (escribe) {
-    const protegida = partes.find((parte) => COMPONENTES_PROTEGIDOS.has(parte.toLowerCase()));
+    if (partes.length === 0) return `la ruta es la raíz del encargo: ${recortar(pedida)}`;
+    const glob = partes.find((parte) => /[*?[]/u.test(parte));
+    if (glob !== undefined) return `componente con metacaracteres de glob «${glob}»: ${recortar(pedida)}`;
+    const protegida = partes.find((parte) => COMPONENTES_PROTEGIDOS.has(parte.toLowerCase().replace(/[. ]+$/u, '')));
     if (protegida !== undefined) return `escritura en un componente protegido «${protegida}»: ${recortar(pedida)}`;
   }
   let actual = escritura.raiz;
