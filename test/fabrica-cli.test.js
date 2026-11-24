@@ -503,18 +503,41 @@ test('estado, resultado y cancelar consultan un recorrido por su id', async () =
   assert.match(inexistente.err, /No hay ningún recorrido/u);
 });
 
-test('sin argumentos o con argumentos inválidos, la ayuda en español sale por stderr con código 2', async () => {
+test('sin argumentos sale la ayuda completa por stderr con código 2', async () => {
   const e = escenario();
-  for (const argv of [[], ['otra'], ['proponer'], ['proponer', '--base'], ['proponer', '--base', 'main', '--raro'], ['lanzar'], ['estado'], ['cancelar', '--id', 'x', 'y']]) {
-    const { codigo, out, err } = await cli(argv, e);
-    assert.equal(codigo, 2, JSON.stringify(argv));
-    assert.equal(out, '');
-    assert.match(err, /Uso: nexakit fabrica proponer --base <rama>/u, JSON.stringify(argv));
-    assert.match(err, /Códigos de salida: 0 bien, 1 fallo de estación/u);
-  }
+  const { codigo, out, err } = await cli([], e);
+  assert.equal(codigo, 2);
+  assert.equal(out, '');
+  assert.match(err, /Uso: nexakit fabrica proponer --base <rama>/u);
+  assert.match(err, /Códigos de salida: 0 bien, 1 fallo de estación/u);
   const ayuda = await cli(['--help'], e);
   assert.equal(ayuda.codigo, 0);
   assert.match(ayuda.out, /Uso: nexakit fabrica/u);
+  assert.match(ayuda.out, /Códigos de salida/u);
+});
+
+test('un error de uso imprime el mensaje, la línea de uso de la orden y cómo ver la ayuda, no toda la ayuda', async () => {
+  const e = escenario();
+  const casos = [
+    [['otra'], /Orden desconocida: otra/u, /Uso: nexakit fabrica proponer\|lanzar/u],
+    [['proponer'], /--base/u, /^Uso: nexakit fabrica proponer --base <rama>/mu],
+    [['proponer', '--base'], /./u, /^Uso: nexakit fabrica proponer --base <rama>/mu],
+    [['proponer', '--base', 'main', '--raro'], /proponer/u, /^Uso: nexakit fabrica proponer --base <rama>/mu],
+    [['lanzar'], /--huella/u, /^Uso: nexakit fabrica lanzar --huella/mu],
+    [['estado'], /--id/u, /^Uso: nexakit fabrica estado --id/mu],
+    [['cancelar', '--id', 'x', 'y'], /./u, /^Uso: nexakit fabrica cancelar --id/mu],
+    [['encargar', '--raro'], /encargar/u, /^Uso: nexakit encargar --ia/mu],
+  ];
+  for (const [argv, mensaje, uso] of casos) {
+    const { codigo, out, err } = await cli(argv, e);
+    assert.equal(codigo, 2, JSON.stringify(argv));
+    assert.equal(out, '');
+    assert.match(err, mensaje, JSON.stringify(argv));
+    assert.match(err, uso, JSON.stringify(argv));
+    assert.match(err, /Usa --help para ver la ayuda completa\./u);
+    assert.doesNotMatch(err, /Códigos de salida/u);
+    assert.ok(err.trimEnd().split('\n').length <= 4, `corto: ${JSON.stringify(argv)}`);
+  }
 });
 
 test('una variable NEXAKIT_FABRICA_* mal formada es un argumento inválido', async () => {

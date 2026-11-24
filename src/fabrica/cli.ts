@@ -88,6 +88,25 @@ Códigos de salida: 0 bien, 1 fallo de estación o escritura detectada, 2 argume
 estado es «ok» o «sin-cambios».
 `;
 
+/** Línea de uso de cada orden, para mostrarla tras un error en vez de toda la ayuda. */
+const USOS: Record<string, string> = {
+  proponer: 'Uso: nexakit fabrica proponer --base <rama> [--foco <texto>] [--json]',
+  lanzar: 'Uso: nexakit fabrica lanzar --huella <huella> [--cambios <archivo.json>] [--json]',
+  estado: 'Uso: nexakit fabrica estado --id <id> [--json]',
+  resultado: 'Uso: nexakit fabrica resultado --id <id> [--veredictos <archivo.json>] [--json]',
+  cancelar: 'Uso: nexakit fabrica cancelar --id <id>',
+  preferencias: 'Uso: nexakit fabrica preferencias [--criterio calidad|barato] [--revision-cruzada sí|no] [--json]',
+  encargar: 'Uso: nexakit encargar --ia codex|antigravity|auto --encargo <archivo.md> [--modelo <modelo>] [--esfuerzo <esfuerzo>] [--ordenes <archivo.json>] [--tiempo <min>] [--json]',
+  'banco planificar': 'Uso: nexakit fabrica banco planificar [--fase 1|2] [--estacion <estacion>] [--json]',
+  'banco ejecutar': 'Uso: nexakit fabrica banco ejecutar --huella <huella> [--json]',
+};
+const USO_GENERAL = 'Uso: nexakit fabrica proponer|lanzar|estado|resultado|cancelar|preferencias|banco, o nexakit encargar';
+const PIE_AYUDA = 'Usa --help para ver la ayuda completa.';
+
+/** Mensaje de un error de uso: el mensaje, el uso de la orden afectada (si se conoce) y cómo ver la ayuda. */
+const errorDeUso = (mensaje: string, orden?: string): string =>
+  `${mensaje}\n${orden !== undefined && Object.hasOwn(USOS, orden) ? (USOS[orden] as string) : USO_GENERAL}\n${PIE_AYUDA}\n`;
+
 const NOTA_CLAUDE = 'la ejecuta la sesión de Claude';
 const SONDEO_MS = 1000;
 const MAX_BYTES_CAMBIOS = 1024 * 1024;
@@ -677,7 +696,7 @@ export async function ejecutarCli(argv: string[], io: IoCli, opciones: OpcionesC
   }
   // `banco` solo, sin subcomando: la ayuda, sin «Orden desconocida».
   if (compuesta && siguientes[0] === undefined) {
-    await io.err(AYUDA);
+    await io.err(`${USOS['banco planificar']}\n${USOS['banco ejecutar']}\n${PIE_AYUDA}\n`);
     return 2;
   }
   if (orden === 'encargar' && (resto.includes('--help') || resto.includes('-h'))) {
@@ -686,8 +705,8 @@ export async function ejecutarCli(argv: string[], io: IoCli, opciones: OpcionesC
   }
   const especificacion = orden === undefined ? undefined : Object.hasOwn(OPCIONES, orden) ? OPCIONES[orden] : undefined;
   if (orden === undefined || especificacion === undefined) {
-    if (orden !== undefined) await io.err(`Orden desconocida: ${limpiar(orden)}\n`);
-    await io.err(AYUDA);
+    if (orden === undefined) await io.err(AYUDA);
+    else await io.err(errorDeUso(`Orden desconocida: ${limpiar(orden)}`));
     return 2;
   }
 
@@ -723,7 +742,7 @@ export async function ejecutarCli(argv: string[], io: IoCli, opciones: OpcionesC
     }
   } catch (error) {
     if (error instanceof ErrorUso || error instanceof ErrorEntorno) {
-      await io.err(`${error.message}\n\n${AYUDA}`);
+      await io.err(errorDeUso(error.message, orden));
       return 2;
     }
     await io.err(`${error instanceof ErrorFabrica ? limpiar(error.message) : `Error inesperado: ${limpiar(mensajeDe(error))}`}\n`);
