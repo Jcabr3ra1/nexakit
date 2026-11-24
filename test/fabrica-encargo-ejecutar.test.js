@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { gitConfigGlobalVacio } from '../test-support/git-aislado.js';
@@ -408,6 +408,10 @@ test('auto cae a Antigravity si Codex no está disponible, con su modelo recomen
   assert.equal(informe.ia, 'antigravity');
   assert.equal(informe.modelo, 'gemini-4-hydrogen-medium');
   assert.equal(informe.esfuerzo, null);
+  assert.match(informe.avisos.join('\n'), /IA descartada: codex no está disponible: Codex no está instalado/u);
+  // El texto no promete órdenes que Antigravity rechaza.
+  assert.match(agy.registro.encargos[0].instrucciones, /No se aprueba ninguna orden/u);
+  assert.doesNotMatch(agy.registro.encargos[0].instrucciones, /Solo se aprueban estas órdenes/u);
   // En Antigravity las órdenes se pasan al conector, que en modo escritura no ejecuta ninguna.
   assert.deepEqual(agy.registro.creaciones[0].ordenesPermitidas, ['npm test', 'npm run typecheck']);
   assert.equal(codex.registro.encargos.length, 0);
@@ -493,7 +497,8 @@ test('guarda las denegaciones y aprobaciones, y los tokens 0 quedan en el inform
   });
   const informe = await ejecutarEncargo(opciones(e, { conectores: { codex: codex.crear } }));
   assert.equal(informe.estado, 'ok');
-  assert.deepEqual(informe.tokens, { entrada: 0, salida: 0, total: 0 });
+  // Los tokens 0 no se registran.
+  assert.equal(informe.tokens, null);
   assert.equal(informe.tokensValidos, false);
   assert.match(informe.avisos.join('\n'), /no informó de tokens/u);
   assert.equal(informe.denegaciones.length, 1);
@@ -565,4 +570,130 @@ test('los encargos de más de 90 días caducan con la limpieza del rastro y no s
   assert.equal(existsSync(reciente), true);
   assert.equal(existsSync(path.join(ajena, 'no-borrar.txt')), true);
   assert.equal(lstatSync(enlace).isSymbolicLink(), true);
+});
+
+test('un Ctrl+C justo después de elegir la IA y antes del turno cancela sin lanzarlo', async () => {
+  const e = entorno();
+  const control = new AbortController();
+  const codex = fabrica('codex', async () => assert.fail('el turno no debe empezar'));
+  // Tras devolver la recomendación solo hay microtareas hasta la última comprobación: el aborto cae después de ella.
+  const informe = await ejecutarEncargo(
+    opciones(e, {
+      conectores: { codex: codex.crear },
+      señal: control.signal,
+      recomendar: async (ia) => {
+        setImmediate(() => control.abort());
+        return RECOMENDADO[ia];
+      },
+    }),
+  );
+  assert.equal(informe.estado, 'cancelado');
+  assert.equal(codex.registro.encargos.length, 0);
+  assert.ok(informe.segundos < 20, 'no espera al tope de tiempo');
+  comprobarLimpio(e, informe);
+});
+
+test('un enlace simbólico hacia fuera del repo invalida el encargo; uno que se queda dentro vale', { skip: SIN_ENLACES }, async () => {
+  for (const destino of ['/etc/hosts', '../../fuera', 'sub/../../fuera', 'C:\\Windows\\win.ini']) {
+    const e = entorno();
+    const codex = fabrica('codex', async (encargo) => {
+      writeFileSync(path.join(encargo.raiz, 'nuevo.txt'), 'hola\n');
+      symlinkSync(destino, path.join(encargo.raiz, 'enlace'));
+      return okDe();
+    });
+    const informe = await ejecutarEncargo(opciones(e, { conectores: { codex: codex.crear } }));
+    assert.equal(informe.estado, 'invalido', destino);
+    assert.equal(informe.rutaDiff, null);
+    assert.equal(existsSync(path.join(e.home, '.nexakit', 'encargos', informe.id, 'cambios.diff')), false);
+    assert.equal(informe.rutasVetadas.length, 1);
+    assert.match(informe.rutasVetadas[0], /^enlace \(enlace simbólico hacia fuera del repo/u);
+    assert.match(informe.motivo, /enlace simbólico hacia fuera del repo/u);
+    comprobarLimpio(e, informe);
+  }
+  const e = entorno();
+  const dentro = fabrica('codex', async (encargo) => {
+    symlinkSync('a.txt', path.join(encargo.raiz, 'dentro'));
+    mkdirSync(path.join(encargo.raiz, 'sub'));
+    symlinkSync('../a.txt', path.join(encargo.raiz, 'sub', 'otro'));
+    return okDe();
+  });
+  const informe = await ejecutarEncargo(opciones(e, { conectores: { codex: dentro.crear } }));
+  assert.equal(informe.estado, 'ok', informe.motivo);
+  assert.deepEqual(informe.rutasVetadas, []);
+  assert.deepEqual(informe.archivos, ['dentro', 'sub/otro']);
+});
+
+test('un cambio en rutas sensibles (.claude, .husky, .github/workflows...) invalida el encargo con la lista', async () => {
+  const e = entorno();
+  const codex = fabrica('codex', async (encargo) => {
+    const escribir = (relativa, texto) => {
+      mkdirSync(path.dirname(path.join(encargo.raiz, relativa)), { recursive: true });
+      writeFileSync(path.join(encargo.raiz, relativa), texto);
+    };
+    escribir('.claude/settings.json', '{}');
+    escribir('.HUSKY/pre-commit', 'echo hola');
+    escribir('.github/workflows/ci.yml', 'on: push');
+    escribir('src/.codex/config.toml', 'x');
+    escribir('src/claude.md', 'esta sí vale');
+    return okDe();
+  });
+  const informe = await ejecutarEncargo(opciones(e, { conectores: { codex: codex.crear } }));
+  assert.equal(informe.estado, 'invalido');
+  assert.equal(informe.rutaDiff, null);
+  assert.deepEqual(informe.rutasVetadas.map((v) => v.split(' ')[0]).sort(), [
+    '.HUSKY/pre-commit',
+    '.claude/settings.json',
+    '.github/workflows/ci.yml',
+    'src/.codex/config.toml',
+  ]);
+  assert.match(informe.motivo, /\.claude\/settings\.json/u);
+  comprobarLimpio(e, informe);
+
+  // Un archivo normal con otro nombre parecido sí se entrega.
+  const e2 = entorno();
+  const normal = fabrica('codex', async (encargo) => {
+    mkdirSync(path.join(encargo.raiz, 'github', 'workflows'), { recursive: true });
+    writeFileSync(path.join(encargo.raiz, 'github', 'workflows', 'doc.md'), 'x');
+    return okDe();
+  });
+  const bueno = await ejecutarEncargo(opciones(e2, { conectores: { codex: normal.crear } }));
+  assert.equal(bueno.estado, 'ok', bueno.motivo);
+});
+
+test('si se lanza desde una subcarpeta usa la raíz del repo: una escritura fuera de la subcarpeta se detecta', async () => {
+  const e = entorno();
+  mkdirSync(path.join(e.raiz, 'sub'));
+  writeFileSync(path.join(e.raiz, 'sub', 'x.txt'), 'x\n');
+  git(e.raiz, 'add', '-A');
+  git(e.raiz, 'commit', '-q', '-m', 'sub');
+  const sub = path.join(e.raiz, 'sub');
+  const codex = fabrica('codex', async () => {
+    writeFileSync(path.join(e.raiz, 'escapado.txt'), 'fuera\n');
+    return okDe();
+  });
+  const informe = await ejecutarEncargo(opciones(e, { raiz: sub, conectores: { codex: codex.crear } }));
+  assert.equal(informe.estado, 'invalido');
+  assert.ok(informe.escriturasFuera.includes('escapado.txt'), informe.escriturasFuera.join(','));
+
+  const e2 = entorno();
+  mkdirSync(path.join(e2.raiz, 'sub'));
+  const limpio = fabrica('codex', async (encargo) => {
+    writeFileSync(path.join(encargo.raiz, 'a.txt'), 'dos\n');
+    return okDe();
+  });
+  const bueno = await ejecutarEncargo(opciones(e2, { raiz: path.join(e2.raiz, 'sub'), conectores: { codex: limpio.crear } }));
+  assert.equal(bueno.estado, 'ok', bueno.motivo);
+  assert.deepEqual(bueno.archivos, ['a.txt']);
+});
+
+test('el hook post-checkout del repo real no corre al crear el worktree', { skip: process.platform === 'win32' }, async () => {
+  const e = entorno();
+  const hook = path.join(e.raiz, '.git', 'hooks', 'post-checkout');
+  mkdirSync(path.dirname(hook), { recursive: true });
+  writeFileSync(hook, `#!/bin/sh\necho corrió > "${path.join(e.raiz, 'hook-corrio.txt')}"\n`);
+  chmodSync(hook, 0o755);
+  const codex = fabrica('codex', async () => okDe());
+  const informe = await ejecutarEncargo(opciones(e, { conectores: { codex: codex.crear } }));
+  assert.equal(informe.estado, 'sin-cambios', informe.motivo);
+  assert.equal(existsSync(path.join(e.raiz, 'hook-corrio.txt')), false);
 });

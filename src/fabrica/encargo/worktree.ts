@@ -42,6 +42,8 @@ function entornoSaneado(): NodeJS.ProcessEnv {
   for (const clave of Object.keys(entorno)) {
     if (VARIABLES_GIT.includes(clave.toUpperCase()) || clave.toUpperCase().startsWith('GIT_CONFIG')) delete entorno[clave];
   }
+  // Sin escrituras opcionales (refrescar el índice, por ejemplo): un `git status` no debe tocar el repo real.
+  entorno['GIT_OPTIONAL_LOCKS'] = '0';
   return entorno;
 }
 
@@ -135,7 +137,8 @@ export async function crearWorktree(raiz: string, home: string, opciones: Opcion
     await chmod(carpeta, 0o700);
     const dir = path.join(carpeta, 'repo');
     try {
-      await git(raiz, ['worktree', 'add', '--detach', '--quiet', '--', dir, base]);
+      // Sin hooks: el `post-checkout` del repo real correría sobre él antes de la comprobación del disco.
+      await git(raiz, ['-c', `core.hooksPath=${os.devNull}`, 'worktree', 'add', '--detach', '--quiet', '--', dir, base]);
       await chmod(dir, 0o700);
       await opciones.despuesDeCrear?.();
       // Ahora el `.git` del worktree es el que escribió git: se guarda su gitdir real, que no volverá a leerse de ahí.
@@ -167,6 +170,47 @@ export async function diffDelWorktree(w: Worktree): Promise<Buffer> {
   } catch (error) {
     throw new ErrorFabrica(`No se pudo leer el diff del encargo: ${mensajeDe(error)}`, { cause: error });
   }
+}
+
+/** Un cambio del worktree respecto de su base. */
+export interface CambioWorktree {
+  /** Ruta relativa, con `/`. */
+  ruta: string;
+  /** Modo del archivo ya cambiado (`120000` es un enlace simbólico; `000000`, un borrado). */
+  modo: string;
+}
+
+/**
+ * Cambios del worktree contra su base (`git diff --raw -z --no-renames`), con la ruta y el modo nuevo de cada uno, sin
+ * decodificar nombres raros. Debe llamarse después de `diffDelWorktree`, que registra los archivos nuevos.
+ */
+export async function cambiosDelWorktree(w: Worktree): Promise<CambioWorktree[]> {
+  let crudo: string;
+  try {
+    crudo = (await gitBytes(w.dir, argsSobreWorktree(w, ['diff', '--raw', '-z', '--no-renames', '--no-ext-diff', '--no-textconv', w.base, '--']))).toString('utf8');
+  } catch (error) {
+    throw new ErrorFabrica(`No se pudo analizar el diff del encargo: ${mensajeDe(error)}`, { cause: error });
+  }
+  // Formato: `:<modo previo> <modo nuevo> <sha previo> <sha nuevo> <estado>\0<ruta>\0` por cambio.
+  const partes = crudo.split('\0');
+  const cambios: CambioWorktree[] = [];
+  for (let i = 0; i + 1 < partes.length; i += 2) {
+    const meta = /^:\d+ (\d+) /u.exec(partes[i] ?? '');
+    const ruta = partes[i + 1];
+    if (meta?.[1] === undefined || ruta === undefined || ruta === '') continue;
+    cambios.push({ ruta, modo: meta[1] });
+  }
+  return cambios;
+}
+
+/**
+ * Raíz del repo que contiene `cwd` (`git rev-parse --show-toplevel`, con el entorno saneado). Lanza si `cwd` no está
+ * en un repo de git.
+ */
+export async function raizDelRepoGit(cwd: string): Promise<string> {
+  const raiz = (await git(cwd, ['rev-parse', '--show-toplevel'])).trim();
+  if (raiz === '') throw new ErrorFabrica('No se pudo averiguar la raíz del repo');
+  return path.resolve(raiz);
 }
 
 /**

@@ -1,9 +1,9 @@
-import { lstat, readFile } from 'node:fs/promises';
+import { lstat, readFile, readlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { inspectModels, recommendAntigravity } from '../../../src/model-command.js';
 import { REGLA_ORDENES_SIMPLES } from '../../../src/regla-ordenes-simples.js';
-import { crearConectorAntigravity } from '../conectores/antigravity.js';
+import { crearConectorAntigravity, esComponenteProtegido } from '../conectores/antigravity.js';
 import { crearConectorCodex } from '../conectores/codex.js';
 import type { AlProgreso, Conector, Denegacion, Encargo, ResultadoEstacion } from '../conectores/tipos.js';
 import { comparar, instantanea } from '../disco.js';
@@ -14,7 +14,7 @@ import type { Leccion } from '../lecciones.js';
 import { paraEncargo } from '../lecciones.js';
 import * as rastro from '../rastro.js';
 import { cerrarConectores, limpiar, mensajeDe, opcionesDeEntorno, type Conectores } from '../sesion.js';
-import { borrarWorktree, crearWorktree, diffDelWorktree, type Worktree } from './worktree.js';
+import { borrarWorktree, cambiosDelWorktree, crearWorktree, diffDelWorktree, raizDelRepoGit, type CambioWorktree, type Worktree } from './worktree.js';
 
 /** Tiempo máximo de un encargo: 20 minutos. */
 export const TIEMPO_ENCARGO_MS = 1_200_000;
@@ -77,9 +77,9 @@ export interface InformeEncargo {
   ia: IAEncargo | null;
   modelo: string | null;
   esfuerzo: string | null;
-  /** Tal como los informó la IA (también si son 0). */
+  /** Los que informó la IA; `null` si no informó o fueron 0. */
   tokens: { entrada: number; salida: number; total: number } | null;
-  /** `false` si la IA no informó de tokens o fueron 0: no se registra ni cuenta como éxito comprobado. */
+  /** `false` si la IA no informó de tokens o fueron 0: no cuenta como éxito comprobado. */
   tokensValidos: boolean;
   segundos: number;
   /** Resumen de lo hecho, escrito por la IA. */
@@ -90,6 +90,8 @@ export interface InformeEncargo {
   archivos: string[];
   /** Rutas del repo real que cambiaron mientras corría el encargo (lo invalida). */
   escriturasFuera: string[];
+  /** Enlaces simbólicos hacia fuera del repo y cambios en rutas sensibles que trae el diff (lo invalidan). */
+  rutasVetadas: string[];
   avisos: string[];
   motivo?: string;
   /** Commit de HEAD del que partió el encargo. */
@@ -143,6 +145,7 @@ async function ordenesDelRepo(dir: string): Promise<string[]> {
   }
 }
 
+/** `ordenes` vacío si la IA no ejecuta ninguna (Antigravity en modo escritura): el texto no promete lo que se va a rechazar. */
 function instruccionesDelEncargo(texto: string, lecciones: readonly Leccion[], ordenes: readonly string[]): string {
   const partes = [
     'Programa este encargo en la carpeta de trabajo actual, que es una copia aislada del repositorio: edita los archivos directamente ahí.',
@@ -243,6 +246,7 @@ interface Borrador {
   aprobaciones: Denegacion[];
   archivos: string[];
   escriturasFuera: string[];
+  rutasVetadas: string[];
   avisos: string[];
   motivo: string | undefined;
   diff: Buffer | undefined;
@@ -257,7 +261,7 @@ interface Borrador {
  */
 export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<InformeEncargo> {
   const {
-    raiz,
+    raiz: raizPedida,
     ia,
     texto,
     tiempoMs = TIEMPO_ENCARGO_MS,
@@ -284,6 +288,8 @@ export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<Inform
 
   const inicio = Date.now();
   const fabricas = opciones.conectores ?? fabricasDeEntorno(entorno);
+  // La raíz del repo, no una subcarpeta: la instantánea del disco, las lecciones y el rastro hablan del repo entero.
+  const raiz = await raizDelRepoGit(raizPedida);
   const w = await crearWorktree(raiz, home);
   const carpeta = path.dirname(w.dir);
   const rutaInforme = path.join(carpeta, 'informe.json');
@@ -299,11 +305,24 @@ export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<Inform
     aprobaciones: [],
     archivos: [],
     escriturasFuera: [],
+    rutasVetadas: [],
     avisos: [...w.avisos],
     motivo: undefined,
     diff: undefined,
   };
   const abiertos: Conectores = {};
+  const control = new AbortController();
+  let agotado = false;
+  let canceladoPorPersona = false;
+  // Solo cuenta la primera causa: un tiempo que vence durante la espera tras Ctrl+C no cambia el motivo.
+  const alCancelar = (): void => {
+    if (control.signal.aborted) return;
+    canceladoPorPersona = true;
+    control.abort(new ErrorFabrica(CANCELADO));
+  };
+  // Se registra antes de cualquier paso largo; una señal que ya estaba abortada no avisaría al oyente, así que se mira.
+  if (señal?.aborted === true) alCancelar();
+  else señal?.addEventListener('abort', alCancelar, { once: true });
   let publicador: ReturnType<typeof crearPublicador> | undefined;
   // La limpieza de caducados corre en segundo plano y nunca hace fallar el encargo.
   const poda = rastro.podar(home).then(
@@ -317,7 +336,8 @@ export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<Inform
     b.estado = 'fallido';
     b.motivo = `el encargo falló: ${datosDe(error)}`;
   } finally {
-    await cerrarConectores(abiertos).catch(() => {});
+    señal?.removeEventListener('abort', alCancelar);
+    await cerrarAbiertos();
     const aviso = await borrarWorktree(w);
     if (aviso !== null) b.avisos.push(aviso);
     await publicador?.cerrar();
@@ -333,13 +353,14 @@ export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<Inform
       modelo: b.modelo,
       esfuerzo: b.esfuerzo,
       tokens: b.tokens,
-      tokensValidos: b.tokens !== null && b.tokens.total > 0,
+      tokensValidos: b.tokens !== null,
       segundos: Math.round((Date.now() - inicio) / 100) / 10,
       resumen: b.resumen,
       denegaciones: b.denegaciones,
       aprobaciones: b.aprobaciones,
       archivos: b.archivos,
       escriturasFuera: b.escriturasFuera,
+      rutasVetadas: b.rutasVetadas,
       avisos: b.avisos,
       ...(b.motivo === undefined ? {} : { motivo: b.motivo }),
       base: w.base,
@@ -368,7 +389,14 @@ export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<Inform
 
   /** Una función y no una lectura directa: la señal puede abortarse mientras se espera y TypeScript no lo sabe. */
   function personaCancela(): boolean {
-    return señal?.aborted === true;
+    return canceladoPorPersona || señal?.aborted === true;
+  }
+
+  /** Cierra los conectores abiertos una sola vez; llamarla de nuevo no hace nada. */
+  async function cerrarAbiertos(): Promise<void> {
+    const abiertosAhora = { ...abiertos };
+    for (const clave of Object.keys(abiertos)) delete abiertos[clave as keyof Conectores];
+    await cerrarConectores(abiertosAhora).catch(() => {});
   }
 
   async function correr(): Promise<void> {
@@ -389,6 +417,8 @@ export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<Inform
       if ('motivo' in resultado) motivos.push(resultado.motivo);
       else {
         elegida = resultado;
+        // El motivo por el que no se usó una IA anterior de `auto` también queda a la vista.
+        for (const motivo of motivos) b.avisos.push(`IA descartada: ${motivo}`);
         break;
       }
     }
@@ -422,12 +452,17 @@ export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<Inform
       // Siempre el worktree: es también la raíz de escritura del conector, que rechaza cualquier otra.
       raiz: w.dir,
       base: w.base,
-      instrucciones: instruccionesDelEncargo(texto, lecciones, ordenes),
+      instrucciones: instruccionesDelEncargo(texto, lecciones, iaElegida === 'antigravity' ? [] : ordenes),
       ordenesPermitidas: ordenes,
     };
 
     // La instantánea del repo real se toma justo antes del turno: un worktree nuevo no cambia nada en él.
     const antes = await instantanea(raiz);
+    if (personaCancela()) {
+      b.estado = 'cancelado';
+      b.motivo = CANCELADO;
+      return;
+    }
     publicador = crearPublicador(home, w.id, repo, intervaloActivoMs);
     let tokens = 0;
     const activa = (estado: rastro.EstacionActiva['estado']): rastro.EstacionActiva => ({
@@ -445,16 +480,6 @@ export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<Inform
       publicador?.publicar(activa('en-curso'));
     };
 
-    const control = new AbortController();
-    let agotado = false;
-    let canceladoPorPersona = false;
-    // Solo cuenta la primera causa: un tiempo que vence durante la espera tras Ctrl+C no cambia el motivo.
-    const alCancelar = (): void => {
-      if (control.signal.aborted) return;
-      canceladoPorPersona = true;
-      control.abort(new ErrorFabrica(CANCELADO));
-    };
-    señal?.addEventListener('abort', alCancelar, { once: true });
     const reloj = setTimeout(() => {
       if (control.signal.aborted) return;
       agotado = true;
@@ -486,12 +511,12 @@ export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<Inform
       };
     } finally {
       clearTimeout(reloj);
-      señal?.removeEventListener('abort', alCancelar);
     }
     // Se publica el desenlace antes de comprobar el disco y de pedir el diff; `cerrar` lo retira enseguida.
     publicador.publicar(activa(resultado.estado === 'ok' ? 'ok' : resultado.estado === 'cancelada' ? 'cancelada' : 'fallida'));
 
-    b.tokens = resultado.tokens;
+    // Los tokens 0 no se registran: sin cifra real queda `null` y `tokensValidos` en `false`.
+    b.tokens = resultado.tokens !== null && resultado.tokens.total > 0 ? resultado.tokens : null;
     b.denegaciones = resultado.denegaciones;
     b.aprobaciones = resultado.aprobaciones ?? [];
     b.resumen = limpiar(resultado.informe?.resumen ?? '').slice(0, MAX_RESUMEN);
@@ -514,6 +539,8 @@ export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<Inform
       b.estado = 'ok';
     }
 
+    // Con la IA ya parada (o cerrada a la fuerza), el disco no puede cambiar mientras se comprueba.
+    await cerrarAbiertos();
     // Nada debe haber cambiado en el repo real: una escritura fuera del worktree invalida el encargo en cualquier caso.
     try {
       b.escriturasFuera = comparar(antes, await instantanea(raiz));
@@ -543,9 +570,25 @@ export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<Inform
       b.estado = 'sin-cambios';
       return;
     }
+    let cambios: CambioWorktree[];
+    try {
+      cambios = await cambiosDelWorktree(w);
+    } catch (error) {
+      b.estado = 'fallido';
+      b.motivo = datosDe(error);
+      return;
+    }
+    // El resultado se juzga por lo que trae, no por la IA que lo hizo: enlaces hacia fuera y rutas sensibles no se aplican.
+    const vetadas = await rutasVetadas(w, cambios);
+    if (vetadas.length > 0) {
+      b.estado = 'invalido';
+      b.rutasVetadas = vetadas;
+      b.motivo = `el diff trae cambios que no se aplican solos (no se guarda ningún diff): ${vetadas.join('; ')}`;
+      return;
+    }
     b.diff = diff;
-    b.archivos = archivosDelDiff(diff);
-    if (b.tokens === null || b.tokens.total <= 0) {
+    b.archivos = [...new Set(cambios.map((c) => c.ruta))];
+    if (b.tokens === null) {
       b.avisos.push('La IA no informó de tokens: el encargo no se registra ni cuenta como éxito comprobado.');
     }
   }
@@ -594,14 +637,50 @@ export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<Inform
   }
 }
 
-/** Rutas del diff, de las líneas `diff --git a/<ruta> b/<ruta>`. */
-function archivosDelDiff(diff: Buffer): string[] {
-  const rutas: string[] = [];
-  for (const linea of diff.toString('utf8').split('\n')) {
-    const m = /^diff --git a\/(.+) b\/(.+)$/u.exec(linea);
-    if (m?.[2] !== undefined) rutas.push(m[2]);
+/** `.github/workflows` son dos componentes seguidos: se mira aparte. */
+const FLUJOS_DE_CI = ['.github', 'workflows'];
+
+/** Motivo por el que una ruta del diff no se aplica sola, o `null`. */
+function motivoRutaSensible(ruta: string): string | null {
+  const partes = ruta.split(/[\\/]+/u).filter((p) => p !== '');
+  const protegida = partes.find(esComponenteProtegido);
+  if (protegida !== undefined) return `cambia «${protegida}»`;
+  const normales = partes.map((p) => p.toLowerCase().replace(/[. ]+$/u, ''));
+  for (let i = 0; i + 1 < normales.length; i += 1) {
+    if (normales[i] === FLUJOS_DE_CI[0] && normales[i + 1] === FLUJOS_DE_CI[1]) return 'cambia .github/workflows';
   }
-  return [...new Set(rutas)];
+  return null;
+}
+
+/** Un destino de enlace que sale del repo: absoluto (también de Windows) o con `..` que se pasa de la raíz. */
+function enlaceSaleDelRepo(ruta: string, destino: string): boolean {
+  const normal = destino.replace(/\\/gu, '/');
+  if (normal.startsWith('/') || /^[A-Za-z]:/u.test(normal) || destino.includes('\0')) return true;
+  const resuelto = path.posix.normalize(path.posix.join(path.posix.dirname(ruta.replace(/\\/gu, '/')), normal));
+  return resuelto === '..' || resuelto.startsWith('../');
+}
+
+/**
+ * Lo que el diff trae y no debe aplicarse solo: enlaces simbólicos nuevos o cambiados que apuntan fuera del repo y
+ * cambios en rutas sensibles (`.git`, `.claude`, `.codex`, `.gemini`, `.agents`, `.nexakit`, `.vscode`, `.husky`,
+ * `.github/workflows`: código que se ejecutaría en la próxima sesión o commit). Cada texto dice la ruta y el motivo.
+ */
+async function rutasVetadas(w: Worktree, cambios: readonly CambioWorktree[]): Promise<string[]> {
+  const vetadas: string[] = [];
+  for (const { ruta, modo } of cambios) {
+    const sensible = motivoRutaSensible(ruta);
+    if (sensible !== null) vetadas.push(`${limpiar(ruta)} (${sensible})`);
+    if (modo !== '120000') continue;
+    let destino: string;
+    try {
+      destino = await readlink(path.join(w.dir, ...ruta.split('/')));
+    } catch {
+      vetadas.push(`${limpiar(ruta)} (enlace simbólico que no se pudo leer)`);
+      continue;
+    }
+    if (enlaceSaleDelRepo(ruta, destino)) vetadas.push(`${limpiar(ruta)} (enlace simbólico hacia fuera del repo: ${limpiar(destino).slice(0, 200)})`);
+  }
+  return vetadas;
 }
 
 export type { Worktree };

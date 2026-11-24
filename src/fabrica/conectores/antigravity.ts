@@ -113,7 +113,12 @@ const MOTIVO_ORDENES_DESACTIVADAS = 'órdenes desactivadas en Antigravity hasta 
 /** Encadenados, redirecciones y sustituciones: una orden con cualquiera se rechaza aunque empiece por una permitida. */
 const ENCADENADO = /[;&|<>`\n\r]|\$\(/u;
 /** Componentes que el agente no puede escribir dentro de la raíz (personalización, hooks y metadatos de git). */
-const COMPONENTES_PROTEGIDOS = new Set(['.git', '.gemini', '.agents', '.agent', '_agents', '_agent', '.claude', '.codex', '.nexakit', '.vscode', '.husky']);
+export const COMPONENTES_PROTEGIDOS = new Set(['.git', '.gemini', '.agents', '.agent', '_agents', '_agent', '.claude', '.codex', '.nexakit', '.vscode', '.husky']);
+
+/** Un componente de ruta protegido, sin distinguir mayúsculas ni los puntos y espacios finales (que Windows ignora). */
+export function esComponenteProtegido(parte: string): boolean {
+  return COMPONENTES_PROTEGIDOS.has(parte.toLowerCase().replace(/[. ]+$/u, ''));
+}
 
 /** Claves de `rawInput` que contienen una ruta (nombres normalizados: minúsculas y sin `_` ni `-`). */
 const CLAVES_RUTA = new Set(['path', 'filepath', 'absolutepath', 'targetfile', 'file', 'directory', 'directorypath', 'dir', 'searchpath', 'oldpath', 'newpath', 'from', 'to', 'source', 'destination', 'dest']);
@@ -180,7 +185,7 @@ export function motivoRutaRechazada(escritura: { raiz: string; raizPedida?: stri
     if (partes.length === 0) return `la ruta es la raíz del encargo: ${recortar(pedida)}`;
     const glob = partes.find((parte) => /[*?[]/u.test(parte));
     if (glob !== undefined) return `componente con metacaracteres de glob «${glob}»: ${recortar(pedida)}`;
-    const protegida = partes.find((parte) => COMPONENTES_PROTEGIDOS.has(parte.toLowerCase().replace(/[. ]+$/u, '')));
+    const protegida = partes.find(esComponenteProtegido);
     if (protegida !== undefined) return `escritura en un componente protegido «${protegida}»: ${recortar(pedida)}`;
   }
   let actual = escritura.raiz;
