@@ -34,7 +34,7 @@ Las tareas ligeras o normales con diseño claro las delegas primero, sin pregunt
 1. **Revisar el diff** y aplicarlo con `git apply`; si el informe dice `invalido`, descártalo y resuélvelo con Claude.
 2. **Revisión con otra IA:** la revisión del diff incluye al menos una IA distinta de la que lo escribió (si programa Codex, revisa Antigravity o Claude, y al revés). Después, pruebas e integración.
 3. **No edites el repo mientras corre un encargo**: deja el encargo `invalido`.
-4. Las órdenes extra (`--ordenes`) solo con aprobación de la persona. Informa en una línea qué IA hizo cada encargo.
+4. Las órdenes extra (`--ordenes`) solo con aprobación de la persona. En Codex son una guía y no se hacen cumplir: su frontera es el sandbox (solo escribe en la copia, sin red), que no le impide leer el disco; revisa el diff, el resumen y las `alertas` antes de aplicar o compartir. Informa en una línea qué IA hizo cada encargo.
 
 ## Preferencias y revisión cruzada
 

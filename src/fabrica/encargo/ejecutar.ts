@@ -1,5 +1,5 @@
 import { closeSync, constants, lstatSync, openSync, readFileSync } from 'node:fs';
-import { lstat, readFile, readlink } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { inspectModels, recommendAntigravity } from '../../../src/model-command.js';
@@ -16,7 +16,8 @@ import { paraEncargo } from '../lecciones.js';
 import * as rastro from '../rastro.js';
 import { cerrarConectores, limpiar, mensajeDe, opcionesDeEntorno, type Conectores } from '../sesion.js';
 import { procesoVivo, tomarCandadoEncargos } from './candado.js';
-import { barrerHuerfanos, borrarWorktree, cambiosDelWorktree, crearWorktree, diffDelWorktree, raizDelRepoGit, type CambioWorktree, type Worktree } from './worktree.js';
+import { analizarParche, type EntradaParche } from './parche.js';
+import { barrerHuerfanos, borrarWorktree, buscarGitAnidado, crearWorktree, diffDelWorktree, raizDelRepoGit, type Worktree } from './worktree.js';
 
 /** Tiempo máximo de un encargo: 20 minutos. */
 export const TIEMPO_ENCARGO_MS = 1_200_000;
@@ -34,6 +35,11 @@ export type EstadoEncargo = 'ok' | 'sin-cambios' | 'tiempo-agotado' | 'cancelado
 export interface EscrituraConector {
   raiz: string;
   ordenesPermitidas: string[];
+  /**
+   * Carpeta temporal propia del encargo (`~/.nexakit/encargos/<id>/tmp`, 0o700, fuera del worktree), que se borra con
+   * él. Codex la añade como raíz escribible y la exporta como TMPDIR, TMP y TEMP.
+   */
+  tmp?: string;
 }
 
 /**
@@ -90,16 +96,21 @@ export interface InformeEncargo {
   resumen: string;
   denegaciones: Denegacion[];
   aprobaciones: Denegacion[];
-  /** Órdenes que el repo declara (`npm test`, `npm run typecheck`): no necesitan aprobación. */
+  /**
+   * Órdenes que el repo declara (`npm test`, `npm run typecheck`). En Codex son una guía que se comunica a la IA (su
+   * frontera real es el sandbox: solo escribe en la copia y sin red); Antigravity en esta versión no ejecuta órdenes.
+   */
   ordenesPorDefecto: string[];
-  /** Órdenes extra que pidió quien encargó: necesitan la aprobación de la persona. */
+  /** Órdenes extra que pidió quien encargó (con la aprobación de la persona): informativas en Codex, como las anteriores. */
   ordenesExtra: string[];
   /** Rutas del diff, para revisarlo de un vistazo. */
   archivos: string[];
   /** Rutas del repo real que cambiaron mientras corría el encargo (lo invalida). */
   escriturasFuera: string[];
-  /** Enlaces simbólicos hacia fuera del repo y cambios en rutas sensibles que trae el diff (lo invalidan). */
+  /** Enlaces simbólicos hacia fuera del repo, repos anidados y cambios en rutas sensibles que trae el diff (lo invalidan). */
   rutasVetadas: string[];
+  /** Cambios en instrucciones o configuración de herramientas (CLAUDE.md, .envrc, .npmrc...): no invalidan, pero requieren revisión explícita. */
+  alertas: string[];
   avisos: string[];
   motivo?: string;
   /** Commit de HEAD del que partió el encargo. */
@@ -116,9 +127,15 @@ export interface InformeEncargo {
 function fabricasDeEntorno(entorno: NodeJS.ProcessEnv): FabricasConectores {
   return {
     codex: (escritura) =>
-      crearConectorCodex({ ...opcionesDeEntorno(entorno, 'NEXAKIT_FABRICA_CODEX'), escritura: { raiz: escritura.raiz } }),
+      crearConectorCodex({
+        ...opcionesDeEntorno(entorno, 'NEXAKIT_FABRICA_CODEX'),
+        escritura: { raiz: escritura.raiz, ...(escritura.tmp === undefined ? {} : { tmp: escritura.tmp }) },
+      }),
     antigravity: (escritura) =>
-      crearConectorAntigravity({ ...opcionesDeEntorno(entorno, 'NEXAKIT_FABRICA_AGY'), escritura }),
+      crearConectorAntigravity({
+        ...opcionesDeEntorno(entorno, 'NEXAKIT_FABRICA_AGY'),
+        escritura: { raiz: escritura.raiz, ordenesPermitidas: escritura.ordenesPermitidas },
+      }),
   };
 }
 
@@ -153,7 +170,11 @@ async function ordenesDelRepo(dir: string): Promise<string[]> {
   }
 }
 
-/** `ordenes` vacío si la IA no ejecuta ninguna (Antigravity en modo escritura): el texto no promete lo que se va a rechazar. */
+/**
+ * `ordenes` vacío si la IA no ejecuta ninguna (Antigravity en modo escritura): el texto no promete lo que se va a
+ * rechazar. Con Codex las órdenes son una guía: su frontera real es el sandbox (solo escribe en la copia, sin red), no
+ * una lista que se haga cumplir, así que el texto no promete que se rechace ninguna otra.
+ */
 function instruccionesDelEncargo(texto: string, lecciones: readonly Leccion[], ordenes: readonly string[]): string {
   const partes = [
     'Programa este encargo en la carpeta de trabajo actual, que es una copia aislada del repositorio: edita los archivos directamente ahí.',
@@ -168,7 +189,7 @@ function instruccionesDelEncargo(texto: string, lecciones: readonly Leccion[], o
   partes.push(
     ordenes.length === 0
       ? '- No se aprueba ninguna orden: no dependas de ejecutar pruebas.'
-      : `- Solo se aprueban estas órdenes exactas, cualquier otra se rechaza: ${ordenes.map((o) => `\`${o}\``).join(', ')}.`,
+      : `- Para comprobar tu trabajo usa solo estas órdenes: ${ordenes.map((o) => `\`${o}\``).join(', ')}. Trabajas en un sandbox sin red que solo puede escribir en esta carpeta y en su carpeta temporal.`,
   );
   partes.push('', 'Al terminar, responde con un resumen breve en texto (qué cambiaste y qué queda pendiente), sin pegar el diff.');
   return `${partes.join('\n')}\n`;
@@ -257,6 +278,7 @@ interface Borrador {
   archivos: string[];
   escriturasFuera: string[];
   rutasVetadas: string[];
+  alertas: string[];
   avisos: string[];
   motivo: string | undefined;
   diff: Buffer | undefined;
@@ -318,6 +340,17 @@ export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<Inform
     await candado.liberar();
     throw error;
   }
+  // Carpeta temporal propia (fuera del worktree y del repo real): sin ella las pruebas que usan os.tmpdir() fallan en
+  // el sandbox de Codex. Se borra con el worktree; si no se puede crear, el encargo sigue sin ella.
+  const tmp = path.join(path.dirname(w.dir), 'tmp');
+  let tmpCreado = false;
+  try {
+    await mkdir(tmp, { mode: 0o700 });
+    await chmod(tmp, 0o700);
+    tmpCreado = true;
+  } catch {
+    // Sin carpeta temporal propia.
+  }
   try {
     opciones.alCrear?.(w.id);
   } catch {
@@ -340,6 +373,7 @@ export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<Inform
     archivos: [],
     escriturasFuera: [],
     rutasVetadas: [],
+    alertas: [],
     avisos: [...avisosBarrido, ...w.avisos],
     motivo: undefined,
     diff: undefined,
@@ -374,6 +408,7 @@ export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<Inform
     await cerrarAbiertos();
     const aviso = await borrarWorktree(w);
     if (aviso !== null) b.avisos.push(aviso);
+    await rm(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }).catch(() => {});
     await publicador?.cerrar();
     await poda;
     await candado.liberar();
@@ -398,6 +433,7 @@ export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<Inform
       archivos: b.archivos,
       escriturasFuera: b.escriturasFuera,
       rutasVetadas: b.rutasVetadas,
+      alertas: b.alertas,
       avisos: b.avisos,
       ...(b.motivo === undefined ? {} : { motivo: b.motivo }),
       base: w.base,
@@ -596,6 +632,23 @@ export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<Inform
     }
     if (b.estado !== 'ok') return;
 
+    // Antes de cualquier orden git sobre la copia: un repo anidado haría que git aplicara su configuración (filtros
+    // `clean` incluidos) fuera de todo sandbox. Con uno, no se ejecuta git sobre la copia y no hay diff.
+    let anidado: string | null;
+    try {
+      anidado = await buscarGitAnidado(w.dir);
+    } catch (error) {
+      b.estado = 'invalido';
+      b.motivo = `no se pudo comprobar la copia antes de leer el diff (no se guarda ningún diff): ${datosDe(error)}`;
+      return;
+    }
+    if (anidado !== null) {
+      b.estado = 'invalido';
+      b.rutasVetadas = [`${limpiar(anidado)} (repo git anidado)`];
+      b.motivo = `repo git anidado en ${limpiar(anidado)}: no se ejecuta git sobre la copia ni se guarda ningún diff`;
+      return;
+    }
+
     let diff: Buffer;
     try {
       diff = await diffDelWorktree(w);
@@ -608,16 +661,10 @@ export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<Inform
       b.estado = 'sin-cambios';
       return;
     }
-    let cambios: CambioWorktree[];
-    try {
-      cambios = await cambiosDelWorktree(w);
-    } catch (error) {
-      b.estado = 'fallido';
-      b.motivo = datosDe(error);
-      return;
-    }
+    // Todo se analiza sobre los mismos bytes que se guardan: el disco ya no cuenta (evita cambios entre diff y análisis).
+    const entradas = analizarParche(diff);
     // El resultado se juzga por lo que trae, no por la IA que lo hizo: enlaces hacia fuera y rutas sensibles no se aplican.
-    const vetadas = await rutasVetadas(w, cambios);
+    const vetadas = rutasVetadas(entradas);
     if (vetadas.length > 0) {
       b.estado = 'invalido';
       b.rutasVetadas = vetadas;
@@ -625,7 +672,8 @@ export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<Inform
       return;
     }
     b.diff = diff;
-    b.archivos = [...new Set(cambios.map((c) => c.ruta))];
+    b.archivos = [...new Set(entradas.map((c) => c.ruta))];
+    b.alertas = rutasConAlerta(entradas);
     if (b.tokens === null) {
       b.avisos.push('La IA no informó de tokens: el encargo no se registra ni cuenta como éxito comprobado.');
     }
@@ -637,7 +685,7 @@ export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<Inform
     if (fabrica === undefined) return { motivo: `${quien} no está disponible` };
     let conector: Conector;
     try {
-      conector = await fabrica({ raiz: w.dir, ordenesPermitidas: ordenes });
+      conector = await fabrica({ raiz: w.dir, ordenesPermitidas: ordenes, ...(tmpCreado ? { tmp } : {}) });
     } catch (error) {
       return { motivo: `${quien} no está disponible: ${datosDe(error)}` };
     }
@@ -699,21 +747,28 @@ function enlaceSaleDelRepo(ruta: string, destino: string): boolean {
 }
 
 /**
- * Lo que el diff trae y no debe aplicarse solo: enlaces simbólicos nuevos o cambiados que apuntan fuera del repo y
- * cambios en rutas sensibles (`.git`, `.claude`, `.codex`, `.gemini`, `.agents`, `.nexakit`, `.vscode`, `.husky`,
- * `.github/workflows`: código que se ejecutaría en la próxima sesión o commit). Cada texto dice la ruta y el motivo.
+ * Lo que el diff trae y no debe aplicarse solo: enlaces simbólicos nuevos o cambiados que apuntan fuera del repo (o
+ * cuyo destino no se puede leer del parche), gitlinks (modo `160000`, un repo anidado o submódulo), entradas que no se
+ * pueden analizar y cambios en rutas sensibles (`.git`, `.claude`, `.codex`, `.gemini`, `.agents`, `.nexakit`, `.vscode`,
+ * `.husky`, `.github/workflows`: código que se ejecutaría en la próxima sesión o commit). Todo sale del propio parche,
+ * nunca del disco. Cada texto dice la ruta y el motivo.
  */
-async function rutasVetadas(w: Worktree, cambios: readonly CambioWorktree[]): Promise<string[]> {
+export function rutasVetadas(entradas: readonly EntradaParche[]): string[] {
   const vetadas: string[] = [];
-  for (const { ruta, modo } of cambios) {
+  for (const { ruta, modo, destino } of entradas) {
+    if (ruta === '' || modo === '') {
+      vetadas.push(`${limpiar(ruta) || '(sin ruta)'} (entrada del diff que no se pudo analizar)`);
+      continue;
+    }
     const sensible = motivoRutaSensible(ruta);
     if (sensible !== null) vetadas.push(`${limpiar(ruta)} (${sensible})`);
+    if (modo === '160000') {
+      vetadas.push(`${limpiar(ruta)} (submódulo o repo git anidado: modo 160000)`);
+      continue;
+    }
     if (modo !== '120000') continue;
-    let destino: string;
-    try {
-      destino = await readlink(path.join(w.dir, ...ruta.split('/')));
-    } catch {
-      vetadas.push(`${limpiar(ruta)} (enlace simbólico que no se pudo leer)`);
+    if (destino === undefined || destino === null) {
+      vetadas.push(`${limpiar(ruta)} (enlace simbólico cuyo destino no se pudo leer del diff)`);
       continue;
     }
     if (enlaceSaleDelRepo(ruta, destino)) {
@@ -723,10 +778,32 @@ async function rutasVetadas(w: Worktree, cambios: readonly CambioWorktree[]): Pr
     // Un enlace que apunta dentro del repo pero a un componente protegido (`x -> .git/hooks`) abriría la misma puerta.
     const interno = path.posix.normalize(path.posix.join(path.posix.dirname(ruta), destino.replace(/\\/gu, '/'))).replace(/\/+$/u, '') || '.';
     // Un enlace a la raíz del repo o a `.github` (ancestro de `.github/workflows`) da acceso a lo protegido.
-    const motivo = interno === '.' || interno === '' ? 'apunta a la raíz del repo' : interno === '.github' ? 'apunta a .github, que contiene .github/workflows' : motivoRutaSensible(interno);
+    const normal = interno.toLowerCase().replace(/[. ]+$/u, '');
+    const motivo = interno === '.' || interno === '' ? 'apunta a la raíz del repo' : normal === '.github' ? 'apunta a .github, que contiene .github/workflows' : motivoRutaSensible(interno);
     if (motivo !== null) vetadas.push(`${limpiar(ruta)} (enlace simbólico hacia una ruta protegida: ${limpiar(interno).slice(0, 200)}; ${motivo})`);
   }
   return vetadas;
+}
+
+/** Archivos de instrucciones de agentes y de configuración que se ejecuta o carga sola (en cualquier carpeta). */
+const ARCHIVOS_CON_ALERTA = new Set(['claude.md', 'claude.local.md', 'agents.md', 'agents.override.md', 'gemini.md', '.envrc', '.npmrc']);
+/** Carpetas de configuración de entornos y editores. */
+const CARPETAS_CON_ALERTA = new Set(['.devcontainer', '.cursor', '.idea']);
+
+/**
+ * Cambios que no invalidan el encargo pero requieren revisión explícita antes de aplicarlo: instrucciones de agentes
+ * (CLAUDE.md, AGENTS.md, GEMINI.md), `.envrc`, `.npmrc` y las carpetas `.devcontainer/`, `.cursor/` e `.idea/`.
+ */
+export function rutasConAlerta(entradas: readonly EntradaParche[]): string[] {
+  const alertas = new Set<string>();
+  for (const { ruta } of entradas) {
+    const partes = ruta.split(/[\\/]+/u).filter((p) => p !== '').map((p) => p.toLowerCase().replace(/[. ]+$/u, ''));
+    const ultima = ruta.split(/[\\/]+/u).filter((p) => p !== '').at(-1)?.toLowerCase() ?? '';
+    if (ARCHIVOS_CON_ALERTA.has(ultima) || partes.some((p) => CARPETAS_CON_ALERTA.has(p))) {
+      alertas.add(`${limpiar(ruta)} (requiere revisión explícita: instrucciones o configuración que se cargan solas)`);
+    }
+  }
+  return [...alertas];
 }
 
 /** Formato de un id de encargo: nombre neutro, guion y 6 hex (nunca `fab-...`, que es el de un recorrido). */

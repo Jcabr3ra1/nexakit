@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -268,4 +268,74 @@ test('una orden inexistente no lanza: terminado informa y solicitar rechaza', as
   assert.match(fin.motivo, /no se pudo lanzar/i);
   await assert.rejects(cliente.solicitar('x', {}), ErrorProceso);
   await cliente.cerrar();
+});
+
+/** `true` si el proceso `pid` sigue vivo. */
+function vivo(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === 'EPERM';
+  }
+}
+
+async function hasta(condicion, motivo) {
+  for (let i = 0; i < 200; i++) {
+    if (condicion()) return;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  throw new Error(`no ocurrió: ${motivo}`);
+}
+
+test('el proceso va en su propio grupo y cerrar termina también a sus descendientes', { skip: process.platform === 'win32', timeout: 20_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'nexakit-jsonrpc-grupo-'));
+  const archivoPid = join(dir, 'nieto.pid');
+  // El hijo lanza un nieto que hereda sus tuberías y no muere solo; el hijo ignora el cierre de stdin.
+  const hijo = [
+    "const { spawn } = require('node:child_process');",
+    "const fs = require('node:fs');",
+    "const nieto = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'inherit' });",
+    `fs.writeFileSync(${JSON.stringify(archivoPid)}, String(nieto.pid));`,
+    'process.stdin.resume();',
+    "process.stdin.on('end', () => {});",
+    'setInterval(() => {}, 1000);',
+  ].join('\n');
+  const cliente = ClienteJsonRpc.lanzar(process.execPath, ['-e', hijo], { cwd: dir, graciaCierreMs: 100 });
+  try {
+    await hasta(() => {
+      try {
+        return Number(readFileSync(archivoPid, 'utf8')) > 0;
+      } catch {
+        return false;
+      }
+    }, 'el nieto arranca');
+    const nieto = Number(readFileSync(archivoPid, 'utf8'));
+    assert.equal(vivo(nieto), true);
+    await cliente.cerrar();
+    await hasta(() => !vivo(nieto), 'el nieto termina con el grupo');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('si el proceso sale solo, el nieto que dejó vivo también se termina', { skip: process.platform === 'win32', timeout: 20_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'nexakit-jsonrpc-grupo-'));
+  const archivoPid = join(dir, 'nieto.pid');
+  const hijo = [
+    "const { spawn } = require('node:child_process');",
+    "const fs = require('node:fs');",
+    "const nieto = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });",
+    `fs.writeFileSync(${JSON.stringify(archivoPid)}, String(nieto.pid));`,
+    'process.exit(0);',
+  ].join('\n');
+  const cliente = ClienteJsonRpc.lanzar(process.execPath, ['-e', hijo], { cwd: dir });
+  try {
+    await cliente.terminado;
+    const nieto = Number(readFileSync(archivoPid, 'utf8'));
+    await hasta(() => !vivo(nieto), 'el nieto termina al salir el hijo');
+  } finally {
+    await cliente.cerrar();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

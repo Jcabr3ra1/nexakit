@@ -1,11 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { cpSync, existsSync, lstatSync, readlinkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, readlinkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { gitConfigGlobalVacio } from '../test-support/git-aislado.js';
-import { borrarWorktree, cambiosDelWorktree, crearWorktree, diffDelWorktree } from '../dist/fabrica/encargo/worktree.js';
+import { borrarWorktree, buscarGitAnidado, cambiosDelWorktree, crearWorktree, diffDelWorktree } from '../dist/fabrica/encargo/worktree.js';
+import { fileSymlinkSkipReason } from '../testing/symlink-capability.js';
+
+const SIN_ENLACES = process.platform === 'win32' || fileSymlinkSkipReason();
+const POSIX = process.platform !== 'win32';
 
 process.env.GIT_CONFIG_GLOBAL = gitConfigGlobalVacio;
 process.env.GIT_CONFIG_NOSYSTEM = '1';
@@ -40,8 +44,10 @@ test('crea el worktree de HEAD con permisos 0o700 y nombre neutro', async () => 
   assert.equal(w.base, git(raiz, 'rev-parse', 'HEAD'));
   assert.deepEqual(w.avisos, []);
   assert.equal(readFileSync(path.join(w.dir, 'a.txt'), 'utf8'), 'uno\n');
-  for (const ruta of [path.join(home, '.nexakit'), path.join(home, '.nexakit', 'encargos'), path.dirname(w.dir), w.dir]) {
-    assert.equal(modo(ruta), 0o700, ruta);
+  if (POSIX) {
+    for (const ruta of [path.join(home, '.nexakit'), path.join(home, '.nexakit', 'encargos'), path.dirname(w.dir), w.dir]) {
+      assert.equal(modo(ruta), 0o700, ruta);
+    }
   }
   assert.doesNotMatch(w.id, /encargo|nexakit|banco/iu);
   assert.match(git(raiz, 'worktree', 'list'), new RegExp(w.id));
@@ -123,14 +129,14 @@ test('el repo real no se toca: ni archivos ni estado', async () => {
   assert.deepEqual({ estado: git(raiz, 'status', '--porcelain'), head: git(raiz, 'rev-parse', 'HEAD'), ramas: git(raiz, 'branch', '--list') }, antes);
 });
 
-test('no sigue enlaces: si encargos es un enlace, se rechaza', async () => {
+test('no sigue enlaces: si encargos es un enlace, se rechaza', { skip: SIN_ENLACES }, async () => {
   const { raiz, home } = entorno();
   const otro = mkdtempSync(path.join(tmpdir(), 'enc-otro-'));
   temporales.push(otro);
   mkdirSync(path.join(home, '.nexakit'), { mode: 0o700 });
-  execFileSync('ln', ['-s', otro, path.join(home, '.nexakit', 'encargos')]);
+  symlinkSync(otro, path.join(home, '.nexakit', 'encargos'), 'dir');
   await assert.rejects(crearWorktree(raiz, home), /no sigue enlaces/u);
-  assert.deepEqual(execFileSync('ls', [otro], { encoding: 'utf8' }).trim(), '');
+  assert.deepEqual(readdirSync(otro), []);
 });
 
 test('el diff de un archivo Latin-1 se conserva byte a byte y git apply --check lo acepta', async () => {
@@ -226,7 +232,7 @@ function conNodeModules(ignorado) {
   return { raiz, home };
 }
 
-test('enlaza node_modules ignorado, no entra en el diff y borrar no toca el real', async () => {
+test('enlaza node_modules ignorado, no entra en el diff y borrar no toca el real', { skip: SIN_ENLACES }, async () => {
   const { raiz, home } = conNodeModules(true);
   const w = await crearWorktree(raiz, home);
   const enlace = path.join(w.dir, 'node_modules');
@@ -256,4 +262,45 @@ test('si el patrón solo ignora carpetas (node_modules/), el enlace no se crea p
   const w = await crearWorktree(raiz, home);
   assert.equal(existsSync(path.join(w.dir, 'node_modules')), false);
   await borrarWorktree(w);
+});
+
+test('buscarGitAnidado encuentra un .git anidado de cualquier tipo, salta el de la raíz y no sigue enlaces', async () => {
+  const { raiz, home } = entorno();
+  const w = await crearWorktree(raiz, home);
+  try {
+    assert.equal(await buscarGitAnidado(w.dir), null, 'el .git de la raíz no cuenta');
+    if (!SIN_ENLACES) {
+      // Un enlace a una carpeta con un .git dentro no se sigue.
+      symlinkSync(raiz, path.join(w.dir, 'enlace-al-repo'), 'dir');
+      assert.equal(await buscarGitAnidado(w.dir), null);
+    }
+    mkdirSync(path.join(w.dir, 'a', 'b'), { recursive: true });
+    writeFileSync(path.join(w.dir, 'a', 'b', '.git'), 'gitdir: /tmp/otro\n');
+    assert.equal(await buscarGitAnidado(w.dir), 'a/b/.git');
+  } finally {
+    await borrarWorktree(w);
+  }
+});
+
+test('el diff no entra en un repo anidado aunque se llame sin comprobarlo antes: su filtro clean no corre', async () => {
+  const { raiz, home } = entorno();
+  const w = await crearWorktree(raiz, home);
+  const testigo = path.join(home, 'testigo-filtro');
+  const sub = path.join(w.dir, 'sub');
+  mkdirSync(sub);
+  git(sub, 'init', '-q');
+  writeFileSync(path.join(sub, 'f.txt'), 'hola\n');
+  git(sub, 'add', '-A');
+  git(sub, 'commit', '-q', '-m', 'sub');
+  git(sub, 'config', 'filter.testigo.clean', `"${process.execPath}" -e "require('fs').writeFileSync(process.argv[1], 'x')" "${testigo}"`);
+  writeFileSync(path.join(sub, '.gitattributes'), '* filter=testigo\n');
+  writeFileSync(path.join(sub, 'f.txt'), 'HOLA\n');
+  const hace = new Date(Date.now() - 3_600_000);
+  utimesSync(path.join(sub, 'f.txt'), hace, hace);
+  try {
+    await diffDelWorktree(w).catch(() => {});
+    assert.equal(existsSync(testigo), false, 'diff.ignoreSubmodules=all: git no mira dentro del repo anidado');
+  } finally {
+    await borrarWorktree(w);
+  }
 });

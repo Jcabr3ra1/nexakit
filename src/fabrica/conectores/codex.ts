@@ -1,8 +1,11 @@
 // Conector de la fábrica con Codex por `codex app-server` (JSON-RPC por stdio).
-// Frontera de seguridad: por defecto el revisor trabaja en un hilo de solo lectura y toda petición de escritura se
-// deniega. El modo escritura es opcional y explícito (`escritura: { raiz }`): `workspace-write` acotado a esa única
-// raíz (que debe ser también el cwd), sin red, sin aprobaciones y con un CODEX_HOME aislado sin reglas de execpolicy.
-// Las órdenes solo se aprueban si coinciden EXACTAMENTE con una de `ordenesPermitidas` de la estación.
+// Frontera de seguridad: por defecto el revisor trabaja en un hilo de solo lectura (`approvalPolicy: untrusted`), toda
+// petición de escritura se deniega y una orden solo se aprueba si coincide EXACTAMENTE con una de `ordenesPermitidas`.
+// El modo escritura es opcional y explícito (`escritura: { raiz, tmp? }`): `workspace-write` acotado a esa raíz (que
+// debe ser también el cwd) y a su carpeta temporal, sin red y con un CODEX_HOME aislado sin reglas de execpolicy. Ahí
+// `approvalPolicy` es `never`: Codex no pide aprobación, así que `ordenesPermitidas` NO se aplica (es una guía que se
+// comunica a la IA) y la frontera real es el sandbox. Riesgo residual: el sandbox acota la escritura, no la lectura;
+// Codex puede LEER todo el disco de la persona. Quien encarga revisa el diff y el resumen antes de aplicarlo.
 import { execFile } from 'node:child_process';
 import { realpathSync, statSync } from 'node:fs';
 import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
@@ -83,10 +86,11 @@ export interface OpcionesConectorCodex {
   /** Argumentos previos a `app-server` o `--version` (solo con `orden`). */
   argsPrefijo?: string[];
   /**
-   * Modo escritura, explícito y acotado: el hilo y el turno usan `workspace-write` con esa única carpeta escribible,
-   * sin red y sin aprobaciones. Sin esta opción el conector es de solo lectura, como siempre.
+   * Modo escritura, explícito y acotado: el hilo y el turno usan `workspace-write` con esa carpeta escribible (y `tmp`,
+   * si se da, que además se exporta como TMPDIR, TMP y TEMP), sin red y sin aprobaciones. Sin esta opción el conector
+   * es de solo lectura, como siempre.
    */
-  escritura?: { raiz: string };
+  escritura?: { raiz: string; tmp?: string };
 }
 
 export interface VersionTiposCodex {
@@ -327,12 +331,20 @@ class ConectorCodex implements Conector {
   private borrado: Promise<void> = Promise.resolve();
   private readonly hilos = new Map<string, EnCurso>();
   private cerrado = false;
-  /** Ruta absoluta y canónica de la única carpeta escribible; undefined si el conector es de solo lectura. */
+  /** Ruta absoluta y canónica de la carpeta escribible del encargo; undefined si el conector es de solo lectura. */
   private readonly raizEscritura: string | undefined;
+  /** Carpeta temporal propia del encargo (canónica), también escribible; undefined si no hay. */
+  private readonly tmpEscritura: string | undefined;
 
-  constructor(opciones: OpcionesConectorCodex, raizEscritura?: string) {
+  constructor(opciones: OpcionesConectorCodex, raizEscritura?: string, tmpEscritura?: string) {
     this.opciones = opciones;
     this.raizEscritura = raizEscritura;
+    this.tmpEscritura = tmpEscritura;
+  }
+
+  /** Raíces escribibles del modo escritura: la del encargo y, si hay, su carpeta temporal. */
+  private raicesEscribibles(raiz: string): string[] {
+    return this.tmpEscritura === undefined ? [raiz] : [raiz, this.tmpEscritura];
   }
 
   async catalogo(): Promise<Array<{ modelo: string; esfuerzos: string[] }>> {
@@ -415,9 +427,9 @@ class ConectorCodex implements Conector {
           ? { type: 'readOnly', networkAccess: false }
           : {
             type: 'workspaceWrite',
-            writableRoots: [this.raizEscritura],
+            writableRoots: this.raicesEscribibles(this.raizEscritura),
             networkAccess: false,
-            // Solo la raíz: ni el directorio temporal de la persona ni /tmp.
+            // Solo la raíz y la carpeta temporal del encargo: ni el directorio temporal de la persona ni /tmp.
             excludeTmpdirEnvVar: true,
             excludeSlashTmp: true,
           },
@@ -491,7 +503,7 @@ class ConectorCodex implements Conector {
       ...(this.raizEscritura === undefined ? {} : {
         // Defensa en profundidad: la configuración de la persona no ensancha la política hasta el primer turno.
         sandbox_workspace_write: {
-          writable_roots: [this.raizEscritura],
+          writable_roots: this.raicesEscribibles(this.raizEscritura),
           network_access: false,
           exclude_tmpdir_env_var: true,
           exclude_slash_tmp: true,
@@ -564,7 +576,8 @@ class ConectorCodex implements Conector {
           await this.borrarHomeAislado();
           const home = await crearHomeAislado();
           this.homeAislado = home;
-          env = { ...process.env, CODEX_HOME: home.ruta };
+          const tmp = this.tmpEscritura;
+          env = { ...process.env, CODEX_HOME: home.ruta, ...(tmp === undefined ? {} : { TMPDIR: tmp, TMP: tmp, TEMP: tmp }) };
           if (this.cerrado) {
             await this.borrarHomeAislado();
             throw new Error('El conector de Codex está cerrado');
@@ -706,22 +719,23 @@ class ConectorCodex implements Conector {
   }
 }
 
-/** La raíz del modo escritura debe ser una carpeta absoluta y existente; se devuelve su ruta canónica. */
-function validarRaizEscritura(raiz: string): string {
+/** La raíz del modo escritura (o su carpeta temporal) debe ser una carpeta absoluta y existente; se devuelve su ruta canónica. */
+function validarRaizEscritura(raiz: string, que = 'La raíz de escritura'): string {
   if (typeof raiz !== 'string' || !path.isAbsolute(raiz)) {
-    throw new Error(`La raíz de escritura debe ser una ruta absoluta: ${recortar(String(raiz))}`);
+    throw new Error(`${que} debe ser una ruta absoluta: ${recortar(String(raiz))}`);
   }
   try {
     if (!statSync(raiz).isDirectory()) throw new Error('no es una carpeta');
     return realpathSync(raiz);
   } catch {
-    throw new Error(`La raíz de escritura no existe o no es una carpeta: ${recortar(raiz)}`);
+    throw new Error(`${que} no existe o no es una carpeta: ${recortar(raiz)}`);
   }
 }
 
 export async function crearConectorCodex(opciones: OpcionesConectorCodex = {}): Promise<Conector> {
   const raiz = opciones.escritura === undefined ? undefined : validarRaizEscritura(opciones.escritura.raiz);
-  return new ConectorCodex(opciones, raiz);
+  const tmp = opciones.escritura?.tmp === undefined ? undefined : validarRaizEscritura(opciones.escritura.tmp, 'La carpeta temporal del encargo');
+  return new ConectorCodex(opciones, raiz, tmp);
 }
 
 const ejecutarArchivo = promisify(execFile);

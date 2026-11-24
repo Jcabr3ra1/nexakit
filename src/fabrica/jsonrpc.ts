@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
 
@@ -67,6 +67,47 @@ interface Pendiente {
   temporizador: NodeJS.Timeout | undefined;
 }
 
+/**
+ * Fuera de Windows los procesos de las IA se lanzan en su propio grupo (`detached`): así se puede terminar también a
+ * sus descendientes (shells, pruebas, servidores) y no solo al proceso principal.
+ */
+export const LANZAR_EN_GRUPO = process.platform !== 'win32';
+
+/**
+ * Termina el proceso y todo su árbol: en POSIX, la señal a su grupo entero (`process.kill(-pid)`; el hijo debe haberse
+ * lanzado con `detached`); en Windows, `taskkill /T /F`. Nunca lanza.
+ */
+export function terminarArbol(hijo: ChildProcess, senal: NodeJS.Signals = 'SIGTERM'): void {
+  const pid = hijo.pid;
+  if (pid === undefined) return;
+  if (process.platform === 'win32') {
+    execFile('taskkill.exe', ['/pid', String(pid), '/t', '/f'], { windowsHide: true }, () => {});
+    return;
+  }
+  try {
+    process.kill(-pid, senal);
+  } catch {
+    try {
+      hijo.kill(senal);
+    } catch {
+      // Ya terminó.
+    }
+  }
+}
+
+/**
+ * En POSIX, en cuanto sale el proceso principal se mata lo que quede de su grupo (nietos que siguieran vivos y que, además,
+ * retendrían sus tuberías). Se llama al salir, no más tarde: mientras el grupo tenga miembros su id no se reutiliza.
+ */
+export function barrerGrupo(hijo: ChildProcess): void {
+  if (!LANZAR_EN_GRUPO || hijo.pid === undefined) return;
+  try {
+    process.kill(-hijo.pid, 'SIGKILL');
+  } catch {
+    // El grupo ya estaba vacío.
+  }
+}
+
 function esObjeto(valor: unknown): valor is Record<string, unknown> {
   return typeof valor === 'object' && valor !== null && !Array.isArray(valor);
 }
@@ -109,13 +150,17 @@ export class ClienteJsonRpc {
     hijo.on('error', (error: Error) => {
       this.finalizar(null, `no se pudo lanzar el proceso: ${error.message}`);
     });
+    hijo.on('exit', () => barrerGrupo(hijo));
     hijo.on('close', (codigo: number | null, senal: NodeJS.Signals | null) => {
       const como = codigo !== null ? `con código de salida ${codigo}` : `por la señal ${senal ?? 'desconocida'}`;
       this.finalizar(codigo, `el proceso terminó ${como}`);
     });
   }
 
-  /** Lanza el proceso sin shell y habla JSON-RPC 2.0 (un mensaje JSON por línea) por stdin/stdout. */
+  /**
+   * Lanza el proceso sin shell, en su propio grupo fuera de Windows, y habla JSON-RPC 2.0 (un mensaje JSON por línea)
+   * por stdin/stdout.
+   */
   static lanzar(orden: string, args: string[], opciones: OpcionesLanzar): ClienteJsonRpc {
     const hijo = spawn(orden, args, {
       cwd: opciones.cwd,
@@ -123,6 +168,7 @@ export class ClienteJsonRpc {
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: false,
       windowsHide: true,
+      detached: LANZAR_EN_GRUPO,
     });
     return new ClienteJsonRpc(hijo, opciones.graciaCierreMs ?? GRACIA_CIERRE_MS);
   }
@@ -163,7 +209,7 @@ export class ClienteJsonRpc {
     this.peticion = fn;
   }
 
-  /** Cierra stdin y espera la salida; si el proceso no termina a tiempo, lo termina a la fuerza. */
+  /** Cierra stdin y espera la salida; si el proceso no termina a tiempo, lo termina a la fuerza con todo su árbol. */
   cerrar(): Promise<void> {
     this.cierre ??= this.ejecutarCierre();
     return this.cierre;
@@ -174,9 +220,9 @@ export class ClienteJsonRpc {
       this.hijo.stdin?.end();
       const salioSolo = await Promise.race([this.terminado.then(() => true), pausa(this.graciaCierreMs).then(() => false)]);
       if (!salioSolo) {
-        this.hijo.kill();
+        terminarArbol(this.hijo, 'SIGTERM');
         const termino = await Promise.race([this.terminado.then(() => true), pausa(this.graciaCierreMs).then(() => false)]);
-        if (!termino) this.hijo.kill('SIGKILL');
+        if (!termino) terminarArbol(this.hijo, 'SIGKILL');
       }
     }
     await this.terminado;

@@ -46,6 +46,7 @@ import type {
 } from '@agentclientprotocol/sdk';
 import { resolveCliInvocation } from '../../../src/cli-executable.js';
 import { hallazgosJsonSchema, InformeEstacion } from '../esquemas.js';
+import { barrerGrupo, LANZAR_EN_GRUPO, terminarArbol } from '../jsonrpc.js';
 import { nombreSeguro, type AlProgreso, type Conector, type Encargo, type ResultadoEstacion } from './tipos.js';
 
 const NO_INSTALADO = 'Antigravity no está instalado';
@@ -665,8 +666,8 @@ class ConectorAntigravity implements Conector {
     proceso.hijo.stdin?.end();
     const terminado = proceso.terminado.then(() => true);
     if (!(await Promise.race([terminado, pausa(GRACIA_CIERRE_MS).then(() => false)]))) {
-      proceso.hijo.kill();
-      if (!(await Promise.race([terminado, pausa(GRACIA_CIERRE_MS).then(() => false)]))) proceso.hijo.kill('SIGKILL');
+      terminarArbol(proceso.hijo, 'SIGTERM');
+      if (!(await Promise.race([terminado, pausa(GRACIA_CIERRE_MS).then(() => false)]))) terminarArbol(proceso.hijo, 'SIGKILL');
     }
     await proceso.terminado;
   }
@@ -767,7 +768,10 @@ class ConectorAntigravity implements Conector {
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: false,
       windowsHide: true,
+      // En su propio grupo (fuera de Windows): al cerrar se termina también a sus descendientes.
+      detached: LANZAR_EN_GRUPO,
     });
+    hijo.on('exit', () => barrerGrupo(hijo));
     let salidaError = Buffer.alloc(0);
     hijo.stderr?.on('data', (trozo: Buffer) => {
       const total = Buffer.concat([salidaError, trozo]);
@@ -846,7 +850,7 @@ class ConectorAntigravity implements Conector {
 
   private async forzarFin(proceso: Proceso): Promise<void> {
     proceso.conexion.close();
-    proceso.hijo.kill();
+    terminarArbol(proceso.hijo, 'SIGTERM');
     await Promise.race([proceso.terminado, pausa(GRACIA_CIERRE_MS)]);
   }
 

@@ -435,7 +435,9 @@ const PATRON_ID_ENCARGO = /^[a-z0-9-]+-[0-9a-f]{6}$/u;
 
 /**
  * Borra las carpetas de `~/.nexakit/encargos/` sin actividad en los últimos `dias` (el informe y el diff de un encargo
- * caducan como el rastro). Nunca sigue enlaces. Devuelve los ids borrados.
+ * caducan como el rastro). Nunca sigue enlaces. Si una carpeta aún tiene su worktree `repo/`, primero se quita con la
+ * misma lógica que el barrido de huérfanos (`git worktree prune` solo si el repo del candado lo tiene registrado) y se
+ * respeta si su proceso sigue vivo. Devuelve los ids borrados.
  */
 export async function podarEncargos(home: string, dias: number = DIAS_RASTRO): Promise<string[]> {
   if (!Number.isFinite(dias) || dias <= 0) throw new ErrorFabrica('Los días de poda deben ser un número positivo');
@@ -449,6 +451,14 @@ export async function podarEncargos(home: string, dias: number = DIAS_RASTRO): P
     const dir = path.join(base, id);
     const info = await lstatSiExiste(dir);
     if (info === null || info.isSymbolicLink() || !info.isDirectory() || info.mtimeMs >= limite) continue;
+    // Import dinámico: `worktree.ts` ya importa de este módulo.
+    const { quitarWorktreeDeCarpeta } = await import('./encargo/worktree.js');
+    try {
+      await quitarWorktreeDeCarpeta(dir, id);
+    } catch {
+      // Su proceso sigue vivo: no se toca.
+      continue;
+    }
     await rm(dir, { recursive: true, force: true });
     borrados.push(id);
   }

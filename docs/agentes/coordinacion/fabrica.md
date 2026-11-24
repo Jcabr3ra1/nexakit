@@ -30,9 +30,11 @@ Las IA externas nunca escriben: se deniegan los cambios de archivos y los permis
 ```
 
 - **Copia aislada.** La IA trabaja en un `git worktree` de `HEAD` en `~/.nexakit/encargos/<id>/repo`, que se borra siempre. Devuelve `cambios.diff` (para `git apply`), `informe.json` y el resumen de la IA. `node_modules` se enlaza en solo lectura si está ignorado.
-- **Límites.** Codex corre en `workspace-write`, sin red y sin las reglas de `~/.codex/rules` (un `CODEX_HOME` temporal). Antigravity solo escribe dentro de la copia y en esta versión no ejecuta órdenes. Las órdenes extra (`--ordenes`) requieren aprobación de la persona.
-- **Encargo `invalido`.** Si hay escrituras fuera de la copia (no edites el repo mientras corre), enlaces que salen del repo o cambios en `.git`, `.claude`, `.codex`, `.gemini`, `.agents`, `.nexakit`, `.vscode`, `.husky` o `.github/workflows`.
-- **Un trabajo a la vez**, con el mismo candado que la fábrica. Los encargos caducan a los 90 días.
+- **Límites.** Codex corre en `workspace-write`: solo escribe en la copia y en su carpeta temporal (`~/.nexakit/encargos/<id>/tmp`, exportada como `TMPDIR`), sin red y sin las reglas de `~/.codex/rules` (un `CODEX_HOME` temporal). Codex no pide aprobaciones: su frontera real es el sandbox, y las órdenes por defecto y las de `--ordenes` se le comunican como guía, sin hacerse cumplir. Antigravity solo escribe dentro de la copia y en esta versión no ejecuta órdenes. Las órdenes extra (`--ordenes`) se pasan solo con aprobación de la persona. Las IA corren en su propio grupo de procesos y al cerrar se termina todo el árbol.
+- **Riesgo residual.** El sandbox de Codex acota la escritura, no la lectura: puede leer todo el disco de la persona, no solo las dependencias. Revisa el diff y el resumen antes de aplicarlo o compartirlo.
+- **Encargo `invalido`.** Si hay escrituras fuera de la copia (no edites el repo mientras corre), un repo git anidado (cualquier `.git` dentro de la copia: no se ejecuta git sobre ella), gitlinks, enlaces que salen del repo o cambios en `.git`, `.claude`, `.codex`, `.gemini`, `.agents`, `.nexakit`, `.vscode`, `.husky` o `.github/workflows`. Enlaces y rutas se analizan sobre el propio `cambios.diff`, no sobre el disco.
+- **Alertas.** Los cambios en `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.envrc`, `.npmrc`, `.devcontainer/`, `.cursor/` o `.idea/` no invalidan el encargo, pero el informe los lista en `alertas` y la CLI los destaca: requieren revisión explícita.
+- **Un trabajo a la vez** (un encargo o recorrido), con el mismo candado que la fábrica. Los encargos caducan a los 90 días.
 - **Revisión cruzada del diff.** El orquestador revisa el diff, lo aplica, ejecuta las pruebas y lo pasa por al menos una IA distinta de la que lo escribió; si falla, lo resuelve con Claude. Informa en una línea qué IA hizo cada encargo.
 
 ## Servidor y orden equivalente

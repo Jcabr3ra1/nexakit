@@ -32,12 +32,12 @@ la sesión por tu cuenta. Sin subagentes de nivel, trabaja tú.
 
 Encargos: las tareas ligeras o normales con diseño claro las delegas primero,
 sin preguntar, con fabrica_encargar (o ~/.nexakit/nexakit encargar) en Codex o
-Antigravity: trabajan en una copia aislada y devuelven un diff. Lo revisas, lo
-aplicas con git apply, pruebas e integras; si falla, lo resuelves con Claude.
+Antigravity: trabajan en una copia aislada y devuelven un diff. Revisas diff y
+resumen, lo aplicas, pruebas e integras; si falla, lo resuelves con Claude.
 Lo exigente, alto, de seguridad o de contexto largo sigue con subagentes de
 Claude. Revisa el diff con al menos una IA distinta de la que lo escribió. No
 edites el repo mientras corre un encargo. Informa en una línea qué IA hizo cada
-encargo; las órdenes extra, solo con aprobación de la persona.
+encargo; --ordenes, con permiso de la persona (en Codex solo orientan).
 
 La fábrica (revisión con varias IA) la lanzas tú, sin pedir permiso: al cerrar
 una tarea con cambios de código y siempre antes de proponer o crear un PR, con

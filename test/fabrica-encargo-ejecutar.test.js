@@ -5,8 +5,9 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync,
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { gitConfigGlobalVacio } from '../test-support/git-aislado.js';
-import { ejecutarEncargo, TIEMPO_ENCARGO_MS } from '../dist/fabrica/encargo/ejecutar.js';
-import { barrerHuerfanos, crearWorktree } from '../dist/fabrica/encargo/worktree.js';
+import { ejecutarEncargo, rutasVetadas, TIEMPO_ENCARGO_MS } from '../dist/fabrica/encargo/ejecutar.js';
+import { analizarParche } from '../dist/fabrica/encargo/parche.js';
+import { barrerHuerfanos, borrarWorktree, crearWorktree, diffDelWorktree } from '../dist/fabrica/encargo/worktree.js';
 import { leerCandado } from '../dist/fabrica/encargo/candado.js';
 import { ErrorFabrica } from '../dist/fabrica/errores.js';
 import { aceptar, registrar } from '../dist/fabrica/lecciones.js';
@@ -20,6 +21,7 @@ process.env.GIT_AUTHOR_NAME = process.env.GIT_COMMITTER_NAME = 'Prueba';
 process.env.GIT_AUTHOR_EMAIL = process.env.GIT_COMMITTER_EMAIL = 'prueba@example.com';
 
 const SIN_ENLACES = process.platform === 'win32' || fileSymlinkSkipReason();
+const POSIX = process.platform !== 'win32';
 const DIA_MS = 24 * 60 * 60 * 1000;
 
 const temporales = [];
@@ -891,4 +893,231 @@ test('el hook post-checkout del repo real no corre al crear el worktree', { skip
   const informe = await ejecutarEncargo(opciones(e, { conectores: { codex: codex.crear } }));
   assert.equal(informe.estado, 'sin-cambios', informe.motivo);
   assert.equal(existsSync(path.join(e.raiz, 'hook-corrio.txt')), false);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Repo git anidado, análisis sobre el parche guardado, alertas y carpeta temporal
+
+/** Crea en `dir` un repo con un commit, un filtro `clean` que crea `testigo` y un archivo sucio que obliga a pasarlo. */
+function repoAnidadoConFiltro(dir, testigo) {
+  mkdirSync(dir, { recursive: true });
+  git(dir, 'init', '-q');
+  writeFileSync(path.join(dir, 'f.txt'), 'hola\n');
+  git(dir, 'add', '-A');
+  git(dir, 'commit', '-q', '-m', 'sub');
+  git(dir, 'config', 'filter.testigo.clean', `"${process.execPath}" -e "require('fs').writeFileSync(process.argv[1], 'x')" "${testigo}"`);
+  writeFileSync(path.join(dir, '.gitattributes'), '* filter=testigo\n');
+  // Mismo tamaño y otra fecha: git tiene que leer el contenido (y pasar el filtro) para saber si cambió.
+  writeFileSync(path.join(dir, 'f.txt'), 'HOLA\n');
+  const hace = new Date(Date.now() - 3_600_000);
+  utimesSync(path.join(dir, 'f.txt'), hace, hace);
+}
+
+test('un repo git anidado (carpeta .git) invalida el encargo sin ejecutar git sobre la copia: su filtro no corre', async () => {
+  const e = entorno();
+  const testigo = path.join(e.home, 'testigo-filtro');
+  let explotable = false;
+  const codex = fabrica('codex', async (encargo) => {
+    writeFileSync(path.join(encargo.raiz, 'a.txt'), 'dos\n');
+    repoAnidadoConFiltro(path.join(encargo.raiz, 'sub'), testigo);
+    // Comprobación previa: sin las protecciones, un `git diff` sobre la copia sí ejecutaría el filtro del repo anidado.
+    try {
+      git(encargo.raiz, '-c', 'advice.addEmbeddedRepo=false', 'add', '-N', '--all', '--', '.');
+      git(encargo.raiz, 'diff', 'HEAD', '--');
+    } catch {}
+    explotable = existsSync(testigo);
+    try {
+      git(encargo.raiz, 'reset', '-q');
+    } catch {}
+    rmSync(testigo, { force: true });
+    return okDe();
+  });
+  const informe = await ejecutarEncargo(opciones(e, { conectores: { codex: codex.crear } }));
+  assert.equal(informe.estado, 'invalido');
+  assert.match(informe.motivo, /repo git anidado en sub\/\.git/u);
+  assert.deepEqual(informe.rutasVetadas, ['sub/.git (repo git anidado)']);
+  assert.equal(informe.rutaDiff, null);
+  assert.equal(existsSync(testigo), false, 'el filtro clean del repo anidado no debe ejecutarse');
+  comprobarLimpio(e, informe);
+  if (!explotable) console.log('aviso: esta versión de git no ejecutó el filtro en la comprobación previa');
+});
+
+test('un .git anidado como archivo (gitdir:) o con otra caja también invalida el encargo', async () => {
+  for (const [ruta, crear] of [
+    ['x/y/.git', (raiz, testigo) => {
+      const gitdir = mkdtempSync(path.join(tmpdir(), 'enc-ej-gitdir-'));
+      temporales.push(gitdir);
+      repoAnidadoConFiltro(gitdir, testigo);
+      mkdirSync(path.join(raiz, 'x', 'y'), { recursive: true });
+      writeFileSync(path.join(raiz, 'x', 'y', '.git'), `gitdir: ${path.join(gitdir, '.git')}\n`);
+      writeFileSync(path.join(raiz, 'x', 'y', 'f.txt'), 'HOLA\n');
+      writeFileSync(path.join(raiz, 'x', 'y', '.gitattributes'), '* filter=testigo\n');
+    }],
+    ['z/.GIT', (raiz) => {
+      mkdirSync(path.join(raiz, 'z', '.GIT'), { recursive: true });
+    }],
+  ]) {
+    const e = entorno();
+    const testigo = path.join(e.home, 'testigo-filtro');
+    const codex = fabrica('codex', async (encargo) => {
+      crear(encargo.raiz, testigo);
+      rmSync(testigo, { force: true });
+      return okDe();
+    });
+    const informe = await ejecutarEncargo(opciones(e, { conectores: { codex: codex.crear } }));
+    assert.equal(informe.estado, 'invalido', ruta);
+    assert.deepEqual(informe.rutasVetadas, [`${ruta} (repo git anidado)`]);
+    assert.equal(existsSync(testigo), false, ruta);
+    comprobarLimpio(e, informe);
+  }
+});
+
+test('rutasVetadas veta gitlinks (modo 160000), enlaces sin destino legible y entradas que no se pueden analizar', () => {
+  const vetadas = rutasVetadas([
+    { ruta: 'vendor/lib', modo: '160000' },
+    { ruta: 'enlace', modo: '120000', destino: null },
+    { ruta: '', modo: '' },
+    { ruta: 'normal.txt', modo: '100644' },
+    { ruta: 'dentro', modo: '120000', destino: 'normal.txt' },
+    { ruta: 'gh', modo: '120000', destino: '.GitHub.' },
+  ]);
+  assert.deepEqual(vetadas.map((v) => v.split(' (')[0]), ['vendor/lib', 'enlace', '(sin ruta)', 'gh']);
+  assert.match(vetadas[0], /modo 160000/u);
+  assert.match(vetadas[1], /no se pudo leer del diff/u);
+  assert.match(vetadas[2], /no se pudo analizar/u);
+  assert.match(vetadas[3], /apunta a \.github/u);
+});
+
+test('el análisis sale del diff guardado: cambiar el disco después no cambia el veredicto', { skip: SIN_ENLACES }, async () => {
+  const e = entorno();
+  const w = await crearWorktree(e.raiz, e.home);
+  try {
+    symlinkSync('/etc/hosts', path.join(w.dir, 'enlace'));
+    const diff = await diffDelWorktree(w);
+    // Tras guardar el diff, alguien cambia el enlace en el disco por uno inofensivo.
+    rmSync(path.join(w.dir, 'enlace'));
+    symlinkSync('a.txt', path.join(w.dir, 'enlace'));
+    const entradas = analizarParche(diff);
+    assert.deepEqual(entradas, [{ ruta: 'enlace', modo: '120000', destino: '/etc/hosts' }]);
+    assert.match(rutasVetadas(entradas)[0], /^enlace \(enlace simbólico hacia fuera del repo: \/etc\/hosts\)/u);
+  } finally {
+    await borrarWorktree(w);
+  }
+});
+
+test('analizarParche lee rutas con espacios y comillas, borrados, modos y destinos de enlace; un destino de varias líneas no se acepta', { skip: SIN_ENLACES }, async () => {
+  const e = entorno();
+  writeFileSync(path.join(e.raiz, 'borrar.txt'), 'x\n');
+  writeFileSync(path.join(e.raiz, 'script.sh'), 'echo\n');
+  git(e.raiz, 'add', '-A');
+  git(e.raiz, 'commit', '-q', '-m', 'mas');
+  const w = await crearWorktree(e.raiz, e.home);
+  try {
+    writeFileSync(path.join(w.dir, 'con espacio.txt'), 'hola\n');
+    writeFileSync(path.join(w.dir, 'raro"q.txt'), 'x\n');
+    rmSync(path.join(w.dir, 'borrar.txt'));
+    chmodSync(path.join(w.dir, 'script.sh'), 0o755);
+    symlinkSync('a.txt', path.join(w.dir, 'b c'));
+    symlinkSync('uno\ndos', path.join(w.dir, 'multi'));
+    writeFileSync(path.join(w.dir, 'datos.bin'), Buffer.from([0, 1, 2, 0]));
+    const entradas = analizarParche(await diffDelWorktree(w));
+    const por = Object.fromEntries(entradas.map((x) => [x.ruta, x]));
+    assert.deepEqual(por['b c'], { ruta: 'b c', modo: '120000', destino: 'a.txt' });
+    assert.equal(por['borrar.txt'].modo, '000000');
+    assert.equal(por['con espacio.txt'].modo, '100644');
+    assert.equal(por['datos.bin'].modo, '100644');
+    assert.equal(por['raro"q.txt'].modo, '100644');
+    if (process.platform !== 'win32') assert.equal(por['script.sh'].modo, '100755');
+    assert.deepEqual(por.multi, { ruta: 'multi', modo: '120000', destino: null });
+    assert.match(rutasVetadas(entradas).join('|'), /^multi \(enlace simbólico cuyo destino no se pudo leer del diff\)$/u);
+  } finally {
+    await borrarWorktree(w);
+  }
+});
+
+test('los cambios en instrucciones y configuración no invalidan el encargo, pero salen en alertas', async () => {
+  const e = entorno();
+  const codex = fabrica('codex', async (encargo) => {
+    const escribir = (relativa, texto) => {
+      mkdirSync(path.dirname(path.join(encargo.raiz, relativa)), { recursive: true });
+      writeFileSync(path.join(encargo.raiz, relativa), texto);
+    };
+    escribir('CLAUDE.md', 'nuevas instrucciones');
+    escribir('src/AGENTS.md', 'x');
+    escribir('GEMINI.md', 'x');
+    escribir('.envrc', 'export A=1');
+    escribir('pkg/.npmrc', 'registry=x');
+    escribir('.devcontainer/devcontainer.json', '{}');
+    escribir('.cursor/rules.md', 'x');
+    escribir('.idea/workspace.xml', 'x');
+    escribir('normal.txt', 'x');
+    return okDe();
+  });
+  const informe = await ejecutarEncargo(opciones(e, { conectores: { codex: codex.crear } }));
+  assert.equal(informe.estado, 'ok', informe.motivo);
+  assert.deepEqual(informe.rutasVetadas, []);
+  assert.deepEqual(informe.alertas.map((a) => a.split(' ')[0]).sort(), [
+    '.cursor/rules.md',
+    '.devcontainer/devcontainer.json',
+    '.envrc',
+    '.idea/workspace.xml',
+    'CLAUDE.md',
+    'GEMINI.md',
+    'pkg/.npmrc',
+    'src/AGENTS.md',
+  ]);
+  assert.match(informe.alertas[0], /requiere revisión explícita/u);
+  assert.ok(informe.rutaDiff !== null);
+  comprobarLimpio(e, informe);
+  // Sin esos archivos, no hay alertas.
+  const e2 = entorno();
+  const limpio = fabrica('codex', async (encargo) => {
+    writeFileSync(path.join(encargo.raiz, 'a.txt'), 'dos\n');
+    return okDe();
+  });
+  assert.deepEqual((await ejecutarEncargo(opciones(e2, { conectores: { codex: limpio.crear } }))).alertas, []);
+});
+
+test('el conector recibe una carpeta temporal propia fuera de la copia, 0o700, que se borra con el encargo', async () => {
+  const e = entorno();
+  let visto;
+  const codex = fabrica('codex', async (encargo) => {
+    const tmp = codex.registro.creaciones[0].tmp;
+    writeFileSync(path.join(tmp, 'prueba.tmp'), 'x');
+    visto = { tmp, existe: existsSync(tmp), modo: modo(tmp), raiz: encargo.raiz };
+    return okDe();
+  });
+  const informe = await ejecutarEncargo(opciones(e, { conectores: { codex: codex.crear } }));
+  assert.equal(informe.estado, 'sin-cambios', informe.motivo);
+  assert.equal(visto.tmp, path.join(e.home, '.nexakit', 'encargos', informe.id, 'tmp'));
+  assert.equal(path.dirname(visto.tmp), path.dirname(visto.raiz), 'junto a la copia, no dentro');
+  assert.equal(visto.existe, true);
+  if (POSIX) assert.equal(visto.modo, 0o700);
+  assert.equal(existsSync(visto.tmp), false, 'se borra al terminar');
+  comprobarLimpio(e, informe);
+});
+
+test('la poda de encargos caducados quita su worktree con git solo si el repo del candado lo tiene registrado y respeta los vivos', async () => {
+  const a = entorno();
+  const b = entorno();
+  const viejo = await crearWorktree(a.raiz, a.home);
+  const ajeno = await crearWorktree(a.raiz, a.home);
+  const vivo = await crearWorktree(a.raiz, a.home);
+  // En el repo b hay una entrada de worktree rota que un `prune` en b limpiaría.
+  const roto = await crearWorktree(b.raiz, b.home);
+  rmSync(roto.dir, { recursive: true, force: true });
+  const antesB = git(b.raiz, 'worktree', 'list', '--porcelain');
+  writeFileSync(path.join(path.dirname(viejo.dir), 'candado.json'), JSON.stringify({ pid: pidMuerto(), raiz: a.raiz }));
+  writeFileSync(path.join(path.dirname(ajeno.dir), 'candado.json'), JSON.stringify({ pid: pidMuerto(), raiz: b.raiz }));
+  const hace = new Date(Date.now() - 91 * DIA_MS);
+  for (const w of [viejo, ajeno, vivo]) utimesSync(path.dirname(w.dir), hace, hace);
+
+  await rastro.podarEncargos(a.home);
+  assert.equal(existsSync(path.dirname(viejo.dir)), false, 'el caducado se borra entero');
+  assert.equal(existsSync(path.dirname(ajeno.dir)), false, 'el de candado ajeno también, pero sin tocar ese repo');
+  assert.equal(existsSync(vivo.dir), true, 'el de un proceso vivo se respeta aunque haya caducado');
+  const listado = git(a.raiz, 'worktree', 'list', '--porcelain');
+  assert.doesNotMatch(listado, new RegExp(viejo.id), 'el registro del caducado se limpia en su repo');
+  assert.match(listado, new RegExp(vivo.id));
+  assert.equal(git(b.raiz, 'worktree', 'list', '--porcelain'), antesB, 'el repo ajeno no se toca (ni remove ni prune)');
 });

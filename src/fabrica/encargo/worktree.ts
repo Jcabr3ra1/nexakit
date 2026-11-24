@@ -96,6 +96,11 @@ function argsSobreWorktree(w: Worktree, args: string[]): string[] {
     `core.hooksPath=${os.devNull}`,
     '-c',
     'core.untrackedCache=false',
+    // Ni submódulos ni repos anidados: git entraría en ellos y aplicaría su configuración (filtros `clean` incluidos).
+    '-c',
+    'diff.ignoreSubmodules=all',
+    '-c',
+    'submodule.recurse=false',
     ...args,
   ];
 }
@@ -108,7 +113,9 @@ const borrarCarpeta = (ruta: string): Promise<void> => rm(ruta, { recursive: tru
  * Enlaza `node_modules` del repo real en el worktree para que la IA pueda compilar y probar sin red.
  * Solo si es una carpeta real (no un enlace) y git la tiene ignorada, también ya como enlace dentro del worktree: así no entra en el diff ni dispara el análisis
  * de enlaces que salen del repo. Codex escribe con sandbox por ruta real (no puede tocar el `node_modules` real) y
- * Antigravity veta componentes que sean enlaces. Riesgo residual: la IA puede LEER las dependencias.
+ * Antigravity veta componentes que sean enlaces. Riesgo residual: el sandbox de Codex acota la escritura, no la lectura;
+ * en modo escritura Codex puede LEER todo el disco de la persona (no solo las dependencias). Quien encarga revisa el
+ * diff y el resumen antes de aplicarlo o compartirlo.
  * `borrarWorktree` borra el enlace sin seguirlo.
  */
 async function enlazarNodeModules(raiz: string, dir: string): Promise<void> {
@@ -185,17 +192,66 @@ export async function crearWorktree(raiz: string, home: string, opciones: Opcion
   throw new ErrorFabrica('No se pudo reservar un id libre para el encargo');
 }
 
+/** Tope de entradas que recorre `buscarGitAnidado`: más allá, el encargo no se comprueba y se rechaza. */
+const MAX_ENTRADAS_RECORRIDO = 1_000_000;
+
+/** `.git` también con otra caja, puntos o espacios finales (Windows) o el nombre corto de NTFS. */
+const esNombreGit = (nombre: string): boolean => {
+  const normal = nombre.toLowerCase().replace(/[. ]+$/u, '');
+  return normal === '.git' || normal === 'git~1';
+};
+
+/**
+ * Primer `.git` anidado (carpeta, archivo o enlace) dentro del worktree, como ruta relativa con `/`, o `null`. Recorre con
+ * el tipo de `readdir` (sin seguir enlaces) y salta solo el `.git` de la raíz. Hay que llamarla antes de cualquier orden
+ * git sobre el worktree tras el turno: git entraría en un repo anidado y ejecutaría los filtros de su configuración,
+ * fuera de todo sandbox. Lanza si no puede leer una carpeta o si hay demasiadas entradas.
+ */
+export async function buscarGitAnidado(dir: string): Promise<string | null> {
+  const pendientes: string[] = [''];
+  let vistas = 0;
+  while (pendientes.length > 0) {
+    const relativa = pendientes.pop() as string;
+    const entradas = await readdir(relativa === '' ? dir : path.join(dir, ...relativa.split('/')), { withFileTypes: true });
+    for (const entrada of entradas) {
+      vistas += 1;
+      if (vistas > MAX_ENTRADAS_RECORRIDO) throw new ErrorFabrica(`la copia tiene más de ${MAX_ENTRADAS_RECORRIDO} entradas`);
+      const ruta = relativa === '' ? entrada.name : `${relativa}/${entrada.name}`;
+      if (esNombreGit(entrada.name)) {
+        if (relativa === '' && entrada.name === '.git') continue;
+        return ruta;
+      }
+      // Los enlaces (también el de `node_modules`) no se siguen.
+      if (entrada.isDirectory() && !entrada.isSymbolicLink()) pendientes.push(ruta);
+    }
+  }
+  return null;
+}
+
 /**
  * Diff del worktree contra su base, con los archivos nuevos (`git add -N`) y los binarios (`--binary`), listo para
- * `git apply`. Se devuelve como bytes: un archivo que no está en UTF-8 se corrompería al decodificarlo. Vacío si no
- * hubo cambios.
+ * `git apply`, sin renombrados ni submódulos. Se devuelve como bytes: un archivo que no está en UTF-8 se corrompería al
+ * decodificarlo. Vacío si no hubo cambios. Antes hay que descartar los repos anidados con `buscarGitAnidado`.
  */
 export async function diffDelWorktree(w: Worktree): Promise<Buffer> {
   try {
     await gitBytes(w.dir, argsSobreWorktree(w, ['add', '-N', '--all', '--', '.']));
     return await gitBytes(
       w.dir,
-      argsSobreWorktree(w, ['diff', '--binary', '--no-ext-diff', '--no-textconv', '--no-color', '--src-prefix=a/', '--dst-prefix=b/', w.base, '--']),
+      argsSobreWorktree(w, [
+        'diff',
+        '--binary',
+        '--no-renames',
+        '--no-relative',
+        '--ignore-submodules=all',
+        '--no-ext-diff',
+        '--no-textconv',
+        '--no-color',
+        '--src-prefix=a/',
+        '--dst-prefix=b/',
+        w.base,
+        '--',
+      ]),
     );
   } catch (error) {
     throw new ErrorFabrica(`No se pudo leer el diff del encargo: ${mensajeDe(error)}`, { cause: error });
@@ -212,12 +268,15 @@ export interface CambioWorktree {
 
 /**
  * Cambios del worktree contra su base (`git diff --raw -z --no-renames`), con la ruta y el modo nuevo de cada uno, sin
- * decodificar nombres raros. Debe llamarse después de `diffDelWorktree`, que registra los archivos nuevos.
+ * decodificar nombres raros. Debe llamarse después de `diffDelWorktree`, que registra los archivos nuevos. El encargo no
+ * la usa: analiza el propio parche guardado (`analizarParche`), que no puede cambiar entre el diff y la comprobación.
  */
 export async function cambiosDelWorktree(w: Worktree): Promise<CambioWorktree[]> {
   let crudo: string;
   try {
-    crudo = (await gitBytes(w.dir, argsSobreWorktree(w, ['diff', '--raw', '-z', '--no-renames', '--no-ext-diff', '--no-textconv', w.base, '--']))).toString('utf8');
+    crudo = (
+      await gitBytes(w.dir, argsSobreWorktree(w, ['diff', '--raw', '-z', '--no-renames', '--no-relative', '--ignore-submodules=all', '--no-ext-diff', '--no-textconv', w.base, '--']))
+    ).toString('utf8');
   } catch (error) {
     throw new ErrorFabrica(`No se pudo analizar el diff del encargo: ${mensajeDe(error)}`, { cause: error });
   }
@@ -245,16 +304,15 @@ export async function raizDelRepoGit(cwd: string): Promise<string> {
 
 /**
  * Quita el worktree y limpia el registro de git. Nunca lanza: si algo falla, devuelve el aviso (y `null` si todo fue bien).
+ * No ejecuta git sobre el worktree (que controla la IA y puede traer un repo anidado): borra la carpeta sin seguir enlaces
+ * y después `git worktree prune` en el repo real limpia su entrada de `.git/worktrees`.
  */
 export async function borrarWorktree(w: Worktree): Promise<string | null> {
   const fallos: string[] = [];
   try {
-    await git(w.raiz, ['worktree', 'remove', '--force', w.dir]);
-  } catch {
-    // Si git no puede quitarlo (carpeta ya borrada, bloqueo...), se borra la carpeta y `prune` limpia el registro.
-    await borrarCarpeta(w.dir).catch((e: unknown) => {
-      fallos.push(mensajeDe(e));
-    });
+    await borrarCarpeta(w.dir);
+  } catch (error) {
+    fallos.push(mensajeDe(error));
   }
   try {
     await git(w.raiz, ['worktree', 'prune']);
@@ -322,22 +380,37 @@ export async function barrerHuerfanos(home: string, ahora: number = Date.now()):
       const carpeta = path.join(encargos, nombre);
       const info = await lstat(carpeta);
       if (!info.isDirectory() || info.isSymbolicLink()) continue;
-      const dir = path.join(carpeta, 'repo');
-      const repo = await lstat(dir).catch(() => null);
+      const repo = await lstat(path.join(carpeta, 'repo')).catch(() => null);
       // Un `repo` que sea un enlace u otra cosa no se toca: solo se borra un worktree real.
       if (repo === null || !repo.isDirectory() || repo.isSymbolicLink()) continue;
       const candado = await leerCandadoWorktree(carpeta);
       if (candado === null ? ahora - info.mtimeMs < GRACIA_SIN_CANDADO_MS : procesoVivo(candado.pid)) continue;
-      // Sin una raíz que tenga registrado este worktree solo se borra la carpeta: ejecutar git en otro repo lo tocaría sin motivo.
-      const raizRepo = candado?.raiz;
-      let aviso: string | null = null;
-      if (raizRepo !== undefined && path.isAbsolute(raizRepo) && (await worktreeRegistrado(raizRepo, dir))) {
-        aviso = await borrarWorktree({ id: nombre, dir, base: '', raiz: raizRepo, gitDir: '', avisos: [] });
-      } else await borrarCarpeta(dir);
-      avisos.push(aviso ?? `Se borró el worktree huérfano de un encargo anterior (${nombre}).`);
+      const aviso = await quitarWorktreeDeCarpeta(carpeta, nombre);
+      if (aviso !== undefined) avisos.push(aviso ?? `Se borró el worktree huérfano de un encargo anterior (${nombre}).`);
     } catch (error) {
       avisos.push(`No se pudo revisar la carpeta de encargo ${nombre}: ${mensajeDe(error)}`);
     }
   }
   return avisos;
+}
+
+/**
+ * Quita el worktree `repo` (y la carpeta `tmp`) de una carpeta de encargo cuyo proceso ya no vive. Solo ejecuta git en
+ * la raíz del candado si ese repo tiene registrado el worktree; si no, solo borra la carpeta (ejecutar git en otro repo
+ * lo tocaría sin motivo). Devuelve `undefined` si no había worktree real, `null` si se borró bien y el aviso si no.
+ * Lanza si el proceso del candado sigue vivo.
+ */
+export async function quitarWorktreeDeCarpeta(carpeta: string, nombre: string = path.basename(carpeta)): Promise<string | null | undefined> {
+  const candado = await leerCandadoWorktree(carpeta);
+  if (candado !== null && procesoVivo(candado.pid)) throw new ErrorFabrica(`el encargo ${nombre} sigue en curso (proceso ${candado.pid})`);
+  await borrarCarpeta(path.join(carpeta, 'tmp')).catch(() => {});
+  const dir = path.join(carpeta, 'repo');
+  const repo = await lstat(dir).catch(() => null);
+  if (repo === null || !repo.isDirectory() || repo.isSymbolicLink()) return undefined;
+  const raizRepo = candado?.raiz;
+  if (raizRepo !== undefined && path.isAbsolute(raizRepo) && (await worktreeRegistrado(raizRepo, dir))) {
+    return borrarWorktree({ id: nombre, dir, base: '', raiz: raizRepo, gitDir: '', avisos: [] });
+  }
+  await borrarCarpeta(dir);
+  return null;
 }
