@@ -30,9 +30,15 @@
 // `npm test` aprobada corre en el sandbox (el binario usa `/usr/bin/sandbox-exec`) y su script no pudo escribir fuera del `cwd` (carpeta personal, carpeta
 // hermana, el `node_modules` enlazado, `.git/hooks` y `.git/config` del repo real; también desde un `sh` hijo), ni leer
 // fuera de él, ni usar la red (DNS y HTTPS: ENOTFOUND). Sí pudo escribir en `/tmp` y en el `TMPDIR` del sistema, que
-// no son el repo. Tampoco pudo escribir dentro del `cwd` cuando este cuelga de una carpeta oculta (`~/.nexakit/...`):
-// las órdenes que generan archivos fallan, pero no escapan. La petición llega como `kind: execute`, `name: run_command`
-// y `rawInput` = { CommandLine, BypassSandbox, WaitMsBeforeAsync, toolSummary } (repetido en `args`); salir del sandbox
+// no son el repo. Tampoco puede escribir dentro del `cwd`: `agy acp --sandbox` monta la carpeta de la sesión en solo
+// lectura para las órdenes, esté donde esté. Comprobado con agy 1.5.16 (11 sesiones de `gemini-3.8-flash-low`, unos
+// 11 000 tokens cada una; el kernel anota `deny(1) file-write-create <cwd>/...`): falla igual bajo `~/.nexakit`, en una
+// carpeta no oculta de la carpeta personal y bajo el `TMPDIR` (donde la carpeta hermana sí era escribible), en un
+// worktree y en un repo normal, en modo `default` y `accept-edits`, y con `--add-dir`, `additionalDirectories` en
+// `session/new` o un proyecto `default-cli-project.json` que declara la carpeta. No hay opción conocida para abrir solo
+// la copia: las órdenes que generan archivos (`npm test` con compilación) fallan, pero no escapan. La petición llega como
+// `kind: execute`, `name: run_command` y `rawInput` = { CommandLine, BypassSandbox, WaitMsBeforeAsync, toolSummary }
+// (repetido en `args`); con agy 1.5.16 el modelo suele omitir `BypassSandbox` y la orden se rechaza. Salir del sandbox
 // (`BypassSandbox` distinto de `false`, o ausente) se rechaza siempre. Solo en macOS y con agy 1.5.14 o superior de la
 // serie 1.5 (`agy --version`, una vez al crear el conector): en Linux y Windows, o con otra versión, no se verificó y no
 // se aprueba ninguna orden (`ORDENES_ACTIVAS`, `comprobarOrdenes`).
