@@ -123,13 +123,17 @@ export interface InformeEncargo {
 // ---------------------------------------------------------------------------------------------
 // Conectores y modelo
 
-/** Los conectores reales, con la misma configuración de entorno que la fábrica, en modo escritura. */
-function fabricasDeEntorno(entorno: NodeJS.ProcessEnv): FabricasConectores {
+/**
+ * Los conectores reales, con la misma configuración de entorno que la fábrica, en modo escritura. `home` es la carpeta
+ * personal cuya lectura Codex tiene vetada (salvo el camino hasta el encargo) donde sabe acotarla.
+ */
+function fabricasDeEntorno(entorno: NodeJS.ProcessEnv, home: string): FabricasConectores {
   return {
     codex: (escritura) =>
       crearConectorCodex({
         ...opcionesDeEntorno(entorno, 'NEXAKIT_FABRICA_CODEX'),
         escritura: { raiz: escritura.raiz, ...(escritura.tmp === undefined ? {} : { tmp: escritura.tmp }) },
+        home,
       }),
     antigravity: (escritura) =>
       crearConectorAntigravity({
@@ -319,7 +323,7 @@ export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<Inform
   if (!extras.every((o) => typeof o === 'string' && o.trim() !== '')) throw new ErrorFabrica('Las órdenes permitidas deben ser textos no vacíos');
 
   const inicio = Date.now();
-  const fabricas = opciones.conectores ?? fabricasDeEntorno(entorno);
+  const fabricas = opciones.conectores ?? fabricasDeEntorno(entorno, home);
   // La raíz del repo, no una subcarpeta: la instantánea del disco, las lecciones y el rastro hablan del repo entero.
   const raiz = await raizDelRepoGit(raizPedida);
   // Un encargo a la vez en toda la máquina: el candado va antes del barrido y de crear nada, y se libera en el `finally`.

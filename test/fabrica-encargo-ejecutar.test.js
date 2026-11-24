@@ -1136,7 +1136,17 @@ test('sin conectores inyectados, el conector real de Codex (con NEXAKIT_FABRICA_
   const registro = path.join(dir, 'registro.ndjson');
   const registroEnv = path.join(dir, 'env.json');
   const rutaGuion = path.join(dir, 'guion.json');
-  writeFileSync(rutaGuion, JSON.stringify({ ...revision, metodos: { ...revision.metodos, 'model/list': catalogo.metodos['model/list'] }, registro, registroEnv }));
+  // En macOS el conector exige que Codex active el perfil de lectura acotada; en otras plataformas se ignora.
+  const hiloConPerfil = {
+    ...revision.metodos['thread/start'],
+    resultado: { ...revision.metodos['thread/start'].resultado, activePermissionProfile: { id: 'nexakit-encargo', extends: null } },
+  };
+  writeFileSync(rutaGuion, JSON.stringify({
+    ...revision,
+    metodos: { ...revision.metodos, 'thread/start': hiloConPerfil, 'model/list': catalogo.metodos['model/list'] },
+    registro,
+    registroEnv,
+  }));
   // CODEX_HOME de pruebas: el home aislado del modo escritura nunca enlaza el auth.json de la persona.
   const codexHome = path.join(dir, 'codex-home');
   mkdirSync(codexHome);
@@ -1163,16 +1173,27 @@ test('sin conectores inyectados, el conector real de Codex (con NEXAKIT_FABRICA_
   const turno = mensajes.find((m) => m.method === 'turn/start').params;
   const carpeta = path.join(realpathSync(e.home), '.nexakit', 'encargos', informe.id);
   const copia = path.join(carpeta, 'repo');
-  assert.equal(hilo.sandbox, 'workspace-write');
   assert.equal(hilo.approvalPolicy, 'never');
   assert.equal(hilo.cwd, copia);
   assert.equal(turno.cwd, copia);
-  // La copia es la única raíz escribible del repo; la otra es la carpeta temporal del encargo, fuera del repo real.
-  assert.deepEqual(turno.sandboxPolicy.writableRoots, [copia, path.join(carpeta, 'tmp')]);
-  assert.equal(turno.sandboxPolicy.networkAccess, false);
-  assert.deepEqual(hilo.config.sandbox_workspace_write.writable_roots, [copia, path.join(carpeta, 'tmp')]);
-  assert.ok(!turno.sandboxPolicy.writableRoots.some((r) => r.startsWith(realpathSync(e.raiz))), 'el repo real nunca es escribible');
   const env = JSON.parse(readFileSync(registroEnv, 'utf8'));
+  if (process.platform === 'darwin') {
+    // Perfil de permisos del CODEX_HOME aislado: la copia y su carpeta temporal escribibles, el home del encargo vetado
+    // salvo ese camino (aquí, la carpeta personal de pruebas), sin red.
+    assert.equal('sandbox' in hilo, false);
+    assert.equal('sandboxPolicy' in turno, false);
+    const escribibles = [...env.config.matchAll(/^(".*") = "write"$/gmu)].map((m) => JSON.parse(m[1]));
+    assert.deepEqual(escribibles, [copia, path.join(carpeta, 'tmp')]);
+    assert.ok(!escribibles.some((r) => r.startsWith(realpathSync(e.raiz))), 'el repo real nunca es escribible');
+    assert.match(env.config, /^\[permissions\.nexakit-encargo\.network\]\nenabled = false$/mu);
+  } else {
+    assert.equal(hilo.sandbox, 'workspace-write');
+    // La copia es la única raíz escribible del repo; la otra es la carpeta temporal del encargo, fuera del repo real.
+    assert.deepEqual(turno.sandboxPolicy.writableRoots, [copia, path.join(carpeta, 'tmp')]);
+    assert.equal(turno.sandboxPolicy.networkAccess, false);
+    assert.deepEqual(hilo.config.sandbox_workspace_write.writable_roots, [copia, path.join(carpeta, 'tmp')]);
+    assert.ok(!turno.sandboxPolicy.writableRoots.some((r) => r.startsWith(realpathSync(e.raiz))), 'el repo real nunca es escribible');
+  }
   assert.notEqual(env.home, codexHome, 'CODEX_HOME aislado');
   assert.equal(env.temporales.TMPDIR, path.join(carpeta, 'tmp'));
   assert.match(turno.input[0].text, /Para comprobar tu trabajo usa solo estas órdenes: `npm test`, `npm run typecheck`/u);

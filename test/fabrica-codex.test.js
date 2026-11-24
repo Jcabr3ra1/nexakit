@@ -6,7 +6,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Ajv } from 'ajv';
-import { crearConectorCodex, crearHomeAislado, esShellDelSistema, ordenPermitida, versionTiposCodex } from '../dist/fabrica/conectores/codex.js';
+import {
+  configDePerfil, crearConectorCodex, crearHomeAislado, esShellDelSistema, ordenPermitida, perfilDeEncargo, PERFIL_ENCARGO,
+  versionTiposCodex, vetosDeLectura,
+} from '../dist/fabrica/conectores/codex.js';
 import { hallazgosJsonSchema } from '../dist/fabrica/esquemas.js';
 import { resolveCliInvocation } from '../src/cli-executable.js';
 
@@ -36,7 +39,9 @@ function preparar(nombre, cambios = {}, opcionesConector = {}) {
   guion.registro = join(dir, 'registro.ndjson');
   const rutaGuion = join(dir, 'guion.json');
   writeFileSync(rutaGuion, JSON.stringify(guion));
-  const conector = crearConectorCodex({ orden: process.execPath, argsPrefijo: [SERVIDOR, rutaGuion], ...opcionesConector });
+  // El modo escritura acota la lectura solo en macOS: estas pruebas fijan otra plataforma salvo que pidan darwin (con un
+  // home falso), para no depender del sistema ni recorrer la carpeta personal de quien las ejecuta.
+  const conector = crearConectorCodex({ orden: process.execPath, argsPrefijo: [SERVIDOR, rutaGuion], plataforma: 'linux', ...opcionesConector });
   return {
     dir,
     rutaGuion,
@@ -409,6 +414,170 @@ test('con escritura: { raiz, tmp } la carpeta temporal del encargo es la otra ra
     rmSync(dir, { recursive: true, force: true });
   }
   await assert.rejects(crearConectorCodex({ escritura: { raiz: tmpdir(), tmp: 'relativa' } }), /carpeta temporal del encargo debe ser una ruta absoluta/);
+});
+
+/** Carpeta personal falsa con secretos, otro proyecto, otro encargo y la copia y la carpeta temporal de un encargo. */
+function homeFalso() {
+  const home = realpathSync(mkdtempSync(join(tmpdir(), 'nexakit-home-falso-')));
+  const crear = (ruta, contenido = 'secreto') => {
+    mkdirSync(join(home, ruta, '..'), { recursive: true });
+    writeFileSync(join(home, ruta), contenido);
+  };
+  crear('.ssh/id_ed25519');
+  crear('.aws/credentials');
+  crear('.npmrc');
+  crear('.nexakit/fabrica/preferencias.json');
+  crear('.nexakit/encargos/otro/cambios.diff');
+  crear('proyectos/real/src/a.ts');
+  crear('proyectos/real/secreto.env');
+  crear('proyectos/real/node_modules/zod/index.js');
+  crear('proyectos/real/.git/HEAD');
+  crear('proyectos/otro/README.md');
+  crear('.nexakit/encargos/e1/repo/package.json', '{}');
+  mkdirSync(join(home, '.nexakit/encargos/e1/tmp'));
+  return {
+    home,
+    raiz: join(home, '.nexakit/encargos/e1/repo'),
+    tmp: join(home, '.nexakit/encargos/e1/tmp'),
+    limpiar: () => rmSync(home, { recursive: true, force: true }),
+  };
+}
+
+test('vetosDeLectura veta la carpeta personal entera salvo el camino hasta cada ruta permitida', () => {
+  const h = homeFalso();
+  try {
+    const real = join(h.home, 'proyectos/real');
+    const vetos = vetosDeLectura(h.home, [h.raiz, h.tmp, join(real, 'node_modules'), join(real, '.git')]).sort();
+    assert.deepEqual(vetos, [
+      '.aws', '.npmrc', '.nexakit/encargos/otro', '.nexakit/fabrica', '.ssh', 'proyectos/otro', 'proyectos/real/secreto.env',
+      'proyectos/real/src',
+    ].map((r) => join(h.home, r)).sort());
+    // Sin nada permitido dentro, la carpeta entera.
+    assert.deepEqual(vetosDeLectura(join(h.home, '.ssh'), [h.raiz]), [join(h.home, '.ssh')]);
+    // Dentro de una ruta permitida no se veta nada.
+    assert.deepEqual(vetosDeLectura(h.raiz, [h.raiz]), []);
+  } finally {
+    h.limpiar();
+  }
+});
+
+test('vetosDeLectura falla cerrado con un nombre que Codex no sabe vetar', () => {
+  const h = homeFalso();
+  try {
+    mkdirSync(join(h.home, 'fotos[2024]'));
+    assert.throws(() => vetosDeLectura(h.home, [h.raiz]), /No se puede vetar la lectura de .*fotos\[2024\]/);
+  } finally {
+    h.limpiar();
+  }
+});
+
+test('perfilDeEncargo: todo legible salvo el home vetado, las lecturas imprescindibles y las raíces escribibles', () => {
+  const h = homeFalso();
+  try {
+    const nodeModules = join(h.home, 'proyectos/real/node_modules');
+    const entradas = perfilDeEncargo({
+      home: h.home,
+      escribibles: [h.raiz, h.tmp],
+      // `/` (un ejecutable en /bin) anularía el veto y se ignora; lo que ya es escribible o está dentro de otra lectura, también.
+      legibles: [nodeModules, join(nodeModules, 'zod'), join(h.raiz, 'package.json'), join(h.home, '..', '..')],
+    });
+    assert.deepEqual(entradas[0], { ruta: ':root', acceso: 'read' });
+    assert.deepEqual(entradas.filter((e) => e.acceso === 'read').map((e) => e.ruta), [':root', nodeModules]);
+    assert.deepEqual(entradas.filter((e) => e.acceso === 'write').map((e) => e.ruta), [h.raiz, h.tmp]);
+    const vetadas = entradas.filter((e) => e.acceso === 'none').map((e) => e.ruta);
+    for (const r of ['.ssh', '.aws', '.npmrc', '.nexakit/encargos/otro', 'proyectos/real/src', 'proyectos/real/.git']) {
+      assert.ok(vetadas.includes(join(h.home, r)), r);
+    }
+    assert.equal(vetadas.some((r) => h.raiz.startsWith(r) || nodeModules.startsWith(r)), false, 'ningún antecesor vetado');
+
+    const toml = configDePerfil(entradas, h.tmp);
+    assert.match(toml, new RegExp(`^default_permissions = "${PERFIL_ENCARGO}"$`, 'm'));
+    assert.match(toml, /^\[permissions\.nexakit-encargo\.network\]\nenabled = false$/m);
+    assert.ok(toml.includes(`${JSON.stringify(join(h.home, '.ssh'))} = "none"`));
+    assert.ok(toml.includes(`[shell_environment_policy.set]\nHOME = ${JSON.stringify(h.tmp)}`));
+    assert.equal(configDePerfil([{ ruta: '/a\u007fb', acceso: 'none' }]).includes('"/a\\u007Fb" = "none"'), true, 'DEL escapado');
+  } finally {
+    h.limpiar();
+  }
+});
+
+/** El guion `revision` con el perfil activo que devuelve thread/start (o sin él). */
+function guionConPerfil(perfil) {
+  const base = JSON.parse(readFileSync(join(GUIONES, 'codex-revision.json'), 'utf8'));
+  const hilo = base.metodos['thread/start'];
+  return { ...base.metodos, 'thread/start': { ...hilo, resultado: { ...hilo.resultado, activePermissionProfile: perfil } } };
+}
+
+test('en macOS el modo escritura corre con el perfil que veta leer la carpeta personal, sin sandbox ni sandboxPolicy', async () => {
+  const h = homeFalso();
+  const p = preparar('revision', { metodos: guionConPerfil({ id: PERFIL_ENCARGO, extends: null }) }, {
+    escritura: { raiz: h.raiz, tmp: h.tmp }, plataforma: 'darwin', home: h.home,
+  });
+  const registroEnv = join(p.dir, 'env.json');
+  const guion = JSON.parse(readFileSync(p.rutaGuion, 'utf8'));
+  writeFileSync(p.rutaGuion, JSON.stringify({ ...guion, registroEnv }));
+  try {
+    const resultado = await (await p.conector).ejecutar(encargo(h.raiz), new AbortController().signal);
+    assert.equal(resultado.estado, 'ok', resultado.motivo);
+    const mensajes = p.mensajes();
+    const hilo = mensajes.find((m) => m.method === 'thread/start').params;
+    const turno = mensajes.find((m) => m.method === 'turn/start').params;
+    // `sandbox` o `sandboxPolicy` sustituirían el perfil por defecto (comprobado con codex-cli 0.171.0).
+    assert.equal('sandbox' in hilo, false);
+    assert.equal('sandboxPolicy' in turno, false);
+    assert.equal(hilo.config.sandbox_workspace_write, undefined);
+    assert.equal(hilo.approvalPolicy, 'never');
+    assert.equal(turno.approvalPolicy, 'never');
+    assert.equal(hilo.cwd, h.raiz);
+    assert.deepEqual(hilo.config.mcp_servers, { memoria: { enabled: false }, railway: { enabled: false } });
+
+    const { config } = JSON.parse(readFileSync(registroEnv, 'utf8'));
+    assert.match(config, new RegExp(`^default_permissions = "${PERFIL_ENCARGO}"$`, 'm'));
+    assert.ok(config.includes('":root" = "read"'));
+    for (const r of ['.ssh', '.aws', '.npmrc', 'proyectos', '.nexakit/encargos/otro', '.nexakit/fabrica']) {
+      assert.ok(config.includes(`${JSON.stringify(join(h.home, r))} = "none"`), r);
+    }
+    assert.ok(config.includes(`${JSON.stringify(h.raiz)} = "write"`));
+    assert.ok(config.includes(`${JSON.stringify(h.tmp)} = "write"`));
+    assert.ok(config.includes(`HOME = ${JSON.stringify(h.tmp)}`));
+    assert.match(config, /enabled = false/);
+  } finally {
+    await p.limpiar();
+    h.limpiar();
+  }
+});
+
+test('en macOS, si Codex no aplica el perfil de lectura acotada, el encargo falla cerrado antes del turno', async () => {
+  const h = homeFalso();
+  try {
+    for (const perfil of [null, { id: ':workspace', extends: null }]) {
+      const p = preparar('revision', { metodos: guionConPerfil(perfil) }, {
+        escritura: { raiz: h.raiz, tmp: h.tmp }, plataforma: 'darwin', home: h.home,
+      });
+      try {
+        const resultado = await (await p.conector).ejecutar(encargo(h.raiz), new AbortController().signal);
+        assert.equal(resultado.estado, 'fallida');
+        assert.match(resultado.motivo, /no aplicó el perfil de permisos nexakit-encargo/);
+        assert.equal(p.mensajes().some((m) => m.method === 'turn/start'), false);
+      } finally {
+        await p.limpiar();
+      }
+    }
+  } finally {
+    h.limpiar();
+  }
+});
+
+test('el modo lectura no usa el perfil aunque sea macOS', async () => {
+  const p = preparar('revision', {}, { plataforma: 'darwin' });
+  try {
+    const resultado = await (await p.conector).ejecutar(encargo(p.dir), new AbortController().signal);
+    assert.equal(resultado.estado, 'ok', resultado.motivo);
+    const hilo = p.mensajes().find((m) => m.method === 'thread/start').params;
+    assert.equal(hilo.sandbox, 'read-only');
+  } finally {
+    await p.limpiar();
+  }
 });
 
 test('escritura.raiz debe ser absoluta y existir, con un error claro en español', async () => {

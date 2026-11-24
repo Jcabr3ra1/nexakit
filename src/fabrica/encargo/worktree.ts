@@ -113,9 +113,9 @@ const borrarCarpeta = (ruta: string): Promise<void> => rm(ruta, { recursive: tru
  * Enlaza `node_modules` del repo real en el worktree para que la IA pueda compilar y probar sin red.
  * Solo si es una carpeta real (no un enlace) y git la tiene ignorada, también ya como enlace dentro del worktree: así no entra en el diff ni dispara el análisis
  * de enlaces que salen del repo. Codex escribe con sandbox por ruta real (no puede tocar el `node_modules` real) y
- * Antigravity veta componentes que sean enlaces. Riesgo residual: el sandbox de Codex acota la escritura, no la lectura;
- * en modo escritura Codex puede LEER todo el disco de la persona (no solo las dependencias). Quien encarga revisa el
- * diff y el resumen antes de aplicarlo o compartirlo.
+ * Antigravity veta componentes que sean enlaces. En macOS Codex solo puede leer de la carpeta personal el camino hasta la
+ * copia y este `node_modules` (ver `conectores/codex.ts`); en Linux y Windows su sandbox acota la escritura, no la
+ * lectura, y puede LEER todo el disco. Quien encarga revisa el diff y el resumen antes de aplicarlo o compartirlo.
  * `borrarWorktree` borra el enlace sin seguirlo.
  */
 async function enlazarNodeModules(raiz: string, dir: string): Promise<void> {
