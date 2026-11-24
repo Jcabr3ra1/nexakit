@@ -83,6 +83,7 @@ el encargo «invalido» sin diff. Hay un encargo o recorrido a la vez.
   --ia auto prueba Codex y, si no responde, Antigravity; sin --modelo usa la recomendación de nivel normal de esa IA.
   --encargo es el archivo con el texto (objetivo, archivos, criterio de hecho y pruebas); admite hasta 1 MiB.
   --ordenes es un JSON con una lista de órdenes exactas que se añaden a «npm test» y «npm run typecheck» del repo.
+  Antigravity escribe solo en la copia y no ejecuta órdenes (su sandbox deja la copia en solo lectura): las pruebas las ejecutas tú. Codex ejecuta dentro de su sandbox.
   --tiempo son los minutos máximos (entero de 1 a 120; por defecto 20). Ctrl+C cancela y borra la copia.
 Códigos de salida: 0 bien, 1 fallo de estación o escritura detectada, 2 argumentos inválidos. Con encargar, 0 solo si el
 estado es «ok» o «sin-cambios».
@@ -433,7 +434,7 @@ export function lineasInforme(i: InformeEncargo): string[] {
   if (i.motivo !== undefined) lineas.push(`Motivo: ${enUnaLinea(i.motivo)}`);
   if (i.ordenesPorDefecto.length > 0) lineas.push(`Órdenes por defecto: ${i.ordenesPorDefecto.map((o) => `«${enUnaLinea(o)}»`).join(', ')}`);
   if (i.ordenesExtra.length > 0) {
-    lineas.push(`Órdenes extra (en Codex son una guía, su frontera es el sandbox; en Antigravity solo se aprueban esas, en su sandbox y solo en macOS): ${i.ordenesExtra.map((o) => `«${enUnaLinea(o)}»`).join(', ')}`);
+    lineas.push(`Órdenes extra (en Codex son una guía, su frontera es el sandbox; Antigravity no ejecuta órdenes): ${i.ordenesExtra.map((o) => `«${enUnaLinea(o)}»`).join(', ')}`);
   }
   if (i.rutaDiff !== null) {
     lineas.push(`Diff: ${i.rutaDiff}`, `Para aplicarlo tras revisarlo (desde la raíz de tu repo): git apply "${i.rutaDiff}"`);

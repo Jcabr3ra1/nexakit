@@ -98,8 +98,8 @@ export interface InformeEncargo {
   aprobaciones: Denegacion[];
   /**
    * Órdenes que el repo declara (`npm test`, `npm run typecheck`). En Codex son una guía que se comunica a la IA (su
-   * frontera real es el sandbox: solo escribe en la copia y sin red). En Antigravity, solo en macOS, son la lista que
-   * se aprueba (coincidencia exacta) y corren en su sandbox sin red; fuera de macOS no ejecuta órdenes.
+   * frontera real es el sandbox: solo escribe en la copia y sin red). Antigravity no ejecuta órdenes (desactivadas: su
+   * sandbox deja la copia en solo lectura); las pruebas las ejecuta el orquestador.
    */
   ordenesPorDefecto: string[];
   /** Órdenes extra que pidió quien encargó (con la aprobación de la persona): informativas en Codex, como las anteriores. */
@@ -177,13 +177,14 @@ async function ordenesDelRepo(dir: string): Promise<string[]> {
 
 /**
  * La regla de órdenes que se le da a la IA. Con Codex las órdenes son una guía: su frontera real es el sandbox (solo
- * escribe en la copia, sin red), no una lista que se haga cumplir. Con Antigravity la lista sí se hace cumplir
- * (coincidencia exacta) y solo en macOS, donde se verificó su sandbox; fuera de macOS no se aprueba ninguna y el texto
- * no promete lo que se va a rechazar.
+ * escribe en la copia, sin red), no una lista que se haga cumplir. Antigravity escribe solo en la copia y no ejecuta
+ * órdenes (desactivadas: su sandbox deja la copia en solo lectura); el texto no promete lo que se va a rechazar. Solo
+ * si el conector las reactiva (`ordenesActivas`) la lista se hace cumplir (coincidencia exacta).
  */
 export function reglaDeOrdenes(ia: IAEncargo, ordenes: readonly string[], ordenesActivas: boolean = ORDENES_ACTIVAS): string {
   const lista = ordenes.map((o) => `\`${o}\``).join(', ');
-  if (ordenes.length === 0 || (ia === 'antigravity' && !ordenesActivas)) return '- No se aprueba ninguna orden: no dependas de ejecutar pruebas.';
+  if (ia === 'antigravity' && !ordenesActivas) return '- No se aprueba ninguna orden: no dependas de ejecutar pruebas. Antigravity solo escribe archivos en esta carpeta y no ejecuta órdenes; las pruebas las ejecuta quien te encarga.';
+  if (ordenes.length === 0) return '- No se aprueba ninguna orden: no dependas de ejecutar pruebas.';
   if (ia === 'antigravity') {
     return `- Para comprobar tu trabajo solo se aprueban estas órdenes, escritas exactamente así y sin encadenar: ${lista}. Corren en el sandbox de Antigravity, sin red y sin poder escribir fuera de esta carpeta (puede que tampoco dentro). Si una falla por el sandbox, no la repitas fuera de él (BypassSandbox se rechaza): dilo en el resumen.`;
   }

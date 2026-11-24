@@ -1072,5 +1072,5 @@ test('encargar muestra las órdenes por defecto y las extra por separado', async
   const codex = codexFalso(async () => okEnc());
   const { out, err } = await cli(['encargar', '--ia', 'codex', '--encargo', f.md, '--ordenes', f.json], e, datosEnc(codex));
   assert.match(out, /Órdenes por defecto: «npm test»\n/u, err);
-  assert.match(out, /Órdenes extra \(en Codex son una guía, su frontera es el sandbox; en Antigravity solo se aprueban esas, en su sandbox y solo en macOS\): «npm run lint»\n/u);
+  assert.match(out, /Órdenes extra \(en Codex son una guía, su frontera es el sandbox; Antigravity no ejecuta órdenes\): «npm run lint»\n/u);
 });
