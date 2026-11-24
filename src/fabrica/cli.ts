@@ -414,7 +414,7 @@ export function lineasInforme(i: InformeEncargo): string[] {
   if (i.motivo !== undefined) lineas.push(`Motivo: ${enUnaLinea(i.motivo)}`);
   if (i.ordenesPorDefecto.length > 0) lineas.push(`Órdenes por defecto: ${i.ordenesPorDefecto.map((o) => `«${enUnaLinea(o)}»`).join(', ')}`);
   if (i.ordenesExtra.length > 0) {
-    lineas.push(`Órdenes extra (en Codex son una guía, su frontera es el sandbox; Antigravity no ejecuta órdenes): ${i.ordenesExtra.map((o) => `«${enUnaLinea(o)}»`).join(', ')}`);
+    lineas.push(`Órdenes extra (en Codex son una guía, su frontera es el sandbox; en Antigravity solo se aprueban esas, en su sandbox y solo en macOS): ${i.ordenesExtra.map((o) => `«${enUnaLinea(o)}»`).join(', ')}`);
   }
   if (i.rutaDiff !== null) {
     lineas.push(`Diff: ${i.rutaDiff}`, `Para aplicarlo tras revisarlo (desde la raíz de tu repo): git apply "${i.rutaDiff}"`);

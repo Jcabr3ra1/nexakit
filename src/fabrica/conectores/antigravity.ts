@@ -25,6 +25,16 @@
 // y, si es una orden, coincide exactamente con `ordenesPermitidas` y no está encadenada. El resto se rechaza y se
 // anota. Las reglas persistentes de la persona (`permissions.allow`) no se aplican gracias a `--gemini-dir`; las del
 // repo (`.gemini/`) se rechazan por la lista blanca de personalizaciones, que sigue vigente en este modo.
+// Órdenes en modo escritura, comprobado con una sesión real contra agy 1.5.14 en macOS (`gemini-3.8-flash-low`, unos
+// 11 000 tokens; no hay subcomando para ejecutar una orden en el sandbox sin el modelo): con `--sandbox`, la orden
+// `npm test` aprobada corre en el sandbox (el binario usa `/usr/bin/sandbox-exec`) y su script no pudo escribir fuera del `cwd` (carpeta personal, carpeta
+// hermana, el `node_modules` enlazado, `.git/hooks` y `.git/config` del repo real; también desde un `sh` hijo), ni leer
+// fuera de él, ni usar la red (DNS y HTTPS: ENOTFOUND). Sí pudo escribir en `/tmp` y en el `TMPDIR` del sistema, que
+// no son el repo. Tampoco pudo escribir dentro del `cwd` cuando este cuelga de una carpeta oculta (`~/.nexakit/...`):
+// las órdenes que generan archivos fallan, pero no escapan. La petición llega como `kind: execute`, `name: run_command`
+// y `rawInput` = { CommandLine, BypassSandbox, WaitMsBeforeAsync, toolSummary } (repetido en `args`); salir del sandbox
+// (`BypassSandbox` distinto de `false`) se rechaza siempre. Solo en macOS: en Linux y Windows no se verificó y no se
+// aprueba ninguna orden (`ORDENES_ACTIVAS`).
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { lstatSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync } from 'node:fs';
@@ -105,12 +115,12 @@ interface Escritura {
 /** Tipos de petición de permiso que el modo escritura puede llegar a aprobar. */
 const TIPOS_APROBABLES = new Set(['read', 'edit', 'delete', 'move', 'search', 'execute']);
 /**
- * Interruptor interno: mientras no se verifique qué confina el `--sandbox` de `agy`, el modo escritura no aprueba
- * ninguna orden (una orden permitida, como `npm test`, ejecuta código del worktree con los permisos de la persona).
- * Con `true` se reactiva la lista `ordenesPermitidas` (coincidencia exacta).
+ * El modo escritura aprueba órdenes de `ordenesPermitidas` (coincidencia exacta) solo donde se verificó el `--sandbox`
+ * de `agy`: en macOS (ver la cabecera). En Linux y Windows no se verificó, así que allí no se aprueba ninguna orden
+ * (una orden permitida, como `npm test`, ejecuta código del worktree).
  */
-const ORDENES_ACTIVAS = false;
-const MOTIVO_ORDENES_DESACTIVADAS = 'órdenes desactivadas en Antigravity hasta verificar su sandbox';
+export const ORDENES_ACTIVAS = process.platform === 'darwin';
+const MOTIVO_ORDENES_DESACTIVADAS = 'órdenes desactivadas en Antigravity fuera de macOS: su sandbox solo se verificó en macOS';
 /** Encadenados, redirecciones y sustituciones: una orden con cualquiera se rechaza aunque empiece por una permitida. */
 const ENCADENADO = /[;&|<>`\n\r]|\$\(/u;
 /** Componentes que el agente no puede escribir dentro de la raíz (personalización, hooks y metadatos de git). */
@@ -133,10 +143,22 @@ const CLAVES_ADMITIDAS: Record<string, Set<string>> = {
   move: new Set(CLAVES_RUTA),
   read: new Set([...CLAVES_RUTA, ...CLAVES_LECTURA]),
   search: new Set([...CLAVES_RUTA, ...CLAVES_BUSQUEDA]),
-  execute: new Set(['command', 'cwd']),
+  // agy 1.5.14 (`run_command`) manda `CommandLine`, `BypassSandbox`, `WaitMsBeforeAsync` y `toolSummary`.
+  execute: new Set(['command', 'commandline', 'cwd', 'bypasssandbox', 'waitmsbeforeasync', 'toolsummary', 'toolaction']),
 };
+/** Claves informativas de una orden (texto que el agente pone para la persona); no cambian lo que se ejecuta. */
+const CLAVES_ORDEN_INFORMATIVAS = new Set(['toolsummary', 'toolaction']);
 /** Tipos que escriben: sus rutas no pueden tocar los componentes protegidos. */
 const TIPOS_ESCRITURA = new Set(['edit', 'delete', 'move']);
+
+/** JSON con las claves ordenadas, para comparar dos objetos sin depender del orden. */
+function canonico(valor: unknown): string {
+  if (Array.isArray(valor)) return `[${valor.map(canonico).join(',')}]`;
+  if (esObjeto(valor)) {
+    return `{${Object.keys(valor).sort().map((k) => `${JSON.stringify(k)}:${canonico(valor[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(valor) ?? 'undefined';
+}
 
 function normalizarClave(clave: string): string {
   return clave.toLowerCase().replace(/[_-]/gu, '');
@@ -241,9 +263,21 @@ function analizarPeticion(tipo: string, llamada: Record<string, unknown>): Petic
     const normal = normalizarClave(clave);
     if (!admitidas.has(normal)) return rechazo(`campo no reconocido: ${recortar(clave)}`);
     if (tipo === 'execute') {
-      if (typeof valor !== 'string') return rechazo(`el campo ${clave} no es un texto`);
-      if (normal === 'command') resultado.orden = valor.trim();
-      else resultado.cwd = valor;
+      if (normal === 'bypasssandbox') {
+        // Salir del sandbox nunca se aprueba: solo vale `false` explícito.
+        if (valor !== false) return rechazo('la orden pide ejecutarse fuera del sandbox (BypassSandbox)');
+      } else if (normal === 'waitmsbeforeasync') {
+        if (typeof valor !== 'number' || !Number.isFinite(valor)) return rechazo(`el campo ${clave} no es un número`);
+      } else if (typeof valor !== 'string') {
+        return rechazo(`el campo ${clave} no es un texto`);
+      } else if (normal === 'command' || normal === 'commandline') {
+        if (resultado.orden !== null) return rechazo('la petición trae más de una orden');
+        resultado.orden = valor.trim();
+      } else if (normal === 'cwd') {
+        resultado.cwd = valor;
+      } else if (!CLAVES_ORDEN_INFORMATIVAS.has(normal)) {
+        return rechazo(`campo no reconocido: ${recortar(clave)}`);
+      }
     } else if (CLAVES_RUTA.has(normal)) {
       if (typeof valor !== 'string') return rechazo(`el campo ${clave} no es un texto`);
       resultado.rutas.push(valor);
@@ -264,6 +298,10 @@ export function motivoPermisoRechazado(
   const tipo = texto(llamada['kind']);
   if (tipo === null || !TIPOS_APROBABLES.has(tipo)) return `tipo de petición no admitido: ${tipo ?? 'desconocido'}`;
   if (tipo === 'execute' && !ordenesActivas) return MOTIVO_ORDENES_DESACTIVADAS;
+  // agy repite la entrada de la orden en `args`: si dice otra cosa que `rawInput`, no se sabe cuál se ejecuta.
+  if (tipo === 'execute' && llamada['args'] !== undefined && canonico(llamada['args']) !== canonico(llamada['rawInput'])) {
+    return 'la orden trae args distintos de rawInput';
+  }
   const peticion = analizarPeticion(tipo, llamada);
   if (peticion.motivo !== null) return peticion.motivo;
   const escribe = TIPOS_ESCRITURA.has(tipo);

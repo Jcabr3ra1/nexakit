@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gitConfigGlobalVacio } from '../test-support/git-aislado.js';
 import { ejecutarEncargo, rutasVetadas, TIEMPO_ENCARGO_MS } from '../dist/fabrica/encargo/ejecutar.js';
+import { ORDENES_ACTIVAS } from '../dist/fabrica/conectores/antigravity.js';
 import { analizarParche } from '../dist/fabrica/encargo/parche.js';
 import { barrerHuerfanos, borrarWorktree, crearWorktree, diffDelWorktree } from '../dist/fabrica/encargo/worktree.js';
 import { leerCandado } from '../dist/fabrica/encargo/candado.js';
@@ -318,6 +319,33 @@ test('una escritura fuera del worktree invalida el encargo y no se guarda el dif
   assert.equal(existsSync(path.join(e.home, '.nexakit', 'encargos', informe.id, 'repo')), false);
 });
 
+test('escribir en .git/hooks, .git/config o .git/info del repo real, o en su node_modules, invalida el encargo', async () => {
+  const casos = [
+    ['.git/hooks/pre-commit', (raiz) => writeFileSync(path.join(raiz, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\nexit 0\n')],
+    ['.git/config', (raiz) => writeFileSync(path.join(raiz, '.git', 'config'), `${readFileSync(path.join(raiz, '.git', 'config'), 'utf8')}[core]\n\tfsmonitor = ./x\n`)],
+    ['.git/info/attributes', (raiz) => writeFileSync(path.join(raiz, '.git', 'info', 'attributes'), '* filter=x\n')],
+    ['node_modules/demo', (raiz) => writeFileSync(path.join(raiz, 'node_modules', 'demo', 'package.json'), '{"name":"demo","scripts":{"postinstall":"x"}}')],
+  ];
+  for (const [ruta, escribir] of casos) {
+    const e = entorno();
+    writeFileSync(path.join(e.raiz, '.gitignore'), 'node_modules\n');
+    mkdirSync(path.join(e.raiz, 'node_modules', 'demo'), { recursive: true });
+    writeFileSync(path.join(e.raiz, 'node_modules', 'demo', 'package.json'), '{"name":"demo"}');
+    git(e.raiz, 'add', '.gitignore');
+    git(e.raiz, 'commit', '-q', '-m', 'ignora node_modules');
+    mkdirSync(path.join(e.raiz, '.git', 'info'), { recursive: true });
+    const codex = fabrica('codex', async (encargo) => {
+      writeFileSync(path.join(encargo.raiz, 'a.txt'), 'dos\n');
+      escribir(e.raiz);
+      return okDe();
+    });
+    const informe = await ejecutarEncargo(opciones(e, { conectores: { codex: codex.crear } }));
+    assert.equal(informe.estado, 'invalido', ruta);
+    assert.ok(informe.escriturasFuera.includes(ruta), `${ruta}: ${informe.escriturasFuera.join(',')}`);
+    assert.equal(informe.rutaDiff, null, ruta);
+  }
+});
+
 test('una escritura en el repo real también invalida un encargo cancelado', async () => {
   const e = entorno();
   const control = new AbortController();
@@ -416,10 +444,19 @@ test('auto cae a Antigravity si Codex no está disponible, con su modelo recomen
   assert.equal(informe.modelo, 'gemini-4-hydrogen-medium');
   assert.equal(informe.esfuerzo, null);
   assert.match(informe.avisos.join('\n'), /IA descartada: codex no está disponible: Codex no está instalado/u);
-  // El texto no promete órdenes que Antigravity rechaza.
-  assert.match(agy.registro.encargos[0].instrucciones, /No se aprueba ninguna orden/u);
-  assert.doesNotMatch(agy.registro.encargos[0].instrucciones, /Solo se aprueban estas órdenes/u);
-  // En Antigravity las órdenes se pasan al conector, que en modo escritura no ejecuta ninguna.
+  // El texto no promete órdenes que Antigravity rechaza: en macOS solo las de la lista; fuera, ninguna.
+  const instrucciones = agy.registro.encargos[0].instrucciones;
+  if (ORDENES_ACTIVAS) {
+    assert.match(instrucciones, /solo se aprueban estas órdenes, escritas exactamente así y sin encadenar: `npm test`, `npm run typecheck`/u);
+    assert.match(instrucciones, /BypassSandbox se rechaza/u);
+    assert.doesNotMatch(instrucciones, /No se aprueba ninguna orden/u);
+  } else {
+    assert.match(instrucciones, /No se aprueba ninguna orden/u);
+    assert.doesNotMatch(instrucciones, /solo se aprueban estas órdenes/u);
+  }
+  // Nunca promete la carpeta temporal de Codex.
+  assert.doesNotMatch(instrucciones, /carpeta temporal/u);
+  // En Antigravity las órdenes se pasan al conector, que las hace cumplir (coincidencia exacta).
   assert.deepEqual(agy.registro.creaciones[0].ordenesPermitidas, ['npm test', 'npm run typecheck']);
   assert.equal(codex.registro.encargos.length, 0);
   assert.equal(codex.registro.cerrados, 1);

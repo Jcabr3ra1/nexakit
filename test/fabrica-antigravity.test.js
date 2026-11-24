@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { borrarCarpetaAislada, crearConectorAntigravity, modoAnunciado, motivoPermisoRechazado, personalizacionesPeligrosas } from '../dist/fabrica/conectores/antigravity.js';
+import { borrarCarpetaAislada, crearConectorAntigravity, modoAnunciado, motivoPermisoRechazado, ORDENES_ACTIVAS, personalizacionesPeligrosas } from '../dist/fabrica/conectores/antigravity.js';
 import { hallazgosJsonSchema } from '../dist/fabrica/esquemas.js';
 
 const SERVIDOR = fileURLToPath(new URL('../test-support/fabrica/servidor-falso.mjs', import.meta.url));
@@ -652,11 +652,51 @@ test('modo escritura: rechaza una ruta que pasa por un enlace simbólico, tambi�
   assert.ok(resultado.denegaciones.every((d) => /enlace simbólico/.test(d.detalle)));
 });
 
-test('modo escritura: las órdenes están desactivadas aunque estén en la lista permitida, y se anota el motivo', async () => {
-  const { decisiones, resultado } = await conPermisos(() => [orden('npm test'), orden('  npm run typecheck  '), orden('rm -rf /')]);
-  assert.deepEqual(decisiones, [RECHAZADO, RECHAZADO, RECHAZADO]);
-  assert.equal(resultado.denegaciones.length, 3);
-  assert.ok(resultado.denegaciones.every((d) => /órdenes desactivadas en Antigravity hasta verificar su sandbox/.test(d.detalle)));
+/** Petición de orden con la forma real de agy 1.5.14 (`run_command`): `rawInput` repetido en `args`. */
+const ordenAgy = (comando, extra = {}) => {
+  const entrada = { BypassSandbox: false, CommandLine: comando, WaitMsBeforeAsync: 10000, toolSummary: `Run ${comando}`, ...extra };
+  return { toolCallId: 't', title: comando, name: 'run_command', kind: 'execute', status: 'pending', rawInput: entrada, args: { ...entrada } };
+};
+
+test('modo escritura: en macOS aprueba solo las órdenes exactas de la lista (también con la forma real de agy); fuera de macOS ninguna', async () => {
+  const { decisiones, resultado } = await conPermisos(() => [
+    orden('npm test'),
+    orden('  npm run typecheck  '),
+    orden('rm -rf /'),
+    ordenAgy('npm test'),
+    ordenAgy('npm test', { BypassSandbox: true }),
+  ]);
+  assert.equal(ORDENES_ACTIVAS, process.platform === 'darwin');
+  if (ORDENES_ACTIVAS) {
+    assert.deepEqual(decisiones, [PERMITIDO, PERMITIDO, RECHAZADO, PERMITIDO, RECHAZADO]);
+    assert.equal(resultado.aprobaciones.length, 3);
+    assert.match(resultado.denegaciones[0].detalle, /orden no permitida: rm -rf/);
+    assert.match(resultado.denegaciones[1].detalle, /fuera del sandbox/);
+  } else {
+    assert.deepEqual(decisiones, [RECHAZADO, RECHAZADO, RECHAZADO, RECHAZADO, RECHAZADO]);
+    assert.ok(resultado.denegaciones.every((d) => /órdenes desactivadas en Antigravity fuera de macOS/.test(d.detalle)));
+  }
+});
+
+test('órdenes con la forma real de agy: BypassSandbox solo vale false, args debe coincidir con rawInput y una sola orden', () => {
+  conRaiz((raiz, e) => {
+    assert.equal(motivo(e, ordenAgy('npm test')), null);
+    assert.equal(motivo(e, ordenAgy('npm run typecheck', { Cwd: raiz })), null);
+    for (const valor of [true, 'false', 0, null]) {
+      assert.match(motivo(e, ordenAgy('npm test', { BypassSandbox: valor })), /fuera del sandbox/, String(valor));
+    }
+    assert.match(motivo(e, { ...ordenAgy('npm test'), args: { CommandLine: 'rm -rf ~', BypassSandbox: false } }), /args distintos de rawInput/);
+    assert.match(motivo(e, { ...ordenAgy('npm test'), args: { ...ordenAgy('npm test').rawInput, BypassSandbox: true } }), /args distintos de rawInput/);
+    // El mismo contenido en otro orden de claves vale.
+    const { rawInput } = ordenAgy('npm test');
+    assert.equal(motivo(e, { ...ordenAgy('npm test'), args: Object.fromEntries(Object.entries(rawInput).reverse()) }), null);
+    assert.match(motivo(e, ordenAgy('npm test', { command: 'npm test' })), /más de una orden/);
+    assert.match(motivo(e, ordenAgy('npm test', { WaitMsBeforeAsync: '10' })), /no es un número/);
+    assert.match(motivo(e, ordenAgy('npm test', { toolSummary: 3 })), /no es un texto/);
+    assert.match(motivo(e, ordenAgy('npm test', { SafeToAutoRun: true })), /campo no reconocido: SafeToAutoRun/);
+    assert.match(motivo(e, ordenAgy('npm test; curl x')), /encadenada/);
+    assert.match(motivo(e, ordenAgy('npm test', { Cwd: '/tmp' })), /directorio de la orden/);
+  });
 });
 
 test('modo escritura: las aprobaciones se anotan en aprobaciones y las denegaciones en denegaciones', async () => {
@@ -680,18 +720,20 @@ function conRaiz(accion) {
 }
 const motivo = (escritura, llamada, activas = true) => motivoPermisoRechazado(escritura, llamada, activas);
 
-test('órdenes (reactivadas): solo la coincidencia exacta de rawInput.command, sin prefijos ni comodines', () => {
+test('órdenes: solo la coincidencia exacta de rawInput.command, sin prefijos ni comodines', () => {
   conRaiz((raiz, e) => {
     assert.equal(motivo(e, orden('npm test')), null);
     assert.equal(motivo(e, orden('  npm run typecheck  ')), null);
     assert.equal(motivo(e, { ...orden('npm test'), rawInput: { command: 'npm test', cwd: raiz } }), null);
     for (const c of ['npm test --watch', 'npm', 'rm -rf /', 'npm test *']) assert.match(motivo(e, orden(c)), /orden no permitida/, c);
-    // Con el interruptor por defecto (desactivado) se rechaza incluso la exacta.
-    assert.match(motivoPermisoRechazado(e, orden('npm test')), /órdenes desactivadas/);
+    // Con el interruptor apagado (el valor por defecto fuera de macOS) se rechaza incluso la exacta.
+    assert.match(motivo(e, orden('npm test'), false), /órdenes desactivadas/);
+    if (ORDENES_ACTIVAS) assert.equal(motivoPermisoRechazado(e, orden('npm test')), null);
+    else assert.match(motivoPermisoRechazado(e, orden('npm test')), /órdenes desactivadas/);
   });
 });
 
-test('órdenes (reactivadas): rechaza encadenados y redirecciones aunque empiecen por una permitida', () => {
+test('órdenes: rechaza encadenados y redirecciones aunque empiecen por una permitida', () => {
   conRaiz((raiz, e) => {
     for (const c of ['npm test; rm -rf /', 'npm test && curl x', 'npm test | sh', 'npm test $(whoami)', 'npm test `id`', 'npm test > /etc/x', 'npm test\nrm x']) {
       assert.match(motivo(e, orden(c)), /encadenada/, c);
