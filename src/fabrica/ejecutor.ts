@@ -29,7 +29,7 @@ const CANCELADA = 'cancelada por la persona';
 const MODELO_RETIRADO = 'el modelo ya no está en el catálogo';
 const SIN_RESPUESTA = 'el revisor no respondió a la cancelación';
 /** Marca de una espera que venció su tope. */
-const AGOTADO: unique symbol = Symbol('agotado');
+export const AGOTADO: unique symbol = Symbol('agotado');
 
 export type FaseRecorrido = 'en-curso' | 'terminado' | 'fallido' | 'cancelado';
 export type { EstadoEstacionEjecucion };
@@ -108,7 +108,7 @@ function retirarAntiguos(id: string): void {
 }
 
 /** Resuelve con `AGOTADO` si la promesa no termina en `ms`. */
-function conTope<T>(promesa: Promise<T>, ms: number): Promise<T | typeof AGOTADO> {
+export function conTope<T>(promesa: Promise<T>, ms: number): Promise<T | typeof AGOTADO> {
   let reloj: NodeJS.Timeout | undefined;
   const tope = new Promise<typeof AGOTADO>((resolve) => {
     reloj = setTimeout(() => resolve(AGOTADO), ms);
@@ -117,7 +117,7 @@ function conTope<T>(promesa: Promise<T>, ms: number): Promise<T | typeof AGOTADO
 }
 
 /** Como `conTope`, pero el plazo empieza cuando se aborta la señal. */
-function conGracia<T>(promesa: Promise<T>, señal: AbortSignal, ms: number): Promise<T | typeof AGOTADO> {
+export function conGracia<T>(promesa: Promise<T>, señal: AbortSignal, ms: number): Promise<T | typeof AGOTADO> {
   let reloj: NodeJS.Timeout | undefined;
   let alAbortar = (): void => {};
   const gracia = new Promise<typeof AGOTADO>((resolve) => {

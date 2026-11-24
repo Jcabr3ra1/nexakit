@@ -612,6 +612,17 @@ test('modo escritura: aprueba con «permitir una vez» una ruta dentro de la ra�
   assert.equal(mensajes.find((m) => m.method === 'session/new').params.cwd, raiz);
 });
 
+test('modo escritura: un solo turno sin esquema de hallazgos, y el texto final del agente es el resumen', async () => {
+  const { resultado, mensajes } = await conPermisos(() => [edicion('src/nuevo.js')]);
+  const turnos = mensajes.filter((m) => m.method === 'session/prompt');
+  assert.equal(turnos.length, 1);
+  assert.deepEqual(turnos[0].params.prompt, [{ type: 'text', text: 'Revisa el diff.' }]);
+  const texto = FIN_REVISION.notificaciones.map((n) => n.params.update.content?.text ?? '').join('');
+  assert.deepEqual(resultado.informe, { hallazgos: [], resumen: texto.trim() });
+  assert.equal(resultado.crudo, texto);
+  assert.equal(resultado.tokens.total, 1500);
+});
+
 test('modo escritura: rechaza una ruta fuera de la raíz y anota el motivo', async () => {
   const { decisiones, resultado } = await conPermisos((r, fuera) => [
     edicion(join(fuera, 'secreto.txt')),

@@ -13,7 +13,7 @@ const ANTIGRAVITY_FAMILIES_BY_LEVEL = {
   Alto: ['carbon', 'argon'],
 };
 
-function recommendAntigravity(models, { level, effort }) {
+export function recommendAntigravity(models, { level, effort }) {
   const variants = models.filter(({ model, efforts }) => model.startsWith('gemini-') && efforts.includes(effort));
   for (const family of ANTIGRAVITY_FAMILIES_BY_LEVEL[level]) {
     const match = variants.find(({ model }) => familyOfModel(model) === family);

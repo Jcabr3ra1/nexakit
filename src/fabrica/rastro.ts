@@ -69,18 +69,19 @@ export async function carpetaPropia(ruta: string, quien = 'El rastro'): Promise<
 }
 
 /** Escribe un archivo nuevo con `0o600`; `wx` falla si ya existe algo ahí, también un enlace. */
-async function escribirNuevo(ruta: string, texto: string): Promise<void> {
+async function escribirNuevo(ruta: string, contenido: string | Uint8Array): Promise<void> {
   const archivo = await open(ruta, 'wx', 0o600);
   try {
     await archivo.chmod(0o600);
-    await archivo.writeFile(texto, 'utf8');
+    // Un texto se guarda en UTF-8; los bytes (por ejemplo, un diff) tal cual.
+    await archivo.writeFile(contenido);
   } finally {
     await archivo.close();
   }
 }
 
 /** Reemplaza un archivo de forma atómica: temporal nuevo y `rename`, que no sigue enlaces. */
-export async function escribirReemplazando(ruta: string, texto: string): Promise<void> {
+export async function escribirReemplazando(ruta: string, texto: string | Uint8Array): Promise<void> {
   const temporal = path.join(path.dirname(ruta), `.${path.basename(ruta)}.${randomBytes(6).toString('hex')}.tmp`);
   try {
     await escribirNuevo(temporal, texto);
@@ -205,7 +206,8 @@ export async function consumirPlanBanco(home: string): Promise<unknown> {
 
 /** Estado vivo de una estación del recorrido en curso, tal como lo muestra la barra. */
 export interface EstacionActiva {
-  estacion: NombreEstacion;
+  /** Una estación de la fábrica o `encargo` (programar con otra IA en un worktree). */
+  estacion: NombreEstacion | 'encargo';
   ia: IA | null;
   modelo: string | null;
   esfuerzo: string | null;
@@ -423,12 +425,47 @@ export function carpetasDeRecorridos(home: string, repo: string): string[] {
     .filter(carpetaReal);
 }
 
+const PATRON_ID_ENCARGO = /^[a-z0-9-]+-[0-9a-f]{6}$/u;
+
 /**
- * Borra los rastros sin actividad en los últimos `dias`. Nunca sigue enlaces: una
- * carpeta de repo o de recorrido que sea un enlace se deja tal cual. Devuelve los ids borrados.
+ * Borra las carpetas de `~/.nexakit/encargos/` sin actividad en los últimos `dias` (el informe y el diff de un encargo
+ * caducan como el rastro). Nunca sigue enlaces. Devuelve los ids borrados.
+ */
+export async function podarEncargos(home: string, dias: number = DIAS_RASTRO): Promise<string[]> {
+  if (!Number.isFinite(dias) || dias <= 0) throw new ErrorFabrica('Los días de poda deben ser un número positivo');
+  const base = path.join(home, '.nexakit', 'encargos');
+  const infoBase = await lstatSiExiste(base);
+  if (infoBase === null || infoBase.isSymbolicLink() || !infoBase.isDirectory()) return [];
+  const limite = Date.now() - dias * DIA_MS;
+  const borrados: string[] = [];
+  for (const id of (await readdir(base)).sort()) {
+    if (!PATRON_ID_ENCARGO.test(id)) continue;
+    const dir = path.join(base, id);
+    const info = await lstatSiExiste(dir);
+    if (info === null || info.isSymbolicLink() || !info.isDirectory() || info.mtimeMs >= limite) continue;
+    await rm(dir, { recursive: true, force: true });
+    borrados.push(id);
+  }
+  return borrados;
+}
+
+/**
+ * Borra los rastros sin actividad en los últimos `dias` (y, con ellos, los encargos de `~/.nexakit/encargos/`). Nunca
+ * sigue enlaces: una carpeta de repo o de recorrido que sea un enlace se deja tal cual. Devuelve los ids de los
+ * recorridos borrados.
  */
 export async function podar(home: string, dias: number = DIAS_RASTRO): Promise<string[]> {
   if (!Number.isFinite(dias) || dias <= 0) throw new ErrorFabrica('Los días de poda deben ser un número positivo');
+  // Los encargos (`~/.nexakit/encargos/`) caducan con la misma limpieza; un fallo ahí no impide podar los rastros.
+  const encargos = podarEncargos(home, dias).catch(() => []);
+  try {
+    return await podarRastros(home, dias);
+  } finally {
+    await encargos;
+  }
+}
+
+async function podarRastros(home: string, dias: number): Promise<string[]> {
   const base = path.join(home, '.nexakit', 'fabrica');
   const infoBase = await lstatSiExiste(base);
   if (infoBase === null || infoBase.isSymbolicLink() || !infoBase.isDirectory()) return [];

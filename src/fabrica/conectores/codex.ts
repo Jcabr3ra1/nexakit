@@ -35,6 +35,13 @@ import type { TurnStartParams } from '../protocolos/codex/v2/TurnStartParams.js'
 import type { UserInput } from '../protocolos/codex/v2/UserInput.js';
 
 const NO_INSTALADO = 'Codex no está instalado';
+/** En modo escritura el turno no pide hallazgos: pide solo un resumen breve de lo hecho. */
+const ESQUEMA_RESUMEN: JsonValue = {
+  type: 'object',
+  properties: { resumen: { type: 'string' } },
+  required: ['resumen'],
+  additionalProperties: false,
+};
 const HALLAZGOS_INVALIDOS = 'El revisor no devolvió hallazgos válidos';
 const CANCELADA = 'La revisión se canceló';
 const RECHAZO = 'La fábrica de revisión no permite escrituras ni órdenes que la estación no declare.';
@@ -152,6 +159,17 @@ function esObjeto(valor: unknown): valor is Record<string, unknown> {
 
 function texto(valor: unknown): string | null {
   return typeof valor === 'string' ? valor : null;
+}
+
+/** Resumen de un turno de escritura: el campo `resumen` si la respuesta es el JSON pedido, y si no, el texto tal cual. */
+function resumenDeEscritura(crudo: string): string {
+  try {
+    const datos: unknown = JSON.parse(crudo);
+    if (esObjeto(datos) && typeof datos['resumen'] === 'string') return datos['resumen'];
+  } catch {
+    // No es JSON: se usa el texto.
+  }
+  return crudo.trim();
 }
 
 function recortar(valor: string): string {
@@ -392,7 +410,7 @@ class ConectorCodex implements Conector {
         ...(this.raizEscritura !== undefined ? { cwd: this.raizEscritura } : {}),
         model: encargo.modelo,
         ...(encargo.esfuerzo !== null ? { effort: encargo.esfuerzo } : {}),
-        outputSchema: hallazgosJsonSchema() as JsonValue,
+        outputSchema: (this.raizEscritura === undefined ? hallazgosJsonSchema() : ESQUEMA_RESUMEN) as JsonValue,
         sandboxPolicy: this.raizEscritura === undefined
           ? { type: 'readOnly', networkAccess: false }
           : {
@@ -513,6 +531,10 @@ class ConectorCodex implements Conector {
   }
 
   private cerrarTurno(resultado: ResultadoEstacion, fin: FinTurno, señal: AbortSignal): ResultadoEstacion {
+    if (fin.estado === 'completed' && this.raizEscritura !== undefined) {
+      // En modo escritura lo que importa son los cambios del worktree; la respuesta es solo un resumen.
+      return { ...resultado, estado: 'ok', informe: { hallazgos: [], resumen: resumenDeEscritura(resultado.crudo) } };
+    }
     if (fin.estado === 'completed') {
       let datos: unknown;
       try {

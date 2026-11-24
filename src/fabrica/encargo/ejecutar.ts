@@ -1,0 +1,607 @@
+import { lstat, readFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { inspectModels, recommendAntigravity } from '../../../src/model-command.js';
+import { REGLA_ORDENES_SIMPLES } from '../../../src/regla-ordenes-simples.js';
+import { crearConectorAntigravity } from '../conectores/antigravity.js';
+import { crearConectorCodex } from '../conectores/codex.js';
+import type { AlProgreso, Conector, Denegacion, Encargo, ResultadoEstacion } from '../conectores/tipos.js';
+import { comparar, instantanea } from '../disco.js';
+import { descarte, type Catalogos } from '../enrutador.js';
+import { AGOTADO, bloqueLecciones, conGracia, conTope, GRACIA_MS, INTERVALO_ACTIVO_MS, TOPE_CATALOGO_MS } from '../ejecutor.js';
+import { ErrorFabrica } from '../errores.js';
+import type { Leccion } from '../lecciones.js';
+import { paraEncargo } from '../lecciones.js';
+import * as rastro from '../rastro.js';
+import { cerrarConectores, limpiar, mensajeDe, opcionesDeEntorno, type Conectores } from '../sesion.js';
+import { borrarWorktree, crearWorktree, diffDelWorktree, type Worktree } from './worktree.js';
+
+/** Tiempo máximo de un encargo: 20 minutos. */
+export const TIEMPO_ENCARGO_MS = 1_200_000;
+/** Esfuerzo del nivel Normal, para un modelo indicado a mano en Codex sin esfuerzo. */
+const ESFUERZO_NORMAL = 'medium';
+const MAX_RESUMEN = 8_000;
+const TIEMPO_AGOTADO = 'tiempo agotado';
+const CANCELADO = 'cancelado por la persona';
+const SIN_RESPUESTA = 'la IA no respondió a la cancelación';
+
+export type IAEncargo = 'codex' | 'antigravity';
+export type EstadoEncargo = 'ok' | 'sin-cambios' | 'tiempo-agotado' | 'cancelado' | 'invalido' | 'fallido';
+
+/** Modo escritura con el que se crea el conector: siempre el directorio del worktree como única raíz. */
+export interface EscrituraConector {
+  raiz: string;
+  ordenesPermitidas: string[];
+}
+
+/**
+ * Crea el conector de una IA en modo escritura. Es una función y no un conector ya hecho porque la raíz de escritura
+ * es el worktree, que no existe hasta que arranca el encargo.
+ */
+export type FabricaConector = (escritura: EscrituraConector) => Promise<Conector>;
+export type FabricasConectores = Partial<Record<IAEncargo, FabricaConector>>;
+
+export interface OpcionesEncargo {
+  /** Raíz del repo de la persona: de ahí sale el worktree y nunca se escribe en ella. */
+  raiz: string;
+  ia: IAEncargo | 'auto';
+  /** Si falta, el de la recomendación de nivel Normal de la IA elegida. Se valida contra el catálogo vivo. */
+  modelo?: string | undefined;
+  esfuerzo?: string | undefined;
+  /** Texto del encargo: objetivo, archivos, criterio de hecho y pruebas. */
+  texto: string;
+  /** Órdenes exactas que se añaden a las de pruebas y tipos que detecta el repo. */
+  ordenesPermitidas?: string[] | undefined;
+  /** Por defecto, 20 minutos. */
+  tiempoMs?: number | undefined;
+  home?: string | undefined;
+  /** Por defecto, los reales según `NEXAKIT_FABRICA_CODEX` y `NEXAKIT_FABRICA_AGY`. */
+  conectores?: FabricasConectores | undefined;
+  /** Ctrl+C o `fabrica_cancelar`. */
+  señal?: AbortSignal | undefined;
+  /** Variables de entorno para `nexakit modelo` y los conectores; por defecto las del proceso. */
+  entorno?: NodeJS.ProcessEnv | undefined;
+  /** Sustituye a la recomendación de nivel Normal (`nexakit modelo --nivel normal --ia <ia>`); solo para pruebas. */
+  recomendar?: ((ia: IAEncargo) => Promise<{ modelo: string; esfuerzo: string | null } | null>) | undefined;
+  /** Espera máxima a que la IA devuelva tras cancelarla, y a cada catálogo vivo. */
+  graciaMs?: number | undefined;
+  topeCatalogoMs?: number | undefined;
+  /** Mínimo entre dos escrituras de `activo.json`. */
+  intervaloActivoMs?: number | undefined;
+}
+
+/** Lo que se guarda en `informe.json` y se devuelve a quien pidió el encargo. */
+export interface InformeEncargo {
+  id: string;
+  estado: EstadoEncargo;
+  ia: IAEncargo | null;
+  modelo: string | null;
+  esfuerzo: string | null;
+  /** Tal como los informó la IA (también si son 0). */
+  tokens: { entrada: number; salida: number; total: number } | null;
+  /** `false` si la IA no informó de tokens o fueron 0: no se registra ni cuenta como éxito comprobado. */
+  tokensValidos: boolean;
+  segundos: number;
+  /** Resumen de lo hecho, escrito por la IA. */
+  resumen: string;
+  denegaciones: Denegacion[];
+  aprobaciones: Denegacion[];
+  /** Rutas del diff, para revisarlo de un vistazo. */
+  archivos: string[];
+  /** Rutas del repo real que cambiaron mientras corría el encargo (lo invalida). */
+  escriturasFuera: string[];
+  avisos: string[];
+  motivo?: string;
+  /** Commit de HEAD del que partió el encargo. */
+  base: string;
+  /** `cambios.diff`, listo para `git apply`; `null` si no hay un diff aplicable. */
+  rutaDiff: string | null;
+  rutaInforme: string;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Conectores y modelo
+
+/** Los conectores reales, con la misma configuración de entorno que la fábrica, en modo escritura. */
+function fabricasDeEntorno(entorno: NodeJS.ProcessEnv): FabricasConectores {
+  return {
+    codex: (escritura) =>
+      crearConectorCodex({ ...opcionesDeEntorno(entorno, 'NEXAKIT_FABRICA_CODEX'), escritura: { raiz: escritura.raiz } }),
+    antigravity: (escritura) =>
+      crearConectorAntigravity({ ...opcionesDeEntorno(entorno, 'NEXAKIT_FABRICA_AGY'), escritura }),
+  };
+}
+
+/** Lo mismo que `nexakit modelo --nivel normal --ia <ia>`: el modelo y el esfuerzo recomendados para el nivel Normal. */
+async function recomendacionNormal(
+  ia: IAEncargo,
+  home: string,
+  entorno: NodeJS.ProcessEnv,
+): Promise<{ modelo: string; esfuerzo: string | null } | null> {
+  const datos = await inspectModels({ homeDirectory: home, environment: entorno, includeAntigravity: ia === 'antigravity' });
+  const fila = datos.levels.find((nivel) => nivel.level.toLowerCase() === 'normal');
+  if (fila === undefined) return null;
+  const elegido = ia === 'antigravity' ? recommendAntigravity(datos.catalogs.antigravity, fila) : fila.codex;
+  return elegido === null ? null : { modelo: elegido.model, esfuerzo: elegido.effort };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Texto del encargo y órdenes
+
+/** `npm test` y `npm run typecheck` si el repo los declara; el worktree es el commit de HEAD, no los cambios sin commit. */
+async function ordenesDelRepo(dir: string): Promise<string[]> {
+  try {
+    const archivo = path.join(dir, 'package.json');
+    if (!(await lstat(archivo)).isFile()) return [];
+    const paquete: unknown = JSON.parse(await readFile(archivo, 'utf8'));
+    const scripts = typeof paquete === 'object' && paquete !== null ? (paquete as { scripts?: unknown }).scripts : undefined;
+    if (typeof scripts !== 'object' || scripts === null) return [];
+    const tiene = (nombre: string): boolean => typeof (scripts as Record<string, unknown>)[nombre] === 'string';
+    return [...(tiene('test') ? ['npm test'] : []), ...(tiene('typecheck') ? ['npm run typecheck'] : [])];
+  } catch {
+    return [];
+  }
+}
+
+function instruccionesDelEncargo(texto: string, lecciones: readonly Leccion[], ordenes: readonly string[]): string {
+  const partes = [
+    'Programa este encargo en la carpeta de trabajo actual, que es una copia aislada del repositorio: edita los archivos directamente ahí.',
+    'No hagas commit ni push, no cambies de rama y no toques nada fuera de esta carpeta. Quien te encarga revisará el diff y lo aplicará.',
+    '',
+    'Encargo:',
+    texto.trim(),
+  ];
+  const lecc = bloqueLecciones(lecciones);
+  if (lecc !== '') partes.push('', lecc);
+  partes.push('', 'Reglas de trabajo:', `- ${REGLA_ORDENES_SIMPLES}`);
+  partes.push(
+    ordenes.length === 0
+      ? '- No se aprueba ninguna orden: no dependas de ejecutar pruebas.'
+      : `- Solo se aprueban estas órdenes exactas, cualquier otra se rechaza: ${ordenes.map((o) => `\`${o}\``).join(', ')}.`,
+  );
+  partes.push('', 'Al terminar, responde con un resumen breve en texto (qué cambiaste y qué queda pendiente), sin pegar el diff.');
+  return `${partes.join('\n')}\n`;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Estado vivo (`activo.json`)
+
+/**
+ * Publica la estación «encargo» en `~/.nexakit/fabrica/activo.json` (el mismo archivo y formato que la fábrica, así que
+ * la barra lo enseña), con como mucho una escritura por intervalo. Al cerrar lo borra solo si sigue siendo suyo.
+ */
+function crearPublicador(home: string, id: string, repo: string, intervaloMs: number) {
+  let contenido: rastro.EstacionActiva | undefined;
+  let cerrado = false;
+  let ultima = 0;
+  let temporizador: NodeJS.Timeout | undefined;
+  let cadena: Promise<void> = Promise.resolve();
+
+  const escribir = (): void => {
+    ultima = Date.now();
+    cadena = cadena
+      .then(() =>
+        cerrado || contenido === undefined
+          ? undefined
+          : rastro.guardarActivo(home, { pid: process.pid, id, repo, actualizado: new Date().toISOString(), estaciones: [contenido] }),
+      )
+      // El estado vivo es de cortesía: un fallo se ignora.
+      .catch(() => {});
+  };
+
+  return {
+    publicar(estacion: rastro.EstacionActiva): void {
+      if (cerrado) return;
+      contenido = estacion;
+      const espera = ultima + intervaloMs - Date.now();
+      if (espera <= 0) escribir();
+      else if (temporizador === undefined) {
+        // Sin `unref` un encargo terminado retendría el proceso.
+        temporizador = setTimeout(() => {
+          temporizador = undefined;
+          escribir();
+        }, espera);
+        temporizador.unref();
+      }
+    },
+    async cerrar(): Promise<void> {
+      cerrado = true;
+      clearTimeout(temporizador);
+      cadena = cadena
+        .then(async () => {
+          // `guardarActivo(null)` ya respeta el `pid`; aquí también el id, por si una fábrica corre en el mismo proceso.
+          if (rastro.leerActivo(home)?.id === id) await rastro.guardarActivo(home, null);
+        })
+        .catch(() => {});
+      await cadena;
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Encargo
+
+/** IA elegida: conector abierto, catálogo vivo, modelo y esfuerzo ya validados. */
+interface Eleccion {
+  ia: IAEncargo;
+  conector: Conector;
+  modelo: string;
+  esfuerzo: string | null;
+}
+
+const datosDe = (valor: unknown): string => limpiar(mensajeDe(valor)).slice(0, 300);
+
+/** Lo que se va sabiendo del encargo; al final se convierte en el informe. */
+interface Borrador {
+  estado: EstadoEncargo;
+  ia: IAEncargo | null;
+  modelo: string | null;
+  esfuerzo: string | null;
+  tokens: InformeEncargo['tokens'];
+  resumen: string;
+  denegaciones: Denegacion[];
+  aprobaciones: Denegacion[];
+  archivos: string[];
+  escriturasFuera: string[];
+  avisos: string[];
+  motivo: string | undefined;
+  diff: Buffer | undefined;
+}
+
+/**
+ * Ejecuta un encargo de programación: crea un worktree aislado de HEAD, deja que Codex o Antigravity escriban solo ahí
+ * y devuelve el diff (`cambios.diff`) y el informe (`informe.json`) en `~/.nexakit/encargos/<id>/`. El worktree se borra
+ * siempre, también con error, tiempo agotado o Ctrl+C. Un fallo esperado (IA no disponible, modelo fuera del catálogo,
+ * cancelación...) no lanza: queda en el estado del informe. Solo lanzan los argumentos mal formados y los fallos al
+ * crear el worktree o al guardar el informe.
+ */
+export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<InformeEncargo> {
+  const {
+    raiz,
+    ia,
+    texto,
+    tiempoMs = TIEMPO_ENCARGO_MS,
+    home = os.homedir(),
+    entorno = process.env,
+    recomendar = (quien: IAEncargo) => recomendacionNormal(quien, home, entorno),
+    graciaMs = GRACIA_MS,
+    topeCatalogoMs = TOPE_CATALOGO_MS,
+    intervaloActivoMs = INTERVALO_ACTIVO_MS,
+    señal,
+  } = opciones;
+  if (ia !== 'codex' && ia !== 'antigravity' && ia !== 'auto') throw new ErrorFabrica('La IA del encargo debe ser codex, antigravity o auto');
+  if (typeof texto !== 'string' || texto.trim() === '') throw new ErrorFabrica('El encargo no tiene texto');
+  for (const [valor, nombre] of [
+    [tiempoMs, 'El tiempo máximo del encargo'],
+    [graciaMs, 'La espera tras cancelar'],
+    [topeCatalogoMs, 'La espera al catálogo'],
+    [intervaloActivoMs, 'El intervalo del estado vivo'],
+  ] as const) {
+    if (!Number.isFinite(valor) || valor <= 0) throw new ErrorFabrica(`${nombre} debe ser un número positivo de milisegundos`);
+  }
+  const extras = opciones.ordenesPermitidas ?? [];
+  if (!extras.every((o) => typeof o === 'string' && o.trim() !== '')) throw new ErrorFabrica('Las órdenes permitidas deben ser textos no vacíos');
+
+  const inicio = Date.now();
+  const fabricas = opciones.conectores ?? fabricasDeEntorno(entorno);
+  const w = await crearWorktree(raiz, home);
+  const carpeta = path.dirname(w.dir);
+  const rutaInforme = path.join(carpeta, 'informe.json');
+  const rutaDiffFinal = path.join(carpeta, 'cambios.diff');
+  const b: Borrador = {
+    estado: 'fallido',
+    ia: null,
+    modelo: null,
+    esfuerzo: null,
+    tokens: null,
+    resumen: '',
+    denegaciones: [],
+    aprobaciones: [],
+    archivos: [],
+    escriturasFuera: [],
+    avisos: [...w.avisos],
+    motivo: undefined,
+    diff: undefined,
+  };
+  const abiertos: Conectores = {};
+  let publicador: ReturnType<typeof crearPublicador> | undefined;
+  // La limpieza de caducados corre en segundo plano y nunca hace fallar el encargo.
+  const poda = rastro.podar(home).then(
+    () => undefined,
+    () => undefined,
+  );
+
+  try {
+    await correr();
+  } catch (error) {
+    b.estado = 'fallido';
+    b.motivo = `el encargo falló: ${datosDe(error)}`;
+  } finally {
+    await cerrarConectores(abiertos).catch(() => {});
+    const aviso = await borrarWorktree(w);
+    if (aviso !== null) b.avisos.push(aviso);
+    await publicador?.cerrar();
+    await poda;
+  }
+
+  let rutaDiff: string | null = null;
+  const guardar = async (): Promise<InformeEncargo> => {
+    const informe: InformeEncargo = {
+      id: w.id,
+      estado: b.estado,
+      ia: b.ia,
+      modelo: b.modelo,
+      esfuerzo: b.esfuerzo,
+      tokens: b.tokens,
+      tokensValidos: b.tokens !== null && b.tokens.total > 0,
+      segundos: Math.round((Date.now() - inicio) / 100) / 10,
+      resumen: b.resumen,
+      denegaciones: b.denegaciones,
+      aprobaciones: b.aprobaciones,
+      archivos: b.archivos,
+      escriturasFuera: b.escriturasFuera,
+      avisos: b.avisos,
+      ...(b.motivo === undefined ? {} : { motivo: b.motivo }),
+      base: w.base,
+      rutaDiff,
+      rutaInforme,
+    };
+    await rastro.escribirReemplazando(rutaInforme, `${JSON.stringify(informe, null, 2)}\n`);
+    return informe;
+  };
+  try {
+    if (b.diff !== undefined) {
+      await rastro.escribirReemplazando(rutaDiffFinal, b.diff);
+      rutaDiff = rutaDiffFinal;
+    }
+  } catch (error) {
+    b.estado = 'fallido';
+    b.motivo = `no se pudo guardar cambios.diff: ${datosDe(error)}`;
+  }
+  try {
+    return await guardar();
+  } catch (error) {
+    throw new ErrorFabrica(`No se pudo guardar el informe del encargo en ${rutaInforme}: ${datosDe(error)}`, { cause: error });
+  }
+
+  // -------------------------------------------------------------------------------------------
+
+  /** Una función y no una lectura directa: la señal puede abortarse mientras se espera y TypeScript no lo sabe. */
+  function personaCancela(): boolean {
+    return señal?.aborted === true;
+  }
+
+  async function correr(): Promise<void> {
+    if (personaCancela()) {
+      b.estado = 'cancelado';
+      b.motivo = CANCELADO;
+      return;
+    }
+    const repo = await rastro.nombreRepo(raiz);
+    const ordenes = [...new Set([...(await ordenesDelRepo(w.dir)), ...extras.map((o) => o.trim())])];
+
+    // La IA: la pedida o, con `auto`, Codex si responde y, si no, Antigravity.
+    const motivos: string[] = [];
+    let elegida: Eleccion | undefined;
+    for (const candidata of ia === 'auto' ? (['codex', 'antigravity'] as const) : [ia]) {
+      if (personaCancela()) break;
+      const resultado = await elegir(candidata, ordenes);
+      if ('motivo' in resultado) motivos.push(resultado.motivo);
+      else {
+        elegida = resultado;
+        break;
+      }
+    }
+    if (personaCancela()) {
+      b.estado = 'cancelado';
+      b.motivo = CANCELADO;
+      return;
+    }
+    if (elegida === undefined) {
+      b.motivo = motivos.join('; ');
+      return;
+    }
+    const { ia: iaElegida, conector, modelo, esfuerzo } = elegida;
+    b.ia = iaElegida;
+    b.modelo = modelo;
+    b.esfuerzo = esfuerzo;
+    if (iaElegida === 'antigravity' && opciones.esfuerzo !== undefined) {
+      b.avisos.push('En antigravity el esfuerzo va dentro del id del modelo: se ignora --esfuerzo.');
+    }
+
+    let lecciones: Leccion[] = [];
+    try {
+      lecciones = await paraEncargo(home, raiz, 'codigo');
+    } catch (error) {
+      b.avisos.push(`No se pudieron cargar las lecciones del repo; el encargo sale sin ellas: ${datosDe(error)}`);
+    }
+    const encargo: Encargo = {
+      estacion: 'codigo',
+      modelo,
+      esfuerzo,
+      // Siempre el worktree: es también la raíz de escritura del conector, que rechaza cualquier otra.
+      raiz: w.dir,
+      base: w.base,
+      instrucciones: instruccionesDelEncargo(texto, lecciones, ordenes),
+      ordenesPermitidas: ordenes,
+    };
+
+    // La instantánea del repo real se toma justo antes del turno: un worktree nuevo no cambia nada en él.
+    const antes = await instantanea(raiz);
+    publicador = crearPublicador(home, w.id, repo, intervaloActivoMs);
+    let tokens = 0;
+    const activa = (estado: rastro.EstacionActiva['estado']): rastro.EstacionActiva => ({
+      estacion: 'encargo',
+      ia: iaElegida,
+      modelo,
+      esfuerzo,
+      estado,
+      tokens,
+    });
+    publicador.publicar(activa('en-curso'));
+    const alProgreso: AlProgreso = ({ tokens: total }) => {
+      if (!Number.isFinite(total)) return;
+      tokens = total;
+      publicador?.publicar(activa('en-curso'));
+    };
+
+    const control = new AbortController();
+    let agotado = false;
+    let canceladoPorPersona = false;
+    // Solo cuenta la primera causa: un tiempo que vence durante la espera tras Ctrl+C no cambia el motivo.
+    const alCancelar = (): void => {
+      if (control.signal.aborted) return;
+      canceladoPorPersona = true;
+      control.abort(new ErrorFabrica(CANCELADO));
+    };
+    señal?.addEventListener('abort', alCancelar, { once: true });
+    const reloj = setTimeout(() => {
+      if (control.signal.aborted) return;
+      agotado = true;
+      control.abort(new ErrorFabrica(TIEMPO_AGOTADO));
+    }, tiempoMs);
+
+    let resultado: ResultadoEstacion;
+    let sinRespuesta = false;
+    try {
+      // `then` convierte también una excepción síncrona del conector en un rechazo.
+      const llamada = Promise.resolve().then(() => conector.ejecutar(encargo, control.signal, alProgreso));
+      const respuesta = await conGracia(llamada, control.signal, graciaMs);
+      if (respuesta === AGOTADO) {
+        sinRespuesta = true;
+        throw new ErrorFabrica(SIN_RESPUESTA);
+      }
+      resultado = respuesta;
+      if (typeof resultado !== 'object' || resultado === null || !['ok', 'fallida', 'cancelada'].includes(resultado.estado)) {
+        throw new ErrorFabrica('respuesta no válida');
+      }
+    } catch (error) {
+      resultado = {
+        estado: 'fallida',
+        crudo: '',
+        modeloInformado: null,
+        tokens: null,
+        denegaciones: [],
+        motivo: `el conector falló: ${datosDe(error)}`,
+      };
+    } finally {
+      clearTimeout(reloj);
+      señal?.removeEventListener('abort', alCancelar);
+    }
+    // Se publica el desenlace antes de comprobar el disco y de pedir el diff; `cerrar` lo retira enseguida.
+    publicador.publicar(activa(resultado.estado === 'ok' ? 'ok' : resultado.estado === 'cancelada' ? 'cancelada' : 'fallida'));
+
+    b.tokens = resultado.tokens;
+    b.denegaciones = resultado.denegaciones;
+    b.aprobaciones = resultado.aprobaciones ?? [];
+    b.resumen = limpiar(resultado.informe?.resumen ?? '').slice(0, MAX_RESUMEN);
+
+    // La causa manda sobre el conector sordo: lo que importa es que se agotó el tiempo o que la persona canceló.
+    const nota = sinRespuesta ? `; ${SIN_RESPUESTA}` : '';
+    if (agotado) {
+      b.estado = 'tiempo-agotado';
+      b.motivo = `${TIEMPO_AGOTADO}${nota}`;
+    } else if (canceladoPorPersona || resultado.estado === 'cancelada') {
+      b.estado = 'cancelado';
+      b.motivo = `${CANCELADO}${nota}`;
+    } else if (sinRespuesta) {
+      b.estado = 'fallido';
+      b.motivo = SIN_RESPUESTA;
+    } else if (resultado.estado === 'fallida') {
+      b.estado = 'fallido';
+      b.motivo = limpiar(resultado.motivo ?? 'la IA no completó el encargo');
+    } else {
+      b.estado = 'ok';
+    }
+
+    // Nada debe haber cambiado en el repo real: una escritura fuera del worktree invalida el encargo en cualquier caso.
+    try {
+      b.escriturasFuera = comparar(antes, await instantanea(raiz));
+    } catch (error) {
+      const motivo = `no se pudo comprobar el disco tras el encargo: ${datosDe(error)}`;
+      if (b.estado === 'ok') {
+        b.estado = 'fallido';
+        b.motivo = motivo;
+      } else b.avisos.push(motivo);
+    }
+    if (b.escriturasFuera.length > 0) {
+      b.estado = 'invalido';
+      b.motivo = `el encargo cambió el repo fuera del worktree (no se guarda ningún diff): ${b.escriturasFuera.map(limpiar).join(', ')}`;
+      return;
+    }
+    if (b.estado !== 'ok') return;
+
+    let diff: Buffer;
+    try {
+      diff = await diffDelWorktree(w);
+    } catch (error) {
+      b.estado = 'fallido';
+      b.motivo = datosDe(error);
+      return;
+    }
+    if (diff.length === 0) {
+      b.estado = 'sin-cambios';
+      return;
+    }
+    b.diff = diff;
+    b.archivos = archivosDelDiff(diff);
+    if (b.tokens === null || b.tokens.total <= 0) {
+      b.avisos.push('La IA no informó de tokens: el encargo no se registra ni cuenta como éxito comprobado.');
+    }
+  }
+
+  /** Abre el conector de `quien`, comprueba su catálogo vivo y valida el modelo; o dice por qué no se puede usar. */
+  async function elegir(quien: IAEncargo, ordenes: string[]): Promise<Eleccion | { motivo: string }> {
+    const fabrica = fabricas[quien];
+    if (fabrica === undefined) return { motivo: `${quien} no está disponible` };
+    let conector: Conector;
+    try {
+      conector = await fabrica({ raiz: w.dir, ordenesPermitidas: ordenes });
+    } catch (error) {
+      return { motivo: `${quien} no está disponible: ${datosDe(error)}` };
+    }
+    abiertos[quien] = conector;
+    let catalogo: Awaited<ReturnType<Conector['catalogo']>> | typeof AGOTADO;
+    try {
+      catalogo = await conTope(Promise.resolve().then(() => conector.catalogo()), topeCatalogoMs);
+    } catch (error) {
+      return { motivo: `${quien} no está disponible: ${datosDe(error)}` };
+    }
+    if (catalogo === AGOTADO) return { motivo: `${quien} no está disponible: su catálogo no respondió a tiempo` };
+    if (catalogo.length === 0) return { motivo: `${quien} no está disponible: su catálogo no trae ningún modelo` };
+
+    let modelo = opciones.modelo;
+    let esfuerzo: string | null = opciones.esfuerzo ?? null;
+    if (modelo === undefined) {
+      let recomendado: { modelo: string; esfuerzo: string | null } | null;
+      try {
+        recomendado = await recomendar(quien);
+      } catch (error) {
+        return { motivo: `no se pudo recomendar un modelo de nivel normal para ${quien}: ${datosDe(error)}` };
+      }
+      if (recomendado === null) return { motivo: `no hay una recomendación de nivel normal para ${quien}; indica --modelo` };
+      modelo = recomendado.modelo;
+      esfuerzo ??= recomendado.esfuerzo;
+    } else if (quien === 'codex') {
+      esfuerzo ??= ESFUERZO_NORMAL;
+    }
+    // En Antigravity el esfuerzo forma parte del id del modelo.
+    if (quien === 'antigravity') esfuerzo = null;
+    const vivos: Catalogos = { [quien]: catalogo };
+    const motivo = descarte({ ia: quien, modelo, esfuerzo }, vivos);
+    if (motivo !== null) return { motivo: `${motivo}; consulta nexakit modelo` };
+    return { ia: quien, conector, modelo, esfuerzo };
+  }
+}
+
+/** Rutas del diff, de las líneas `diff --git a/<ruta> b/<ruta>`. */
+function archivosDelDiff(diff: Buffer): string[] {
+  const rutas: string[] = [];
+  for (const linea of diff.toString('utf8').split('\n')) {
+    const m = /^diff --git a\/(.+) b\/(.+)$/u.exec(linea);
+    if (m?.[2] !== undefined) rutas.push(m[2]);
+  }
+  return [...new Set(rutas)];
+}
+
+export type { Worktree };

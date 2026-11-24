@@ -615,7 +615,11 @@ class ConectorAntigravity implements Conector {
       if (señal.aborted) return cancelada();
 
       let informe: InformeEstacion | null = null;
-      for (const prompt of [[conEsquema(encargo.instrucciones), ...imagenes], [conEsquema(CORRECCION)]]) {
+      // Modo escritura: sin esquema de hallazgos ni reintento; el texto final del agente es el resumen de lo hecho.
+      const prompts: ContentBlock[][] = this.escritura === undefined
+        ? [[conEsquema(encargo.instrucciones), ...imagenes], [conEsquema(CORRECCION)]]
+        : [[{ type: 'text', text: encargo.instrucciones }, ...imagenes]];
+      for (const prompt of prompts) {
         const desenlace = await this.turno(proceso, id, enCurso, prompt, aborto.promesa);
         resultado.crudo = enCurso.texto;
         if (desenlace.tipo === 'abortado') return cancelada();
@@ -625,7 +629,7 @@ class ConectorAntigravity implements Conector {
         }
         if (desenlace.parada === 'cancelled' && señal.aborted) return cancelada();
         if (desenlace.parada !== 'end_turn') return { ...resultado, motivo: `Antigravity no completó la revisión: ${desenlace.parada}` };
-        informe = analizarInforme(enCurso.texto);
+        informe = this.escritura === undefined ? analizarInforme(enCurso.texto) : { hallazgos: [], resumen: enCurso.texto.trim() };
         if (informe !== null) break;
       }
       if (informe === null) return { ...resultado, motivo: HALLAZGOS_INVALIDOS };

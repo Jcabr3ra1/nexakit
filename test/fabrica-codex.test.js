@@ -242,6 +242,49 @@ test('con escritura: { raiz } el hilo y el turno son workspace-write solo en esa
   }
 });
 
+/** El guion `invalido` con otro texto como última respuesta del agente. */
+function guionConRespuesta(texto) {
+  const base = JSON.parse(readFileSync(join(GUIONES, 'codex-invalido.json'), 'utf8'));
+  for (const n of base.metodos['turn/start'].notificaciones) if (n.metodo === 'item/completed') n.params.item.text = texto;
+  return base.metodos;
+}
+
+test('en modo escritura el turno pide solo un resumen y lo toma de la respuesta; sin escritura sigue pidiendo hallazgos', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'nexakit-codex-raiz-'));
+  const raiz = join(dir, 'worktree');
+  mkdirSync(raiz);
+  const esquemaResumen = { type: 'object', properties: { resumen: { type: 'string' } }, required: ['resumen'], additionalProperties: false };
+  try {
+    for (const [respuestaFinal, esperado] of [
+      ['{"resumen":"Cambios hechos."}', 'Cambios hechos.'],
+      ['Listo: cambié dos archivos.\n', 'Listo: cambié dos archivos.'],
+      ['{"otra":1}', '{"otra":1}'],
+    ]) {
+      const p = preparar('invalido', { metodos: guionConRespuesta(respuestaFinal) }, { escritura: { raiz } });
+      try {
+        const resultado = await (await p.conector).ejecutar(encargo(raiz), new AbortController().signal);
+        assert.equal(resultado.estado, 'ok', resultado.motivo);
+        assert.deepEqual(resultado.informe, { hallazgos: [], resumen: esperado });
+        assert.deepEqual(p.mensajes().find((m) => m.method === 'turn/start').params.outputSchema, esquemaResumen);
+      } finally {
+        await p.limpiar();
+      }
+    }
+    // En solo lectura la misma respuesta de texto libre no vale: hacen falta hallazgos.
+    const lectura = preparar('invalido', { metodos: guionConRespuesta('Listo.') });
+    try {
+      const resultado = await (await lectura.conector).ejecutar(encargo(lectura.dir), new AbortController().signal);
+      assert.equal(resultado.estado, 'fallida');
+      assert.match(resultado.motivo, /hallazgos válidos/);
+      assert.deepEqual(lectura.mensajes().find((m) => m.method === 'turn/start').params.outputSchema, hallazgosJsonSchema());
+    } finally {
+      await lectura.limpiar();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('en modo escritura, un encargo con otra raíz falla cerrado sin enviar thread/start', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'nexakit-codex-raiz-'));
   const raiz = join(dir, 'worktree');
