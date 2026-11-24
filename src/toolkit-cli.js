@@ -42,6 +42,7 @@ const HELP = `Uso: npx nexakit [--project <ruta>] [--si]
      nexakit codex auditar|preparar|agentes|actividad|consumo|recomendar|hook|ejecutar|comparar [opciones]
      nexakit antigravity barra|preparar|agentes|recomendar|hook|ejecutar [opciones]
      nexakit fabrica proponer|lanzar|estado|resultado|cancelar|banco [opciones]
+     nexakit encargar --ia codex|antigravity|auto --encargo <archivo.md> [--modelo <m>] [--esfuerzo <e>] [--ordenes <archivo.json>] [--tiempo <min>] [--json]
      nexakit ahorro [--json]
      nexakit lecciones [--json | --descartar]
      nexakit lecciones registrar --regla <texto> --porque <texto> [--proyecto <ruta>] [--estacion <estacion>]
@@ -64,6 +65,8 @@ que ya no existe); lista lo que encontró y siempre pregunta.
 memoria ejecuta los subcomandos de project-memory (init, connect, doctor, status, sync).
 modelo consulta los modelos disponibles.
 fabrica propone, lanza y consulta un recorrido de revisión con varias IA en paralelo, solo lectura (ver nexakit fabrica --help).
+encargar delega una tarea de programación en Codex o Antigravity: la IA escribe en una copia aislada del repo y la orden devuelve el diff
+para que lo revises y lo apliques tú (ver nexakit fabrica --help).
 ahorro resume cuánta salida de comandos recortó el mod nexakit-ahorro (caracteres y tokens estimados).
 lecciones resume las correcciones y lecciones que registra el mod nexakit-lecciones y las que siguen pendientes.
 recommend inspecciona el proyecto en solo lectura; setup prepara las skills base globales y respeta las que quitaste
@@ -105,11 +108,11 @@ export async function runToolkitCli(
   if (command === 'modelo') return runModelCommand(rest, { out, err }, options);
   if (command === 'codex') return runCodexCommand(rest, { out, err, input, output }, options);
   if (command === 'antigravity') return runAntigravityCommand(rest, { out, err, input, output }, options);
-  if (command === 'fabrica') {
+  if (command === 'fabrica' || command === 'encargar') {
     let aviso = '';
     const cli = await loadWithDependencyCheck(() => import('../dist/fabrica/cli.js'), { write: text => { aviso += text; } });
     if (!cli) { await err(aviso); return 1; }
-    return cli.ejecutarCli(rest, { out, err }, options);
+    return cli.ejecutarCli(command === 'encargar' ? ['encargar', ...rest] : rest, { out, err }, options);
   }
   if (command === 'ahorro') return runAhorroCommand(rest, { out, err }, options);
   if (command === 'lecciones') return runLeccionesCommand(rest, { out, err }, options);

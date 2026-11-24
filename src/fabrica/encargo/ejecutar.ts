@@ -14,7 +14,7 @@ import type { Leccion } from '../lecciones.js';
 import { paraEncargo } from '../lecciones.js';
 import * as rastro from '../rastro.js';
 import { cerrarConectores, limpiar, mensajeDe, opcionesDeEntorno, type Conectores } from '../sesion.js';
-import { borrarWorktree, cambiosDelWorktree, crearWorktree, diffDelWorktree, raizDelRepoGit, type CambioWorktree, type Worktree } from './worktree.js';
+import { barrerHuerfanos, borrarWorktree, cambiosDelWorktree, crearWorktree, diffDelWorktree, raizDelRepoGit, type CambioWorktree, type Worktree } from './worktree.js';
 
 /** Tiempo máximo de un encargo: 20 minutos. */
 export const TIEMPO_ENCARGO_MS = 1_200_000;
@@ -59,6 +59,8 @@ export interface OpcionesEncargo {
   conectores?: FabricasConectores | undefined;
   /** Ctrl+C o `fabrica_cancelar`. */
   señal?: AbortSignal | undefined;
+  /** Se llama con el id del encargo en cuanto existe su worktree, antes de lanzar la IA (así se puede consultar o cancelar). */
+  alCrear?: ((id: string) => void) | undefined;
   /** Variables de entorno para `nexakit modelo` y los conectores; por defecto las del proceso. */
   entorno?: NodeJS.ProcessEnv | undefined;
   /** Sustituye a la recomendación de nivel Normal (`nexakit modelo --nivel normal --ia <ia>`); solo para pruebas. */
@@ -290,7 +292,14 @@ export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<Inform
   const fabricas = opciones.conectores ?? fabricasDeEntorno(entorno);
   // La raíz del repo, no una subcarpeta: la instantánea del disco, las lecciones y el rastro hablan del repo entero.
   const raiz = await raizDelRepoGit(raizPedida);
+  // Antes de crear el propio: los worktrees de encargos cuyo proceso murió se borran para no acumular carpetas.
+  const avisosBarrido = await barrerHuerfanos(home);
   const w = await crearWorktree(raiz, home);
+  try {
+    opciones.alCrear?.(w.id);
+  } catch {
+    // El oyente es de cortesía: un fallo suyo no tumba el encargo.
+  }
   const carpeta = path.dirname(w.dir);
   const rutaInforme = path.join(carpeta, 'informe.json');
   const rutaDiffFinal = path.join(carpeta, 'cambios.diff');
@@ -306,7 +315,7 @@ export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<Inform
     archivos: [],
     escriturasFuera: [],
     rutasVetadas: [],
-    avisos: [...w.avisos],
+    avisos: [...avisosBarrido, ...w.avisos],
     motivo: undefined,
     diff: undefined,
   };
@@ -678,7 +687,14 @@ async function rutasVetadas(w: Worktree, cambios: readonly CambioWorktree[]): Pr
       vetadas.push(`${limpiar(ruta)} (enlace simbólico que no se pudo leer)`);
       continue;
     }
-    if (enlaceSaleDelRepo(ruta, destino)) vetadas.push(`${limpiar(ruta)} (enlace simbólico hacia fuera del repo: ${limpiar(destino).slice(0, 200)})`);
+    if (enlaceSaleDelRepo(ruta, destino)) {
+      vetadas.push(`${limpiar(ruta)} (enlace simbólico hacia fuera del repo: ${limpiar(destino).slice(0, 200)})`);
+      continue;
+    }
+    // Un enlace que apunta dentro del repo pero a un componente protegido (`x -> .git/hooks`) abriría la misma puerta.
+    const interno = path.posix.normalize(path.posix.join(path.posix.dirname(ruta), destino.replace(/\\/gu, '/')));
+    const motivo = motivoRutaSensible(interno);
+    if (motivo !== null) vetadas.push(`${limpiar(ruta)} (enlace simbólico hacia una ruta protegida: ${limpiar(interno).slice(0, 200)}; ${motivo})`);
   }
   return vetadas;
 }

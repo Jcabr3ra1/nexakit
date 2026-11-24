@@ -170,11 +170,11 @@ async function proponer(cliente) {
   return datos(r).recorrido;
 }
 
-test('listTools devuelve las cinco herramientas y las instrucciones van en español', async () => {
+test('listTools devuelve las seis herramientas y las instrucciones van en español', async () => {
   const e = escenario();
   const { cliente } = await conectar(e);
   const { tools } = await cliente.listTools();
-  assert.deepEqual(tools.map((t) => t.name).sort(), ['fabrica_cancelar', 'fabrica_estado', 'fabrica_lanzar', 'fabrica_proponer', 'fabrica_resultado']);
+  assert.deepEqual(tools.map((t) => t.name).sort(), ['fabrica_cancelar', 'fabrica_encargar', 'fabrica_estado', 'fabrica_lanzar', 'fabrica_proponer', 'fabrica_resultado']);
   for (const t of tools) {
     assert.match(t.description, /\S/u, t.name);
     assert.equal(Object.hasOwn(t.inputSchema.properties ?? {}, 'raiz'), false, `${t.name} no acepta una raíz`);
@@ -186,6 +186,8 @@ test('listTools devuelve las cinco herramientas y las instrucciones van en espa�
   const instrucciones = cliente.getInstructions();
   assert.match(instrucciones, /Lánzala tú por tu cuenta[^.]*con la huella de la propuesta; solo hay un recorrido a la vez y no encadenes recorridos para el mismo diff\. Pide aprobación a la persona solo si el recorrido trae órdenes de \.nexakit\/fabrica\.json/u);
   assert.match(instrucciones, /Las estaciones de Claude las lanzas tú como subagentes; pasa sus hallazgos a fabrica_resultado/u);
+  assert.match(instrucciones, /fabrica_encargar: devuelve un id sin esperar, la IA escribe solo en una copia aislada del repo/u);
+  assert.match(tools.find((t) => t.name === 'fabrica_encargar').description, /directorio de trabajo del servidor/u);
 });
 
 test('fabrica_lanzar con una huella inválida da isError con el mensaje de siempre y no lanza nada', async () => {
@@ -504,4 +506,223 @@ test('una segunda llamada rechazada por ocupada no impide que el cierre espere a
   assert.equal(estado.fase, 'cancelado');
   assert.equal(conectoresVivos(e.guiones).length, 0, 'no queda ningún conector al volver detener()');
   assert.equal((await a).isError, true);
+});
+
+// ---------------------------------------------------------------------------------------------
+// fabrica_encargar
+
+const okEncargo = () => ({
+  estado: 'ok',
+  informe: { hallazgos: [], resumen: 'Hecho: añadí nuevo.txt.' },
+  crudo: 'Hecho.',
+  modeloInformado: 'x',
+  tokens: { entrada: 100, salida: 50, total: 150 },
+  denegaciones: [],
+});
+
+/** Conector falso de encargos; `ejecutar(encargo, señal)` hace de la IA. */
+function codexEncargo(ejecutar) {
+  const registro = { creaciones: 0, encargos: [] };
+  const crear = async () => {
+    registro.creaciones += 1;
+    return {
+      ia: 'codex',
+      catalogo: async () => [{ modelo: 'gpt-6-sol', esfuerzos: ['medium', 'high'] }],
+      ejecutar: async (encargo, señal) => {
+        registro.encargos.push(encargo);
+        return ejecutar(encargo, señal);
+      },
+      cerrar: async () => {},
+    };
+  };
+  return { crear, registro };
+}
+
+/** Una IA que no termina hasta que se llama a `soltar()` o se cancela. */
+function iaDetenida() {
+  let soltar = () => {};
+  const codex = codexEncargo(
+    (encargo, señal) =>
+      new Promise((resolver) => {
+        soltar = () => {
+          writeFileSync(path.join(encargo.raiz, 'nuevo.txt'), 'hola\n');
+          resolver(okEncargo());
+        };
+        señal.addEventListener('abort', () => resolver({ ...okEncargo(), estado: 'cancelada', motivo: 'cancelado' }), { once: true });
+      }),
+  );
+  return { codex, soltar: () => soltar() };
+}
+
+/** Servidor en el mismo proceso con conectores de encargo falsos, y un cliente MCP conectado. */
+async function conectarEncargos(e, codex, { cwd = e.dir } = {}) {
+  const servidor = crearServidorFabrica({
+    homeDirectory: e.home,
+    cwd,
+    environment: { ...process.env, ...GIT_ENTORNO, ...e.env },
+    avisar: () => {},
+    encargo: { conectores: { codex: codex.crear }, recomendar: async () => ({ modelo: 'gpt-6-sol', esfuerzo: 'medium' }) },
+  });
+  const [extremoCliente, extremoServidor] = InMemoryTransport.createLinkedPair();
+  await servidor.server.connect(extremoServidor);
+  const cliente = new Client({ name: 'prueba', version: '0.0.0' }, { capabilities: {} });
+  clientes.push(cliente);
+  await cliente.connect(extremoCliente);
+  return { cliente, servidor };
+}
+
+const ENCARGO = { ia: 'codex', texto: 'Añade nuevo.txt con la palabra hola.' };
+const worktreesMcp = (dir) => git(dir, 'worktree', 'list', '--porcelain').split('\n').filter((l) => l.startsWith('worktree ')).length;
+
+test('fabrica_encargar devuelve el id sin esperar; estado y resultado funcionan con ese id y el diff se aplica', async () => {
+  const e = escenario();
+  const { codex, soltar } = iaDetenida();
+  const { cliente, servidor } = await conectarEncargos(e, codex);
+  const lanzado = await llamar(cliente, 'fabrica_encargar', { ...ENCARGO, ordenes: ['node --version'], tiempoMin: 5 });
+  assert.equal(lanzado.isError, undefined, lanzado.texto);
+  const { id } = datos(lanzado);
+  assert.deepEqual(Object.keys(datos(lanzado)), ['id'], 'solo devuelve el id');
+
+  const enCurso = datos(await llamar(cliente, 'fabrica_estado', { id }));
+  assert.equal(enCurso.tipo, 'encargo');
+  assert.equal(enCurso.fase, 'en-curso');
+  const sinTerminar = await llamar(cliente, 'fabrica_resultado', { id });
+  assert.equal(sinTerminar.isError, true);
+  assert.match(sinTerminar.texto, /El encargo sigue en curso/u);
+  await hasta(() => codex.registro.encargos.length === 1, 'la IA arranca');
+  assert.deepEqual(codex.registro.encargos[0].ordenesPermitidas, ['node --version']);
+  assert.match(codex.registro.encargos[0].instrucciones, /Añade nuevo\.txt con la palabra hola\./u);
+
+  soltar();
+  const final = await hasta(async () => {
+    const estado = datos(await llamar(cliente, 'fabrica_estado', { id }));
+    return estado.fase === 'en-curso' ? null : estado;
+  }, 'el encargo termina');
+  assert.equal(final.informe.estado, 'ok', final.informe.motivo);
+  const resultado = await llamar(cliente, 'fabrica_resultado', { id });
+  assert.equal(resultado.isError, undefined, resultado.texto);
+  const { informe } = datos(resultado);
+  assert.equal(informe.id, id);
+  assert.equal(informe.ia, 'codex');
+  assert.equal(informe.resumen, 'Hecho: añadí nuevo.txt.');
+  assert.deepEqual(informe.archivos, ['nuevo.txt']);
+  assert.ok(existsSync(informe.rutaDiff));
+  git(e.dir, 'stash', '--include-untracked', '-q');
+  git(e.dir, 'apply', '--check', informe.rutaDiff);
+  assert.equal(worktreesMcp(e.dir), 1, 'la copia aislada se borra');
+
+  // Un encargo no admite hallazgos ni veredictos.
+  const conHallazgos = await llamar(cliente, 'fabrica_resultado', { id, veredictos: [] });
+  assert.equal(conHallazgos.isError, true);
+  assert.match(conHallazgos.texto, /Un encargo no tiene hallazgos ni veredictos/u);
+  await servidor.detener();
+});
+
+test('un encargo y un recorrido comparten el candado: ninguno arranca mientras el otro corre, en los dos sentidos', async () => {
+  const e = escenario({ codex: guionCodexLento() });
+  const { codex, soltar } = iaDetenida();
+  const { cliente, servidor } = await conectarEncargos(e, codex);
+  const propuesta = await proponer(cliente);
+
+  const [a, b] = await Promise.all([llamar(cliente, 'fabrica_encargar', ENCARGO), llamar(cliente, 'fabrica_encargar', ENCARGO)]);
+  const aceptadas = [a, b].filter((r) => !r.isError);
+  const rechazadas = [a, b].filter((r) => r.isError);
+  assert.equal(aceptadas.length, 1, `${a.texto} | ${b.texto}`);
+  assert.equal(rechazadas[0].texto, 'Ya hay un encargo en curso; espera a que termine o cancélalo');
+  const { id } = datos(aceptadas[0]);
+
+  const lanzar = await llamar(cliente, 'fabrica_lanzar', { huella: propuesta.huella });
+  assert.equal(lanzar.isError, true);
+  assert.equal(lanzar.texto, 'Ya hay un encargo en curso; espera a que termine o cancélalo');
+
+  await hasta(() => codex.registro.encargos.length === 1, 'la IA arranca');
+  soltar();
+  await hasta(async () => datos(await llamar(cliente, 'fabrica_estado', { id })).fase === 'terminado', 'el encargo termina');
+  // Liberado el candado, un recorrido corre y bloquea a su vez un encargo.
+  const recorrido = await hasta(async () => {
+    const r = await llamar(cliente, 'fabrica_lanzar', { huella: propuesta.huella });
+    return r.isError ? null : r;
+  }, 'tras el encargo se puede lanzar un recorrido');
+  const ocupado = await llamar(cliente, 'fabrica_encargar', ENCARGO);
+  assert.equal(ocupado.isError, true);
+  assert.equal(ocupado.texto, 'Ya hay un recorrido en curso; espera a que termine o cancélalo');
+  assert.equal(codex.registro.creaciones, 1, 'el segundo encargo no llegó a crear un conector');
+  assert.equal((await llamar(cliente, 'fabrica_cancelar', { id: datos(recorrido).id })).isError, undefined);
+  await servidor.detener();
+});
+
+test('fabrica_cancelar con el id de un encargo lo cancela, borra su copia y libera el candado', async () => {
+  const e = escenario();
+  const { codex } = iaDetenida();
+  const { cliente, servidor } = await conectarEncargos(e, codex);
+  const { id } = datos(await llamar(cliente, 'fabrica_encargar', ENCARGO));
+  await hasta(() => codex.registro.encargos.length === 1, 'la IA arranca');
+  assert.equal(worktreesMcp(e.dir), 2, 'mientras corre hay una copia aislada');
+  const cancelado = await llamar(cliente, 'fabrica_cancelar', { id });
+  assert.equal(cancelado.isError, undefined, cancelado.texto);
+  assert.match(cancelado.texto, /^Encargo .+ cancelado \(estado final: cancelado\)$/u);
+  const { informe } = datos(await llamar(cliente, 'fabrica_resultado', { id }));
+  assert.equal(informe.estado, 'cancelado');
+  assert.equal(informe.rutaDiff, null);
+  assert.equal(worktreesMcp(e.dir), 1);
+  // Cancelar otra vez no hace nada y el candado ya está libre.
+  assert.match((await llamar(cliente, 'fabrica_cancelar', { id })).texto, /ya había terminado \(cancelado\)/u);
+  const otro = await llamar(cliente, 'fabrica_encargar', ENCARGO);
+  assert.equal(otro.isError, undefined, otro.texto);
+  await servidor.detener();
+});
+
+test('cerrar el servidor cancela el encargo en curso y borra su copia', async () => {
+  const e = escenario();
+  const { codex } = iaDetenida();
+  const { cliente, servidor } = await conectarEncargos(e, codex);
+  const { id } = datos(await llamar(cliente, 'fabrica_encargar', ENCARGO));
+  await hasta(() => codex.registro.encargos.length === 1, 'la IA arranca');
+  await servidor.detener();
+  assert.equal(worktreesMcp(e.dir), 1);
+  const informe = JSON.parse(readFileSync(path.join(e.home, '.nexakit', 'encargos', id, 'informe.json'), 'utf8'));
+  assert.equal(informe.estado, 'cancelado');
+  const tras = await llamar(cliente, 'fabrica_encargar', ENCARGO);
+  assert.equal(tras.isError, true);
+  assert.match(tras.texto, /se está cerrando/u);
+});
+
+test('fabrica_encargar fuera de un repo devuelve el error y no deja el candado ocupado', async () => {
+  const e = escenario();
+  const fuera = temporal('fabrica-mcp-fuera-');
+  const { codex } = iaDetenida();
+  const { cliente, servidor } = await conectarEncargos(e, codex, { cwd: fuera });
+  for (let i = 0; i < 2; i++) {
+    const r = await llamar(cliente, 'fabrica_encargar', ENCARGO);
+    assert.equal(r.isError, true);
+    assert.doesNotMatch(r.texto, /Ya hay un/u, 'el candado se libera tras el fallo');
+  }
+  assert.equal(codex.registro.creaciones, 0);
+  await servidor.detener();
+});
+
+test('fabrica_encargar valida su entrada: IA, tiempo, texto y órdenes', async () => {
+  const e = escenario();
+  const { codex } = iaDetenida();
+  const { cliente, servidor } = await conectarEncargos(e, codex);
+  const malas = [
+    { ...ENCARGO, ia: 'claude' },
+    { ...ENCARGO, tiempoMin: 0 },
+    { ...ENCARGO, tiempoMin: 121 },
+    { ...ENCARGO, tiempoMin: 1.5 },
+    { ...ENCARGO, texto: '' },
+    { ...ENCARGO, ordenes: [''] },
+    { ia: 'codex' },
+  ];
+  for (const args of malas) {
+    let r;
+    try {
+      r = await llamar(cliente, 'fabrica_encargar', args);
+    } catch {
+      r = { isError: true };
+    }
+    assert.equal(r.isError, true, JSON.stringify(args));
+  }
+  assert.equal(codex.registro.creaciones, 0);
+  await servidor.detener();
 });

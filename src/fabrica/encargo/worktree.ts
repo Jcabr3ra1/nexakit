@@ -1,11 +1,11 @@
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { chmod, mkdir, rm } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readdir, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { prefijoRepoTemporal } from '../banco/ejecutar.js';
 import { ErrorFabrica } from '../errores.js';
-import { carpetaPropia, codigoError } from '../rastro.js';
+import { carpetaPropia, codigoError, escribirReemplazando } from '../rastro.js';
 
 const MAX_BUFFER = 64 * 1024 * 1024;
 
@@ -137,6 +137,8 @@ export async function crearWorktree(raiz: string, home: string, opciones: Opcion
     await chmod(carpeta, 0o700);
     const dir = path.join(carpeta, 'repo');
     try {
+      // El candado dice de quién es el encargo: si ese proceso muere, el barrido de huérfanos puede borrar el worktree.
+      await escribirReemplazando(path.join(carpeta, CANDADO), `${JSON.stringify({ pid: process.pid, raiz })}\n`);
       // Sin hooks: el `post-checkout` del repo real correría sobre él antes de la comprobación del disco.
       await git(raiz, ['-c', `core.hooksPath=${os.devNull}`, 'worktree', 'add', '--detach', '--quiet', '--', dir, base]);
       await chmod(dir, 0o700);
@@ -232,4 +234,78 @@ export async function borrarWorktree(w: Worktree): Promise<string | null> {
     fallos.push(mensajeDe(error));
   }
   return fallos.length === 0 ? null : `No se pudo borrar bien el worktree ${w.dir} (${fallos.join('; ')}); revisa con «git worktree list» y bórralo a mano.`;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Huérfanos
+
+const CANDADO = 'candado.json';
+/** Una carpeta sin candado se respeta este tiempo: puede estar creándose ahora mismo en otro proceso. */
+const GRACIA_SIN_CANDADO_MS = 5 * 60_000;
+
+/** `true` si el proceso `pid` sigue vivo (también cuando existe pero no se puede señalar). */
+export function procesoVivo(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return codigoError(error) === 'EPERM';
+  }
+}
+
+async function leerCandado(carpeta: string): Promise<{ pid: number; raiz: string } | null> {
+  try {
+    const archivo = path.join(carpeta, CANDADO);
+    const info = await lstat(archivo);
+    if (!info.isFile()) return null;
+    const dato: unknown = JSON.parse(await readFile(archivo, 'utf8'));
+    if (typeof dato !== 'object' || dato === null) return null;
+    const { pid, raiz } = dato as { pid?: unknown; raiz?: unknown };
+    return typeof pid === 'number' && typeof raiz === 'string' ? { pid, raiz } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Borra los worktrees que dejó un encargo muerto (un proceso que cayó sin limpiar): carpetas
+ * `~/.nexakit/encargos/<id>/repo` cuyo candado ya no tiene un proceso vivo. Solo toca carpetas reales dentro de
+ * `~/.nexakit/encargos/`, nunca sigue enlaces y conserva `informe.json` y `cambios.diff`. Nunca lanza; devuelve un
+ * aviso por cada worktree borrado o que no se pudo borrar.
+ */
+export async function barrerHuerfanos(home: string, ahora: number = Date.now()): Promise<string[]> {
+  const avisos: string[] = [];
+  const encargos = path.join(home, '.nexakit', 'encargos');
+  let nombres: string[];
+  try {
+    const info = await lstat(encargos);
+    if (!info.isDirectory() || info.isSymbolicLink()) return avisos;
+    nombres = await readdir(encargos);
+  } catch {
+    return avisos;
+  }
+  for (const nombre of nombres) {
+    try {
+      const carpeta = path.join(encargos, nombre);
+      const info = await lstat(carpeta);
+      if (!info.isDirectory() || info.isSymbolicLink()) continue;
+      const dir = path.join(carpeta, 'repo');
+      const repo = await lstat(dir).catch(() => null);
+      // Un `repo` que sea un enlace u otra cosa no se toca: solo se borra un worktree real.
+      if (repo === null || !repo.isDirectory() || repo.isSymbolicLink()) continue;
+      const candado = await leerCandado(carpeta);
+      if (candado === null ? ahora - info.mtimeMs < GRACIA_SIN_CANDADO_MS : procesoVivo(candado.pid)) continue;
+      // Sin raíz conocida solo se borra la carpeta: ejecutar git sin saber en qué repo tocaría el de la persona.
+      const raizRepo = candado?.raiz;
+      let aviso: string | null = null;
+      if (raizRepo !== undefined && path.isAbsolute(raizRepo)) {
+        aviso = await borrarWorktree({ id: nombre, dir, base: '', raiz: raizRepo, gitDir: '', avisos: [] });
+      } else await borrarCarpeta(dir);
+      avisos.push(aviso ?? `Se borró el worktree huérfano de un encargo anterior (${nombre}).`);
+    } catch (error) {
+      avisos.push(`No se pudo revisar la carpeta de encargo ${nombre}: ${mensajeDe(error)}`);
+    }
+  }
+  return avisos;
 }

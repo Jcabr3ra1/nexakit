@@ -685,3 +685,281 @@ test('banco ejecutar --json imprime solo JSON con el resumen', async () => {
   assert.equal(resultado.ejecuciones.length, plan.coste.llamadas);
   assert.equal(resultado.resumen[0].estacion, 'seguridad');
 });
+
+// ---------------------------------------------------------------------------------------------
+// encargar
+
+const TOKENS_ENC = { entrada: 100, salida: 50, total: 150 };
+const okEnc = () => ({
+  estado: 'ok',
+  informe: { hallazgos: [], resumen: 'Hecho: cambié README.txt.' },
+  crudo: 'Hecho.',
+  modeloInformado: 'x',
+  tokens: TOKENS_ENC,
+  denegaciones: [],
+});
+
+/** Conector falso de encargos: `ejecutar(encargo, señal)` hace de la IA; `registro` guarda lo que recibió. */
+function codexFalso(ejecutar) {
+  const registro = { creaciones: [], encargos: [] };
+  const crear = async (escritura) => {
+    registro.creaciones.push(escritura);
+    return {
+      ia: 'codex',
+      catalogo: async () => [{ modelo: 'gpt-6-sol', esfuerzos: ['medium', 'high'] }],
+      ejecutar: async (encargo, señal) => {
+        registro.encargos.push(encargo);
+        return ejecutar(encargo, señal);
+      },
+      cerrar: async () => {},
+    };
+  };
+  return { crear, registro };
+}
+
+const recomendarEnc = async () => ({ modelo: 'gpt-6-sol', esfuerzo: 'medium' });
+const datosEnc = (codex) => ({ encargo: { conectores: { codex: codex.crear }, recomendar: recomendarEnc } });
+
+/** Escribe `encargo.md` (y `ordenes.json` si hay) en una carpeta temporal y devuelve sus rutas. */
+function archivosEnc({ texto = 'Cambia README.txt.', ordenes } = {}) {
+  const dir = temporal('fabrica-cli-enc-');
+  const md = path.join(dir, 'encargo.md');
+  writeFileSync(md, texto);
+  let json;
+  if (ordenes !== undefined) {
+    json = path.join(dir, 'ordenes.json');
+    writeFileSync(json, typeof ordenes === 'string' ? ordenes : JSON.stringify(ordenes));
+  }
+  return { md, json };
+}
+
+const worktreesEnc = (e) => git(e.dir, 'worktree', 'list', '--porcelain').split('\n').filter((l) => l.startsWith('worktree ')).length;
+const escribirEnWorktree = (encargo, relativa, texto) => {
+  mkdirSync(path.dirname(path.join(encargo.raiz, relativa)), { recursive: true });
+  writeFileSync(path.join(encargo.raiz, relativa), texto);
+};
+
+test('encargar muestra el progreso, la ruta del diff, el resumen y sale con 0; el diff se aplica con git apply', async () => {
+  const e = escenario();
+  const f = archivosEnc();
+  const codex = codexFalso(async (encargo) => {
+    writeFileSync(path.join(encargo.raiz, 'README.txt'), 'base\ncambiado\n');
+    escribirEnWorktree(encargo, 'nuevo.txt', 'hola\n');
+    return okEnc();
+  });
+  const { codigo, out, err } = await cli(['encargar', '--ia', 'codex', '--encargo', f.md], e, datosEnc(codex));
+  assert.equal(codigo, 0, err);
+  assert.match(out, /preparando la copia aislada/u);
+  assert.match(out, /la IA trabaja en ~\/\.nexakit\/encargos\//u);
+  assert.match(out, /Encargo [^\n]+: ok/u);
+  assert.match(out, /IA: codex · modelo: gpt-6-sol · esfuerzo: medium/u);
+  assert.match(out, /Resumen de la IA:\nHecho: cambié README\.txt\./u);
+  const diff = /^Diff: (.+)$/mu.exec(out)?.[1];
+  assert.ok(diff !== undefined && existsSync(diff), out);
+  assert.match(out, /git apply /u);
+  assert.match(out, / - README\.txt\n {2}- nuevo\.txt/u);
+  // El encargo no tocó el repo real: el orquestador aplica el diff.
+  assert.equal(git(e.dir, 'status', '--porcelain').includes('nuevo.txt'), false);
+  git(e.dir, 'stash', '--include-untracked', '-q');
+  git(e.dir, 'apply', '--check', diff);
+  assert.equal(worktreesEnc(e), 1, 'la copia aislada se borra');
+  assert.equal(codex.registro.creaciones[0].ordenesPermitidas.length, 0, 'sin package.json en el repo no hay órdenes por defecto');
+});
+
+test('encargar --json imprime solo el informe y sin cambios sale con 0', async () => {
+  const e = escenario();
+  const f = archivosEnc();
+  const codex = codexFalso(async () => okEnc());
+  const { codigo, out, err } = await cli(['encargar', '--ia', 'codex', '--encargo', f.md, '--json'], e, datosEnc(codex));
+  assert.equal(codigo, 0, err);
+  const informe = JSON.parse(out);
+  assert.equal(informe.estado, 'sin-cambios');
+  assert.equal(informe.ia, 'codex');
+  assert.equal(informe.rutaDiff, null);
+  assert.ok(existsSync(informe.rutaInforme));
+});
+
+test('encargar con un encargo invalido sale con 1 y enseña las rutas vetadas', async () => {
+  const e = escenario();
+  const f = archivosEnc();
+  const codex = codexFalso(async (encargo) => {
+    escribirEnWorktree(encargo, '.claude/settings.json', '{}');
+    return okEnc();
+  });
+  const { codigo, out } = await cli(['encargar', '--ia', 'codex', '--encargo', f.md], e, datosEnc(codex));
+  assert.equal(codigo, 1);
+  assert.match(out, /Encargo [^\n]+: invalido/u);
+  assert.match(out, /Rutas vetadas \(no se guarda ningún diff\):\n {2}- \.claude\/settings\.json \(cambia «\.claude»\)/u);
+  assert.doesNotMatch(out, /^Diff:/mu);
+});
+
+test('encargar con una IA que falla sale con 1 y con --ia auto cae a la siguiente', async () => {
+  const e = escenario();
+  const f = archivosEnc();
+  const sinIa = await cli(['encargar', '--ia', 'antigravity', '--encargo', f.md], e, { encargo: { conectores: {}, recomendar: recomendarEnc } });
+  assert.equal(sinIa.codigo, 1);
+  assert.match(sinIa.out, /: fallido/u);
+  assert.match(sinIa.out, /antigravity no está disponible/u);
+  const codex = codexFalso(async () => okEnc());
+  const auto = await cli(['encargar', '--ia', 'auto', '--encargo', f.md, '--json'], e, datosEnc(codex));
+  assert.equal(auto.codigo, 0, auto.err);
+  assert.equal(JSON.parse(auto.out).ia, 'codex');
+  // Sin --ia, el valor por defecto es auto.
+  const sinBandera = await cli(['encargar', '--encargo', f.md, '--json'], e, datosEnc(codex));
+  assert.equal(JSON.parse(sinBandera.out).ia, 'codex');
+});
+
+test('encargar pasa --modelo, --esfuerzo y --ordenes al encargo; las órdenes se suman a las del repo', async () => {
+  const e = escenario();
+  writeFileSync(path.join(e.dir, 'package.json'), JSON.stringify({ scripts: { test: 'x', typecheck: 'y' } }));
+  git(e.dir, 'add', '-A');
+  git(e.dir, 'commit', '-q', '-m', 'paquete');
+  const f = archivosEnc({ ordenes: ['npm run lint', 'node --version'] });
+  const codex = codexFalso(async () => okEnc());
+  const { codigo, err, out } = await cli(
+    ['encargar', '--ia', 'codex', '--modelo', 'gpt-6-sol', '--esfuerzo', 'high', '--encargo', f.md, '--ordenes', f.json, '--json'],
+    e,
+    datosEnc(codex),
+  );
+  assert.equal(codigo, 0, err);
+  const informe = JSON.parse(out);
+  assert.equal(informe.modelo, 'gpt-6-sol');
+  assert.equal(informe.esfuerzo, 'high');
+  assert.deepEqual(codex.registro.encargos[0].ordenesPermitidas, ['npm test', 'npm run typecheck', 'npm run lint', 'node --version']);
+  assert.match(codex.registro.encargos[0].instrucciones, /Cambia README\.txt\./u);
+});
+
+test('encargar valida los argumentos con un mensaje claro, sale con 2 y no crea ninguna copia', async () => {
+  const e = escenario();
+  const f = archivosEnc();
+  const vacio = archivosEnc({ texto: '  \n' });
+  const casos = [
+    [['encargar', '--ia', 'claude', '--encargo', f.md], /--ia debe ser codex, antigravity o auto/u],
+    [['encargar', '--ia', 'codex'], /Falta --encargo/u],
+    [['encargar', '--ia', 'codex', '--encargo', path.join(f.md, 'no-existe')], /No se pudo leer el archivo del encargo/u],
+    [['encargar', '--ia', 'codex', '--encargo', vacio.md], /El archivo del encargo está vacío/u],
+    ...['0', '121', 'abc', '1.5', '-3', ''].map((t) => [['encargar', '--ia', 'codex', '--encargo', f.md, '--tiempo', t], /--tiempo debe ser un entero de 1 a 120|Argumentos no válidos|Falta/u]),
+    [['encargar', '--ia', 'codex', '--encargo', f.md, '--ordenes', path.join(f.md, 'no')], /No se pudo leer el archivo de órdenes/u],
+    [['encargar', '--ia', 'codex', '--encargo', f.md, '--rapido'], /Argumentos no válidos/u],
+  ];
+  for (const ordenes of ['no es json', '{"a":1}', '[1,2]', '[""]', '"npm test"']) {
+    const g = archivosEnc({ ordenes });
+    casos.push([['encargar', '--ia', 'codex', '--encargo', f.md, '--ordenes', g.json], /El archivo de órdenes no es (un JSON )?válido/u]);
+  }
+  for (const [argv, patron] of casos) {
+    let creado = false;
+    const codex = codexFalso(async () => okEnc());
+    const datos = datosEnc(codex);
+    const { codigo, err } = await cli(argv, e, datos);
+    creado = codex.registro.creaciones.length > 0;
+    assert.equal(codigo, 2, `${argv.join(' ')} -> ${err}`);
+    assert.match(err, patron, argv.join(' '));
+    assert.equal(creado, false);
+  }
+  assert.equal(worktreesEnc(e), 1);
+  assert.equal(existsSync(path.join(e.home, '.nexakit', 'encargos')), false, 'nada se creó');
+});
+
+test('encargar: Ctrl+C y SIGTERM cancelan, esperan el cierre, borran la copia y retiran los manejadores', async () => {
+  for (const señal of ['SIGINT', 'SIGTERM']) {
+    const e = escenario();
+    const f = archivosEnc();
+    let enMarcha;
+    const arrancado = new Promise((resolver) => { enMarcha = resolver; });
+    const codex = codexFalso(
+      (encargo, s) =>
+        new Promise((resolver) => {
+          enMarcha();
+          s.addEventListener('abort', () => resolver({ ...okEnc(), estado: 'cancelada', motivo: 'cancelado' }), { once: true });
+        }),
+    );
+    const antes = { SIGINT: process.listenerCount('SIGINT'), SIGTERM: process.listenerCount('SIGTERM') };
+    let out = '';
+    const ejecucion = ejecutarCli(
+      ['encargar', '--ia', 'codex', '--encargo', f.md, '--json'],
+      { out: (t) => { out += t; }, err: () => {} },
+      { homeDirectory: e.home, cwd: e.dir, environment: e.env, ...datosEnc(codex) },
+    );
+    await arrancado;
+    assert.equal(process.listenerCount(señal), antes[señal] + 1, 'el manejador está instalado mientras corre');
+    assert.ok(process.emit(señal));
+    const codigo = await ejecucion;
+    assert.equal(codigo, 1);
+    assert.equal(JSON.parse(out).estado, 'cancelado');
+    assert.equal(process.listenerCount('SIGINT'), antes.SIGINT);
+    assert.equal(process.listenerCount('SIGTERM'), antes.SIGTERM);
+    assert.equal(worktreesEnc(e), 1, 'la copia se borra');
+  }
+});
+
+test('encargar: un segundo Ctrl+C termina el proceso con 130', async () => {
+  const e = escenario();
+  const f = archivosEnc();
+  let enMarcha;
+  const arrancado = new Promise((resolver) => { enMarcha = resolver; });
+  let soltar;
+  const codex = codexFalso(
+    (encargo, s) =>
+      new Promise((resolver) => {
+        enMarcha();
+        soltar = () => resolver({ ...okEnc(), estado: 'cancelada', motivo: 'cancelado' });
+        s.addEventListener('abort', () => {}, { once: true });
+      }),
+  );
+  const codigos = [];
+  const ejecucion = ejecutarCli(
+    ['encargar', '--ia', 'codex', '--encargo', f.md, '--json'],
+    { out: () => {}, err: () => {} },
+    { homeDirectory: e.home, cwd: e.dir, environment: e.env, salir: (c) => codigos.push(c), ...datosEnc(codex) },
+  );
+  await arrancado;
+  process.emit('SIGINT');
+  process.emit('SIGINT');
+  assert.deepEqual(codigos, [130]);
+  soltar();
+  await ejecucion;
+});
+
+test('encargar respeta el candado de un recorrido a la vez: otro proceso vivo en activo.json lo rechaza; uno muerto no', async () => {
+  const e = escenario();
+  const f = archivosEnc();
+  const codex = codexFalso(async () => okEnc());
+  const activo = (pid) => ({ pid, id: 'fab-20260101-0000-abcd', repo: 'demo', actualizado: new Date().toISOString(), estaciones: [] });
+  mkdirSync(path.join(e.home, '.nexakit', 'fabrica'), { recursive: true, mode: 0o700 });
+  const archivo = path.join(e.home, '.nexakit', 'fabrica', 'activo.json');
+  writeFileSync(archivo, JSON.stringify(activo(process.ppid)));
+  const ocupado = await cli(['encargar', '--ia', 'codex', '--encargo', f.md], e, datosEnc(codex));
+  assert.equal(ocupado.codigo, 1);
+  assert.match(ocupado.err, /Ya hay un recorrido o encargo en curso/u);
+  assert.equal(codex.registro.creaciones.length, 0);
+  assert.equal(worktreesEnc(e), 1);
+  // Un proceso que ya no existe no ocupa nada.
+  const muerto = Number(execFileSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' }));
+  writeFileSync(archivo, JSON.stringify(activo(muerto)));
+  const libre = await cli(['encargar', '--ia', 'codex', '--encargo', f.md, '--json'], e, datosEnc(codex));
+  assert.equal(libre.codigo, 0, libre.err);
+});
+
+test('nexakit encargar es una orden de primer nivel y la ayuda la documenta', async () => {
+  const e = escenario();
+  const f = archivosEnc();
+  const codex = codexFalso(async (encargo) => {
+    escribirEnWorktree(encargo, 'nuevo.txt', 'hola\n');
+    return okEnc();
+  });
+  let out = '';
+  let err = '';
+  const codigo = await runToolkitCli(['encargar', '--ia', 'codex', '--encargo', f.md, '--json'], {
+    out: (t) => { out += t; },
+    err: (t) => { err += t; },
+    options: { homeDirectory: e.home, cwd: e.dir, environment: e.env, ...datosEnc(codex) },
+  });
+  assert.equal(codigo, 0, err);
+  assert.equal(JSON.parse(out).estado, 'ok');
+  let ayuda = '';
+  await runToolkitCli(['--help'], { out: (t) => { ayuda += t; }, err: () => {} });
+  assert.match(ayuda, /nexakit encargar --ia codex\|antigravity\|auto --encargo <archivo\.md>/u);
+  const ayudaFabrica = await cli(['--help'], e);
+  assert.match(ayudaFabrica.out, /nexakit encargar --ia codex\|antigravity\|auto --encargo/u);
+  assert.match(ayudaFabrica.out, /Ctrl\+C cancela y borra la copia/u);
+});

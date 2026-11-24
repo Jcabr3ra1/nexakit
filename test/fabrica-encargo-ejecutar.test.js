@@ -1,11 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { gitConfigGlobalVacio } from '../test-support/git-aislado.js';
 import { ejecutarEncargo, TIEMPO_ENCARGO_MS } from '../dist/fabrica/encargo/ejecutar.js';
+import { barrerHuerfanos, crearWorktree } from '../dist/fabrica/encargo/worktree.js';
 import { ErrorFabrica } from '../dist/fabrica/errores.js';
 import { aceptar, registrar } from '../dist/fabrica/lecciones.js';
 import * as rastro from '../dist/fabrica/rastro.js';
@@ -621,6 +622,81 @@ test('un enlace simbólico hacia fuera del repo invalida el encargo; uno que se 
   assert.equal(informe.estado, 'ok', informe.motivo);
   assert.deepEqual(informe.rutasVetadas, []);
   assert.deepEqual(informe.archivos, ['dentro', 'sub/otro']);
+});
+
+test('un enlace simbólico que apunta dentro del repo pero a un componente protegido invalida el encargo', { skip: SIN_ENLACES }, async () => {
+  for (const [destino, ruta] of [['.git/hooks', 'x'], ['.claude', 'y'], ['./.github/workflows/ci.yml', 'z'], ['../.codex', 'sub/w']]) {
+    const e = entorno();
+    const codex = fabrica('codex', async (encargo) => {
+      mkdirSync(path.dirname(path.join(encargo.raiz, ruta)), { recursive: true });
+      symlinkSync(destino, path.join(encargo.raiz, ruta));
+      return okDe();
+    });
+    const informe = await ejecutarEncargo(opciones(e, { conectores: { codex: codex.crear } }));
+    assert.equal(informe.estado, 'invalido', destino);
+    assert.equal(informe.rutaDiff, null);
+    assert.equal(informe.rutasVetadas.length, 1, informe.rutasVetadas.join('|'));
+    assert.match(informe.rutasVetadas[0], new RegExp(`^${ruta} \\(enlace simbólico hacia una ruta protegida`, 'u'));
+    comprobarLimpio(e, informe);
+  }
+});
+
+/** Pid de un proceso que ya terminó. */
+const pidMuerto = () => {
+  const r = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' });
+  return Number(r.stdout);
+};
+
+test('al empezar un encargo se borran los worktrees huérfanos de procesos muertos y no los de procesos vivos', async () => {
+  const e = entorno();
+  const muerto = await crearWorktree(e.raiz, e.home);
+  const vivo = await crearWorktree(e.raiz, e.home);
+  const sinCandado = path.join(e.home, '.nexakit', 'encargos', 'sin-candado');
+  mkdirSync(path.join(sinCandado, 'repo'), { recursive: true });
+  writeFileSync(path.join(sinCandado, 'repo', 'x'), 'x');
+  assert.equal(modo(path.join(path.dirname(muerto.dir), 'candado.json')), 0o600);
+  writeFileSync(path.join(path.dirname(muerto.dir), 'candado.json'), JSON.stringify({ pid: pidMuerto(), raiz: e.raiz }));
+  writeFileSync(path.join(path.dirname(muerto.dir), 'informe.json'), '{}');
+
+  const codex = fabrica('codex', async () => okDe());
+  const informe = await ejecutarEncargo(opciones(e, { conectores: { codex: codex.crear } }));
+  assert.equal(informe.estado, 'sin-cambios');
+  assert.equal(existsSync(muerto.dir), false, 'el worktree del proceso muerto se borra');
+  assert.equal(existsSync(path.join(path.dirname(muerto.dir), 'informe.json')), true, 'su informe se conserva');
+  assert.equal(existsSync(vivo.dir), true, 'el del proceso vivo (este) se respeta');
+  assert.equal(existsSync(path.join(sinCandado, 'repo', 'x')), true, 'sin candado y reciente se respeta');
+  assert.ok(informe.avisos.some((a) => /huérfano/u.test(a)), informe.avisos.join('|'));
+  assert.equal(git(e.raiz, 'worktree', 'list', '--porcelain').split('\n').filter((l) => l.startsWith('worktree ')).length, 2, 'repo y el vivo');
+  assert.equal(git(e.raiz, 'status', '--porcelain'), '');
+
+  // Pasada la gracia, una carpeta sin candado también es huérfana.
+  const avisos = await barrerHuerfanos(e.home, Date.now() + 10 * 60_000);
+  assert.equal(existsSync(path.join(sinCandado, 'repo')), false);
+  assert.equal(existsSync(vivo.dir), true, 'el vivo sigue aunque pase el tiempo');
+  assert.equal(avisos.length, 1);
+});
+
+test('el barrido de huérfanos no sigue enlaces ni toca nada fuera de ~/.nexakit/encargos', { skip: SIN_ENLACES }, async () => {
+  const e = entorno();
+  const fuera = mkdtempSync(path.join(tmpdir(), 'enc-fuera-'));
+  temporales.push(fuera);
+  writeFileSync(path.join(fuera, 'valioso.txt'), 'no me borres');
+  const encargos = path.join(e.home, '.nexakit', 'encargos');
+  // `repo` es un enlace a una carpeta ajena, y una carpeta de encargo entera es un enlace.
+  mkdirSync(path.join(encargos, 'a'), { recursive: true });
+  symlinkSync(fuera, path.join(encargos, 'a', 'repo'));
+  writeFileSync(path.join(encargos, 'a', 'candado.json'), JSON.stringify({ pid: pidMuerto(), raiz: e.raiz }));
+  symlinkSync(fuera, path.join(encargos, 'b'));
+  const avisos = await barrerHuerfanos(e.home, Date.now() + 10 * 60_000);
+  assert.deepEqual(avisos, []);
+  assert.equal(readFileSync(path.join(fuera, 'valioso.txt'), 'utf8'), 'no me borres');
+  assert.equal(lstatSync(path.join(encargos, 'a', 'repo')).isSymbolicLink(), true);
+  // Si `encargos` mismo es un enlace, no se barre.
+  const home2 = mkdtempSync(path.join(tmpdir(), 'enc-home2-'));
+  temporales.push(home2);
+  mkdirSync(path.join(home2, '.nexakit'), { recursive: true });
+  symlinkSync(encargos, path.join(home2, '.nexakit', 'encargos'));
+  assert.deepEqual(await barrerHuerfanos(home2, Date.now() + 10 * 60_000), []);
 });
 
 test('un cambio en rutas sensibles (.claude, .husky, .github/workflows...) invalida el encargo con la lista', async () => {

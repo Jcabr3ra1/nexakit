@@ -195,6 +195,7 @@ Conviene delegar solo cuando la tarea lee mucho o devuelve mucho ruido: lanzar u
 | `node bin/nexakit.js codex consumo` | Tokens, caché y tiempo de las llamadas registradas por los hooks de Codex. |
 | `node bin/nexakit.js codex agentes [--apply [--actualizar]]` | Crea los agentes de nivel de Codex. Sin `--apply` es vista previa. |
 | `node bin/nexakit.js fabrica proponer --base main` | Propone un recorrido de revisión con varias IA. No lanza nada. |
+| `node bin/nexakit.js encargar --ia codex\|antigravity\|auto --encargo <archivo.md> [--modelo m] [--esfuerzo e] [--ordenes <archivo.json>] [--tiempo <min>] [--json]` | Delega una tarea de programación en Codex o Antigravity. La IA escribe solo en una copia aislada del repo (un worktree de `HEAD`; los cambios sin commit no se copian) y la orden deja el diff en `~/.nexakit/encargos/<id>/cambios.diff` junto con `informe.json`. Tú lo revisas y lo aplicas con `git apply`: nunca escribe en tu repo. `--ordenes` es una lista JSON de órdenes exactas que se suman a `npm test` y `npm run typecheck`; `--tiempo` son minutos (1 a 120, por defecto 20); Ctrl+C cancela y borra la copia. Un encargo `invalido` (escritura fuera de la copia, enlaces hacia fuera o cambios en `.git`, `.claude`, `.github/workflows`...) no deja diff. Sale con 0 solo si el estado es `ok` o `sin-cambios`. Hay un encargo o recorrido a la vez. |
 | `node bin/nexakit.js fabrica banco planificar [--fase 1\|2] [--estacion e] [--json]` | Planifica la medición de modelos con casos con fallos sembrados: muestra las llamadas, los tokens estimados y la huella, y guarda el plan en `~/.nexakit/fabrica/banco-plan.json`. No ejecuta nada. La fase 1 mide el esfuerzo más bajo de cada modelo (en Antigravity, la variante más baja de cada modelo base). La fase 2 necesita antes la fase 1. |
 | `node bin/nexakit.js fabrica banco ejecutar --huella <huella> [--json]` | Ejecuta el plan guardado si la huella coincide, en primer plano y con progreso; gasta tokens. Suma lo medido a la evidencia, consume el plan al empezar (vale para una sola ejecución) y muestra un resumen por estación. |
 
@@ -265,6 +266,7 @@ La memoria de Obsidian no se actualiza sola: se hace con `/cerrar-memoria` despu
 | Qué | Dónde |
 | --- | --- |
 | Rastro de cada recorrido de la fábrica | `~/.nexakit/fabrica/<repo>/<id>/` |
+| Diff e informe de cada encargo | `~/.nexakit/encargos/<id>/` |
 | Resultados de Gemini | `~/.agent-toolkit/gemini/` |
 | Skills | `~/.claude/skills/ (Claude) y ~/.agents/skills/ (Codex), como enlaces al repositorio` |
 | Agentes de Codex | `~/.codex/agents/` |
@@ -288,8 +290,9 @@ Herramientas internas del servidor `nexakit-fabrica` (solo para depurar):
 | --- | --- |
 | `fabrica_proponer` | Lee el diff y devuelve el recorrido con su huella. No lanza nada. |
 | `fabrica_lanzar` | Lanza el recorrido solo si la huella coincide con el `HEAD` y el diff actuales. |
-| `fabrica_estado` / `fabrica_resultado` | Consultan el progreso y el resultado. |
-| `fabrica_cancelar` | Interrumpe un recorrido en curso. |
+| `fabrica_encargar` | Delega una tarea de programación en Codex o Antigravity con el texto en línea; devuelve un id sin esperar. Comparte el candado de un recorrido o encargo a la vez. |
+| `fabrica_estado` / `fabrica_resultado` | Consultan el progreso y el resultado de un recorrido o, con su id, de un encargo (informe y ruta de `cambios.diff`). |
+| `fabrica_cancelar` | Interrumpe un recorrido o un encargo en curso. |
 
 Más detalle: [instalación, consumo y recuperación](consolidacion.md), [herramientas de Gemini](herramientas-gemini.md) y [primeros pasos](primeros-pasos.md).
 
