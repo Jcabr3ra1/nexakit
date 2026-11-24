@@ -772,13 +772,17 @@ test('encargar muestra el progreso, la ruta del diff, el resumen y sale con 0; e
   const { codigo, out, err } = await cli(['encargar', '--ia', 'codex', '--encargo', f.md], e, datosEnc(codex));
   assert.equal(codigo, 0, err);
   assert.match(out, /preparando la copia aislada/u);
-  assert.match(out, /la IA trabaja en ~\/\.nexakit\/encargos\//u);
-  assert.match(out, /Encargo [^\n]+: ok/u);
+  // El aviso de inicio da la ruta real, absoluta, de la copia.
+  const copia = /la IA trabaja en (.+)$/mu.exec(out)?.[1];
+  assert.ok(copia !== undefined && path.isAbsolute(copia), out);
+  assert.equal(path.dirname(path.dirname(copia)), path.join(e.home, '.nexakit', 'encargos'));
+  assert.equal(path.basename(copia), 'repo');
+  assert.match(out, /Encargo [^\n]+: listo \(diff para revisar\)/u);
   assert.match(out, /IA: codex · modelo: gpt-6-sol · esfuerzo: medium/u);
   assert.match(out, /Resumen de la IA:\nHecho: cambié README\.txt\./u);
   const diff = /^Diff: (.+)$/mu.exec(out)?.[1];
   assert.ok(diff !== undefined && existsSync(diff), out);
-  assert.match(out, /git apply /u);
+  assert.ok(out.includes(`Para aplicarlo tras revisarlo (desde la raíz de tu repo): git apply "${diff}"`), out);
   assert.match(out, / - README\.txt\n {2}- nuevo\.txt/u);
   // El encargo no tocó el repo real: el orquestador aplica el diff.
   assert.equal(git(e.dir, 'status', '--porcelain').includes('nuevo.txt'), false);
@@ -810,7 +814,7 @@ test('encargar con un encargo invalido sale con 1 y enseña las rutas vetadas', 
   });
   const { codigo, out } = await cli(['encargar', '--ia', 'codex', '--encargo', f.md], e, datosEnc(codex));
   assert.equal(codigo, 1);
-  assert.match(out, /Encargo [^\n]+: invalido/u);
+  assert.match(out, /Encargo [^\n]+: inválido \(sin diff\)/u);
   assert.match(out, /Rutas vetadas \(no se guarda ningún diff\):\n {2}- \.claude\/settings\.json \(cambia «\.claude»\)/u);
   assert.doesNotMatch(out, /^Diff:/mu);
 });
@@ -830,6 +834,19 @@ test('un encargo invalido por escrituras fuera de la copia avisa de no editar el
   const aviso = 'No edites el repo mientras corre un encargo: cualquier cambio fuera de la copia lo invalida.';
   assert.ok(lineasInforme(base).includes(aviso));
   assert.ok(!lineasInforme({ ...base, escriturasFuera: [] }).includes(aviso));
+});
+
+test('el informe en texto destaca las alertas, da una etiqueta legible al estado y tolera informes sin alertas', () => {
+  const base = { id: 'x', estado: 'ok', ia: 'codex', modelo: 'm', esfuerzo: null, segundos: 1, tokens: null, ordenesPorDefecto: [], ordenesExtra: [], rutaDiff: '/tmp/a b/cambios.diff', archivos: ['CLAUDE.md'], rutasVetadas: [], escriturasFuera: [], denegaciones: [], avisos: [], resumen: '', rutaInforme: '/tmp/i' };
+  const lineas = lineasInforme({ ...base, alertas: ['CLAUDE.md (requiere revisión explícita: instrucciones o configuración que se cargan solas)'] });
+  assert.equal(lineas[0], 'Encargo x: listo (diff para revisar)');
+  assert.ok(lineas.includes('Para aplicarlo tras revisarlo (desde la raíz de tu repo): git apply "/tmp/a b/cambios.diff"'));
+  const i = lineas.indexOf('ATENCIÓN: revisa a mano estos cambios antes de aplicar el diff:');
+  assert.ok(i > 0, lineas.join('\n'));
+  assert.match(lineas[i + 1], /^ {2}! CLAUDE\.md \(requiere revisión explícita/u);
+  // Un informe antiguo, sin el campo, no rompe la salida.
+  assert.ok(!lineasInforme(base).some((l) => l.startsWith('ATENCIÓN')));
+  assert.equal(lineasInforme({ ...base, estado: 'sin-cambios', rutaDiff: null })[0], 'Encargo x: sin cambios');
 });
 
 test('encargar con una IA que falla sale con 1 y con --ia auto cae a la siguiente', async () => {
@@ -1032,5 +1049,5 @@ test('encargar muestra las órdenes por defecto y las extra por separado', async
   const codex = codexFalso(async () => okEnc());
   const { out, err } = await cli(['encargar', '--ia', 'codex', '--encargo', f.md, '--ordenes', f.json], e, datosEnc(codex));
   assert.match(out, /Órdenes por defecto: «npm test»\n/u, err);
-  assert.match(out, /Órdenes extra \(aprobadas por quien encargó\): «npm run lint»\n/u);
+  assert.match(out, /Órdenes extra \(en Codex son una guía, su frontera es el sandbox; Antigravity no ejecuta órdenes\): «npm run lint»\n/u);
 });

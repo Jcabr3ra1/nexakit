@@ -541,6 +541,10 @@ test('la CLI desactiva la revisión cruzada sin alterar el criterio y puede volv
   assert.equal((await preferencias(home, '--revision-cruzada', 'si')).codigo, 0);
   assert.deepEqual(modelosExternos(await propuesta()), ['gpt-6-sol', 'gemini-3.8-flash-medium']);
   assert.equal((await preferencias(home, '--revision-cruzada', 'no')).codigo, 0);
+  // «sí» con tilde vale igual que «si».
+  assert.equal((await preferencias(home, '--revision-cruzada', 'sí')).codigo, 0);
+  assert.equal(JSON.parse(readFileSync(archivo, 'utf8')).revisionCruzada, true);
+  assert.equal((await preferencias(home, '--revision-cruzada', 'no')).codigo, 0);
   assert.equal((await preferencias(home, '--criterio', 'calidad', '--revision-cruzada', 'si')).codigo, 0);
   assert.equal((await propuesta()).huella, antes.huella);
 });

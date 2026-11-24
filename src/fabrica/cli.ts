@@ -52,7 +52,7 @@ const AYUDA = `Uso: nexakit fabrica proponer --base <rama> [--foco <texto>] [--j
      nexakit fabrica estado --id <id> [--json]
      nexakit fabrica resultado --id <id> [--veredictos <archivo.json>] [--json]
      nexakit fabrica cancelar --id <id>
-     nexakit fabrica preferencias [--criterio calidad|barato] [--revision-cruzada si|no] [--json]
+     nexakit fabrica preferencias [--criterio calidad|barato] [--revision-cruzada sí|no] [--json]
      nexakit encargar --ia codex|antigravity|auto --encargo <archivo.md> [--modelo <modelo>] [--esfuerzo <esfuerzo>]
                       [--ordenes <archivo.json>] [--tiempo <min>] [--json]
      nexakit fabrica banco planificar [--fase 1|2] [--estacion <estacion>] [--json]
@@ -395,18 +395,34 @@ async function leerTextoEncargo(archivo: string): Promise<string> {
 /** Estados con los que `encargar` sale con 0. */
 const estadoBueno = (estado: InformeEncargo['estado']): boolean => estado === 'ok' || estado === 'sin-cambios';
 
+/** Etiqueta legible de cada estado del encargo (el código interno sigue en `--json`). */
+const ETIQUETAS_ESTADO: Record<InformeEncargo['estado'], string> = {
+  ok: 'listo (diff para revisar)',
+  'sin-cambios': 'sin cambios',
+  'tiempo-agotado': 'tiempo agotado (sin diff)',
+  cancelado: 'cancelado (sin diff)',
+  invalido: 'inválido (sin diff)',
+  fallido: 'fallido (sin diff)',
+};
+
 export function lineasInforme(i: InformeEncargo): string[] {
-  const lineas = [`Encargo ${limpiar(i.id)}: ${limpiar(i.estado)}`];
+  const lineas = [`Encargo ${limpiar(i.id)}: ${ETIQUETAS_ESTADO[i.estado] ?? limpiar(i.estado)}`];
   if (i.ia !== null) {
     lineas.push(`IA: ${enUnaLinea(i.ia)} · modelo: ${enUnaLinea(i.modelo ?? '-')}${i.esfuerzo === null ? '' : ` · esfuerzo: ${enUnaLinea(i.esfuerzo)}`}`);
   }
   lineas.push(`Duración: ${i.segundos} s${i.tokens === null ? ' · tokens: sin cifra' : ` · tokens: ${i.tokens.total}`}`);
   if (i.motivo !== undefined) lineas.push(`Motivo: ${enUnaLinea(i.motivo)}`);
   if (i.ordenesPorDefecto.length > 0) lineas.push(`Órdenes por defecto: ${i.ordenesPorDefecto.map((o) => `«${enUnaLinea(o)}»`).join(', ')}`);
-  if (i.ordenesExtra.length > 0) lineas.push(`Órdenes extra (aprobadas por quien encargó): ${i.ordenesExtra.map((o) => `«${enUnaLinea(o)}»`).join(', ')}`);
+  if (i.ordenesExtra.length > 0) {
+    lineas.push(`Órdenes extra (en Codex son una guía, su frontera es el sandbox; Antigravity no ejecuta órdenes): ${i.ordenesExtra.map((o) => `«${enUnaLinea(o)}»`).join(', ')}`);
+  }
   if (i.rutaDiff !== null) {
-    lineas.push(`Diff: ${i.rutaDiff}`, `Para aplicarlo tras revisarlo: git apply ${i.rutaDiff}`);
+    lineas.push(`Diff: ${i.rutaDiff}`, `Para aplicarlo tras revisarlo (desde la raíz de tu repo): git apply "${i.rutaDiff}"`);
     if (i.archivos.length > 0) lineas.push('Archivos:', ...i.archivos.map((a) => `  - ${enUnaLinea(a)}`));
+  }
+  const alertas = i.alertas ?? [];
+  if (alertas.length > 0) {
+    lineas.push('ATENCIÓN: revisa a mano estos cambios antes de aplicar el diff:', ...alertas.map((a) => `  ! ${enUnaLinea(a)}`));
   }
   if (i.rutasVetadas.length > 0) lineas.push('Rutas vetadas (no se guarda ningún diff):', ...i.rutasVetadas.map((r) => `  - ${enUnaLinea(r)}`));
   if (i.escriturasFuera.length > 0) lineas.push('Escrituras fuera de la copia:', ...i.escriturasFuera.map((r) => `  - ${enUnaLinea(r)}`));
@@ -463,7 +479,7 @@ async function ordenEncargar(ctx: Contexto, valores: Record<string, unknown>, js
       señal: control.signal,
       ...ctx.encargo,
       alCrear: (id) => {
-        if (!json) void ctx.io.out(`Encargo ${limpiar(id)}: la IA trabaja en ~/.nexakit/encargos/${limpiar(id)}/repo\n`);
+        if (!json) void ctx.io.out(`Encargo ${limpiar(id)}: la IA trabaja en ${path.join(ctx.home, '.nexakit', 'encargos', limpiar(id), 'repo')}\n`);
       },
     });
   } finally {
@@ -592,14 +608,14 @@ async function ordenPreferencias(ctx: Contexto, valor: unknown, revision: unknow
   if (valor !== undefined && !esCriterio(valor)) {
     throw new ErrorUso('El criterio debe ser «calidad» o «barato»');
   }
-  if (revision !== undefined && revision !== 'si' && revision !== 'no') {
-    throw new ErrorUso('La revisión cruzada debe ser «si» o «no»');
+  if (revision !== undefined && revision !== 'si' && revision !== 'sí' && revision !== 'no') {
+    throw new ErrorUso('La revisión cruzada debe ser «sí» o «no»');
   }
   const preferencias = valor === undefined && revision === undefined
     ? await leerPreferencias(ctx.home)
     : await guardarPreferencias(ctx.home, {
       ...(valor === undefined ? {} : { criterio: valor }),
-      ...(revision === undefined ? {} : { revisionCruzada: revision === 'si' }),
+      ...(revision === undefined ? {} : { revisionCruzada: revision !== 'no' }),
     });
   const { criterio, revisionCruzada } = preferencias;
   await salida(ctx, json ? JSON.stringify(preferencias) : `Criterio de la fábrica: ${criterio}\nRevisión cruzada: ${revisionCruzada ? 'sí' : 'no'}`);

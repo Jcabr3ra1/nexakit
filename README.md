@@ -39,8 +39,8 @@ npx nexakit memoria <subcomando>               # Operaciones avanzadas de memori
 npx nexakit setup --omitir <skill> --apply   # Declarar quitada una skill global que ya no enlazas
 npx nexakit setup --reponer <skill> --apply  # Devolver una skill global que quitaste
 ~/.nexakit/nexakit fabrica proponer --base main  # Proponer un recorrido de revisión (lo lanza después con la huella de la propuesta)
-~/.nexakit/nexakit encargar --ia auto --encargo tarea.md  # Delegar una tarea en Codex o Antigravity (copia aislada, devuelve un diff)
-~/.nexakit/nexakit fabrica preferencias --criterio calidad  # Elegir modelos por calidad o por coste; revisión cruzada si|no
+~/.nexakit/nexakit encargar --ia codex|antigravity|auto --encargo <archivo.md> [--modelo m] [--esfuerzo e] [--ordenes <archivo.json>] [--tiempo <min>]  # Delegar una tarea en Codex o Antigravity (copia aislada, devuelve un diff; un encargo o recorrido a la vez)
+~/.nexakit/nexakit fabrica preferencias --criterio calidad  # Elegir modelos por calidad o por coste; revisión cruzada sí|no
 ~/.nexakit/nexakit fabrica banco planificar    # Planificar la medición de modelos y ver su coste (no ejecuta nada)
 ~/.nexakit/nexakit fabrica banco ejecutar --huella <huella>  # Ejecutar el plan aprobado (gasta tokens)
 ~/.nexakit/nexakit modelo                      # Ver catálogo real de modelos y esfuerzos
