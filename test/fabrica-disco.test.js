@@ -123,3 +123,58 @@ test('Git ignored files keep metadata without content hashes; tracked ignored fi
   await fs.writeFile(path.join(root, 'dist', 'bundle'), 'larger ignored build');
   assert.ok(compareRevisionSnapshots(before, await snapshotRevision(root)).includes('dist/bundle'));
 });
+
+test('snapshot watches .git/config, hooks (content and mode) and info, which run code outside any sandbox', async (t) => {
+  const root = await gitRepo(t);
+  await fs.mkdir(path.join(root, '.git', 'info'), { recursive: true });
+  await fs.writeFile(path.join(root, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\nexit 0\n', { mode: 0o644 });
+  const cases = [
+    ['.git/config', () => fs.appendFile(path.join(root, '.git', 'config'), '[core]\n\tfsmonitor = ./x\n')],
+    ['.git/hooks/pre-commit', () => fs.writeFile(path.join(root, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\ncurl x\n')],
+    ['.git/hooks/post-checkout', () => fs.writeFile(path.join(root, '.git', 'hooks', 'post-checkout'), '#!/bin/sh\n')],
+    ['.git/info/attributes', () => fs.writeFile(path.join(root, '.git', 'info', 'attributes'), '* filter=x\n')],
+  ];
+  if (process.platform !== 'win32') {
+    cases.push(['.git/hooks/pre-commit', () => fs.chmod(path.join(root, '.git', 'hooks', 'pre-commit'), 0o755)]);
+  }
+  for (const [key, change] of cases) {
+    const before = await snapshotRevision(root);
+    assert.deepEqual(compareRevisionSnapshots(before, await snapshotRevision(root)), [], 'stable without changes');
+    await change();
+    assert.ok(compareRevisionSnapshots(before, await snapshotRevision(root)).includes(key), key);
+  }
+});
+
+test('snapshot follows core.hooksPath and still watches the common hooks folder', async (t) => {
+  const root = await gitRepo(t);
+  const hooks = await fs.mkdtemp(path.join(os.tmpdir(), 'revision-hooks-'));
+  t.after(() => fs.rm(hooks, { recursive: true, force: true }));
+  git(root, 'config', 'core.hooksPath', hooks);
+  const before = await snapshotRevision(root);
+  await fs.writeFile(path.join(hooks, 'pre-push'), '#!/bin/sh\n');
+  await fs.writeFile(path.join(root, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\n');
+  const changes = compareRevisionSnapshots(before, await snapshotRevision(root));
+  assert.ok(changes.includes('.git/hooks/pre-push'), changes.join(','));
+  assert.ok(changes.includes('.git/hooks-comunes/pre-commit'), changes.join(','));
+});
+
+test('snapshot hashes package.json of first-level and scoped packages and node_modules files', async (t) => {
+  const root = await gitRepo(t);
+  const modules = path.join(root, 'node_modules');
+  await fs.mkdir(path.join(modules, 'dep'), { recursive: true });
+  await fs.mkdir(path.join(modules, '@scope', 'pkg'), { recursive: true });
+  await fs.writeFile(path.join(modules, 'dep', 'package.json'), '{"name":"dep"}');
+  await fs.writeFile(path.join(modules, '@scope', 'pkg', 'package.json'), '{"name":"@scope/pkg"}');
+  await fs.writeFile(path.join(modules, '.package-lock.json'), '{"a":1}');
+  const cases = [
+    ['node_modules/dep', () => fs.writeFile(path.join(modules, 'dep', 'package.json'), '{"name":"evil"}')],
+    ['node_modules/@scope/pkg', () => fs.writeFile(path.join(modules, '@scope', 'pkg', 'package.json'), '{"name":"evil"}')],
+    ['node_modules/.package-lock.json', () => fs.writeFile(path.join(modules, '.package-lock.json'), '{"a":2}')],
+    ['node_modules/@scope/new', () => fs.mkdir(path.join(modules, '@scope', 'new'))],
+  ];
+  for (const [key, change] of cases) {
+    const before = await snapshotRevision(root);
+    await change();
+    assert.ok(compareRevisionSnapshots(before, await snapshotRevision(root)).includes(key), key);
+  }
+});
