@@ -1,11 +1,11 @@
 import { rm } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
-import type { HallazgoConsolidado } from './consolidar.js';
+import type { HallazgoConsolidado, OrigenHallazgo } from './consolidar.js';
 import type { EstadoRecorrido } from './ejecutor.js';
 import { calcularHuella, type Recorrido } from './enrutador.js';
 import { actualizar, cargar, guardar, revertirReal, type ClaveEvidencia, type Evidencia } from './evidencia.js';
-import { IA, NombreEstacion } from './esquemas.js';
+import { claveEstacion, IA, IAExterna, NombreEstacion } from './esquemas.js';
 import { esCategoriaValida, type FalsoRepetido, proponerPorFalsos, UMBRAL_FALSOS } from './lecciones.js';
 import * as rastro from './rastro.js';
 import { limpiar, mensajeDe } from './sesion.js';
@@ -43,15 +43,16 @@ type Aplicado = z.infer<typeof Origen>;
 const Registro = z.object({
   version: z.literal(1),
   origenes: z.record(z.string(), Origen),
-  tokens: z.array(NombreEstacion),
+  tokens: z.array(z.union([NombreEstacion, z.literal('codigo-codex'), z.literal('codigo-antigravity')])),
 });
 interface EstadoRegistro {
   origenes: Map<string, Aplicado>;
-  tokens: Set<NombreEstacion>;
+  tokens: Set<string>;
 }
 
 const EstacionDelRecorrido = z.object({
   estacion: NombreEstacion,
+  revisionDe: IAExterna.optional(),
   ia: IA.nullable(),
   modelo: z.string().nullable(),
   esfuerzo: z.string().nullable(),
@@ -82,7 +83,7 @@ let cola: Promise<unknown> = Promise.resolve();
  * Lee el recorrido del rastro y comprueba su huella. Devuelve las estaciones con su IA, modelo y esfuerzo, o el
  * motivo por el que no se puede fiar de él. Esos datos están cubiertos por la huella que la persona aprobó.
  */
-function leerRecorrido(dir: string): Map<NombreEstacion, EstacionRecorridoGuardada> | string {
+function leerRecorrido(dir: string): Map<string, EstacionRecorridoGuardada> | string {
   let dato: unknown;
   try {
     dato = rastro.leerRecorrido(dir);
@@ -99,7 +100,7 @@ function leerRecorrido(dir: string): Map<NombreEstacion, EstacionRecorridoGuarda
     return 'El rastro del recorrido no tiene la forma esperada';
   }
   if (huella !== r.data.huella) return 'El rastro del recorrido no coincide con su huella: parece manipulado';
-  return new Map(r.data.estaciones.map((e) => [e.estacion, e]));
+  return new Map(r.data.estaciones.map((e) => [claveEstacion(e.estacion, e.revisionDe), e]));
 }
 
 function leerRegistro(dir: string): EstadoRegistro | string {
@@ -127,14 +128,15 @@ interface Atribucion {
  * A qué fila de evidencia se atribuye un hallazgo de esta estación: la IA, el modelo y el esfuerzo del recorrido
  * aprobado. Las estaciones de Claude llevan el agente como modelo y ningún esfuerzo. Devuelve el motivo si no se puede.
  */
-function atribuir(dir: string, estacion: NombreEstacion, recorrido: Map<NombreEstacion, EstacionRecorridoGuardada>): Atribucion | string {
-  const e = recorrido.get(estacion);
+function atribuir(dir: string, origen: OrigenHallazgo, recorrido: Map<string, EstacionRecorridoGuardada>): Atribucion | string {
+  const { estacion, revisionDe } = origen;
+  const e = recorrido.get(claveEstacion(estacion, revisionDe));
   if (e === undefined) return `${estacion}: no consta en el recorrido`;
   if (e.ia === null || e.modelo === null) return `${estacion}: el recorrido no le asignó modelo`;
   if (e.ia === 'claude') return { clave: { ia: 'claude', modelo: e.modelo, esfuerzo: null, estacion }, tokens: null };
   let dato: ReturnType<typeof rastro.leerEstacion> = null;
   try {
-    dato = rastro.leerEstacion(dir, estacion);
+    dato = rastro.leerEstacion(dir, estacion, revisionDe);
   } catch {
     return `${estacion}: su rastro no se puede leer`;
   }
@@ -249,7 +251,8 @@ async function aprender(
     cambio = true;
   }
 
-  const enEstacion = (estacion: NombreEstacion): number => [...registro.origenes.values()].filter((o) => o.fila.estacion === estacion).length;
+  const enEstacion = (fila: ClaveEvidencia): number => [...registro.origenes.values()]
+    .filter((o) => o.fila.estacion === fila.estacion && o.fila.ia === fila.ia).length;
   for (const v of veredictos) {
     const h = porClave.get(v.clave);
     if (h === undefined) {
@@ -278,12 +281,12 @@ async function aprender(
         atribuidos += 1;
         continue;
       }
-      const a = atribuir(estado.dir, origen.estacion, recorrido);
+      const a = atribuir(estado.dir, origen, recorrido);
       if (typeof a === 'string') {
         resultado.avisos.push(`Hallazgo ${claveParaAviso(v.clave)}, ${a}: no cuenta para esa estación.`);
         continue;
       }
-      if (o === undefined && enEstacion(origen.estacion) >= MAX_VEREDICTOS_POR_ESTACION) {
+      if (o === undefined && enEstacion(a.clave) >= MAX_VEREDICTOS_POR_ESTACION) {
         resultado.avisos.push(
           `Hallazgo ${claveParaAviso(v.clave)}, ${origen.estacion}: ya hay ${MAX_VEREDICTOS_POR_ESTACION} veredictos de esta estación en el recorrido, no cuenta.`,
         );
@@ -296,9 +299,10 @@ async function aprender(
         resultado.revertidos += 1;
       }
       // Los tokens de la estación entran una sola vez en el recorrido, no una por veredicto.
-      const conTokens = a.tokens !== null && !registro.tokens.has(origen.estacion);
+      const ejecucion = claveEstacion(origen.estacion, origen.revisionDe);
+      const conTokens = a.tokens !== null && !registro.tokens.has(ejecucion);
       ev = sumar(ev, a.clave, v.verificado, conTokens ? (a.tokens ?? undefined) : undefined);
-      if (conTokens) registro.tokens.add(origen.estacion);
+      if (conTokens) registro.tokens.add(ejecucion);
       registro.origenes.set(origen.clave, { verificado: v.verificado, fila: a.clave, archivo: h.archivo, categoria: h.categoria });
       if (v.verificado === 'falso' && a.clave.ia !== 'claude') falsosNuevos.add(claveFalso(origen.estacion, h.categoria, h.archivo));
       nuevos += 1;

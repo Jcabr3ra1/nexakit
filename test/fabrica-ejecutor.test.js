@@ -92,8 +92,12 @@ const deClaude = (estacion) => ({
 });
 
 /** Recorrido real (head, base y diff de `proponer`) con las estaciones que pide la prueba. */
+/** Un HOME temporal vacío para proponer: nunca las preferencias ni la evidencia del HOME real de quien ejecuta. */
+const HOME_VACIO = mkdtempSync(path.join(tmpdir(), 'fabrica-home-vacio-'));
+temporales.push(HOME_VACIO);
+
 async function recorridoCon(dir, estaciones, extra = {}) {
-  const propuesto = await proponer({ raiz: dir, base: 'main', catalogos: {} });
+  const propuesto = await proponer({ raiz: dir, base: 'main', catalogos: {}, home: HOME_VACIO });
   const r = { ...propuesto, ...extra, estaciones };
   r.huella = calcularHuella(r);
   return r;
@@ -129,6 +133,28 @@ const hastaAbortar = (señal) =>
 const NONCE = 'abcdef012345';
 const espera = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const deEstacion = (e, nombre) => e.estaciones.find((x) => x.estacion === nombre);
+
+test('un fallo de Antigravity en código conserva el informe de Codex y la estación de Claude', async () => {
+  const raiz = crearRepo();
+  const home = temporal('fabrica-ejecutor-home-');
+  const recorrido = await proponer({ raiz, base: 'main', catalogos: CATALOGO, home });
+  const conectores = {
+    codex: conector('codex', async (encargo) => {
+      assert.equal(encargo.estacion, 'codigo');
+      assert.match(encargo.instrucciones, /Revisa SOLO, sin modificar nada/u);
+      return ok(encargo);
+    }),
+    antigravity: conector('antigravity', async () => { throw new Error('sin conexión'); }),
+  };
+  const { id } = await lanzar(recorrido, { raiz, conectores, home });
+  const final = await esperar(id, home);
+  assert.equal(final.fase, 'terminado');
+  const codigo = final.estaciones.filter((e) => e.estacion === 'codigo');
+  assert.deepEqual(codigo.map((e) => [e.ia, e.estado]), [['claude', 'claude'], ['codex', 'ok'], ['antigravity', 'fallida']]);
+  assert.match(codigo[2].motivo, /sin conexión/u);
+  assert.equal(rastro.leerEstacion(final.dir, 'codigo', 'codex').resultado.estado, 'ok');
+  assert.equal(rastro.leerEstacion(final.dir, 'codigo', 'antigravity').resultado.estado, 'fallida');
+});
 
 test('construirEncargo une foco, criterios, foco de la persona, aviso de solo lectura y el diff', () => {
   const encargo = construirEncargo({

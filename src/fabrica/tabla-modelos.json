@@ -11,7 +11,9 @@
     { "ia": "codex", "modelo": "gpt-6.1-terra", "esfuerzo": "medium" }
   ],
   "codigo": [
-    { "ia": "claude", "modelo": "revisor-de-calidad", "esfuerzo": null }
+    { "ia": "claude", "modelo": "revisor-de-calidad", "esfuerzo": null },
+    { "ia": "codex", "modelo": "gpt-6.1-sol", "esfuerzo": "high" },
+    { "ia": "antigravity", "modelo": "gemini-4-hydrogen-high", "esfuerzo": null }
   ],
   "interfaz": [
     { "ia": "claude", "modelo": "impeccable-finish-reviewer", "esfuerzo": null },

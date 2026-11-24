@@ -84,8 +84,12 @@ const deClaude = (estacion) => ({
   estado: 'propuesta',
 });
 
+/** Un HOME temporal vacío para proponer: nunca las preferencias ni la evidencia del HOME real de quien ejecuta. */
+const HOME_VACIO = mkdtempSync(path.join(tmpdir(), 'fabrica-home-vacio-'));
+temporales.push(HOME_VACIO);
+
 async function recorridoCon(dir, estaciones) {
-  const propuesto = await proponer({ raiz: dir, base: 'main', catalogos: {} });
+  const propuesto = await proponer({ raiz: dir, base: 'main', catalogos: {}, home: HOME_VACIO });
   const r = { ...propuesto, estaciones };
   r.huella = calcularHuella(r);
   return r;

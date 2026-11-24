@@ -1,6 +1,8 @@
 import { z } from 'zod';
 
-export const IA = z.enum(['codex', 'antigravity', 'claude']);
+export const IAExterna = z.enum(['codex', 'antigravity']);
+export type IAExterna = z.infer<typeof IAExterna>;
+export const IA = z.enum([...IAExterna.options, 'claude']);
 export type IA = z.infer<typeof IA>;
 
 export const NOMBRES_ESTACION = [
@@ -14,6 +16,11 @@ export const NOMBRES_ESTACION = [
 ] as const;
 export const NombreEstacion = z.enum(NOMBRES_ESTACION);
 export type NombreEstacion = z.infer<typeof NombreEstacion>;
+
+/** Identifica la ejecución de una estación en el recorrido y en el rastro. */
+export function claveEstacion(estacion: NombreEstacion, revisionDe?: IAExterna): string {
+  return revisionDe === undefined ? estacion : `${estacion}-${revisionDe}`;
+}
 
 const Nivel = z.enum(['alta', 'media', 'baja']);
 

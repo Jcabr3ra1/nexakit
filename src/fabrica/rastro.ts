@@ -5,7 +5,7 @@ import path from 'node:path';
 import type { Encargo, ResultadoEstacion } from './conectores/tipos.js';
 import type { Recorrido } from './enrutador.js';
 import { ErrorFabrica } from './errores.js';
-import { NOMBRES_ESTACION, type EstadoEstacionEjecucion, type IA, type NombreEstacion } from './esquemas.js';
+import { claveEstacion, IAExterna, NOMBRES_ESTACION, type EstadoEstacionEjecucion, type IA, type NombreEstacion } from './esquemas.js';
 
 /** Días que se conserva un rastro antes de que `podar` lo borre. */
 export const DIAS_RASTRO = 90;
@@ -69,18 +69,19 @@ export async function carpetaPropia(ruta: string, quien = 'El rastro'): Promise<
 }
 
 /** Escribe un archivo nuevo con `0o600`; `wx` falla si ya existe algo ahí, también un enlace. */
-async function escribirNuevo(ruta: string, texto: string): Promise<void> {
+async function escribirNuevo(ruta: string, contenido: string | Uint8Array): Promise<void> {
   const archivo = await open(ruta, 'wx', 0o600);
   try {
     await archivo.chmod(0o600);
-    await archivo.writeFile(texto, 'utf8');
+    // Un texto se guarda en UTF-8; los bytes (por ejemplo, un diff) tal cual.
+    await archivo.writeFile(contenido);
   } finally {
     await archivo.close();
   }
 }
 
 /** Reemplaza un archivo de forma atómica: temporal nuevo y `rename`, que no sigue enlaces. */
-export async function escribirReemplazando(ruta: string, texto: string): Promise<void> {
+export async function escribirReemplazando(ruta: string, texto: string | Uint8Array): Promise<void> {
   const temporal = path.join(path.dirname(ruta), `.${path.basename(ruta)}.${randomBytes(6).toString('hex')}.tmp`);
   try {
     await escribirNuevo(temporal, texto);
@@ -205,7 +206,8 @@ export async function consumirPlanBanco(home: string): Promise<unknown> {
 
 /** Estado vivo de una estación del recorrido en curso, tal como lo muestra la barra. */
 export interface EstacionActiva {
-  estacion: NombreEstacion;
+  /** Una estación de la fábrica o `encargo` (programar con otra IA en un worktree). */
+  estacion: NombreEstacion | 'encargo';
   ia: IA | null;
   modelo: string | null;
   esfuerzo: string | null;
@@ -267,17 +269,23 @@ export async function guardarActivo(home: string, activo: Activo | null): Promis
   }
 }
 
-/** Guarda `<estacion>.json` con el encargo (sin el diff) y el resultado. */
+/** Guarda el encargo (sin el diff) y el resultado en el archivo de esa ejecución. */
 export async function guardarEstacion(
   dir: string,
   estacion: NombreEstacion,
   encargo: EncargoRastro,
   resultado: ResultadoEstacion,
+  revisionDe?: IAExterna,
 ): Promise<void> {
-  if (!(NOMBRES_ESTACION as readonly string[]).includes(estacion)) {
+  if (!estacionValida(estacion, revisionDe)) {
     throw new ErrorFabrica(`Estación desconocida en el rastro: ${estacion}`);
   }
-  await escribirNuevo(path.join(dir, `${estacion}.json`), json({ estacion, encargo, resultado }));
+  await escribirNuevo(path.join(dir, `${claveEstacion(estacion, revisionDe)}.json`), json({ estacion, encargo, resultado }));
+}
+
+function estacionValida(estacion: NombreEstacion, revisionDe?: IAExterna): boolean {
+  return (NOMBRES_ESTACION as readonly string[]).includes(estacion)
+    && (revisionDe === undefined || (estacion === 'codigo' && IAExterna.safeParse(revisionDe).success));
 }
 
 /** Reescribe `estado.json` con el estado actual del recorrido. */
@@ -285,10 +293,10 @@ export async function guardarEstado(dir: string, estado: unknown): Promise<void>
   await escribirReemplazando(path.join(dir, 'estado.json'), json(estado));
 }
 
-/** Lee `<estacion>.json` de un recorrido, sin seguir enlaces. `null` si no existe o no es un archivo normal. */
-export function leerEstacion(dir: string, estacion: NombreEstacion): { encargo?: EncargoRastro; resultado?: ResultadoEstacion } | null {
-  if (!(NOMBRES_ESTACION as readonly string[]).includes(estacion)) return null;
-  const archivo = path.join(dir, `${estacion}.json`);
+/** Lee el informe de una ejecución sin seguir enlaces. `null` si no existe o no es un archivo normal. */
+export function leerEstacion(dir: string, estacion: NombreEstacion, revisionDe?: IAExterna): { encargo?: EncargoRastro; resultado?: ResultadoEstacion } | null {
+  if (!estacionValida(estacion, revisionDe)) return null;
+  const archivo = path.join(dir, `${claveEstacion(estacion, revisionDe)}.json`);
   const info = lstatSync(archivo, { throwIfNoEntry: false });
   if (info === undefined || !info.isFile()) return null;
   const fd = openSync(archivo, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
@@ -423,12 +431,57 @@ export function carpetasDeRecorridos(home: string, repo: string): string[] {
     .filter(carpetaReal);
 }
 
+const PATRON_ID_ENCARGO = /^[a-z0-9-]+-[0-9a-f]{6}$/u;
+
 /**
- * Borra los rastros sin actividad en los últimos `dias`. Nunca sigue enlaces: una
- * carpeta de repo o de recorrido que sea un enlace se deja tal cual. Devuelve los ids borrados.
+ * Borra las carpetas de `~/.nexakit/encargos/` sin actividad en los últimos `dias` (el informe y el diff de un encargo
+ * caducan como el rastro). Nunca sigue enlaces. Si una carpeta aún tiene su worktree `repo/`, primero se quita con la
+ * misma lógica que el barrido de huérfanos (`git worktree prune` solo si el repo del candado lo tiene registrado) y se
+ * respeta si su proceso sigue vivo. Devuelve los ids borrados.
+ */
+export async function podarEncargos(home: string, dias: number = DIAS_RASTRO): Promise<string[]> {
+  if (!Number.isFinite(dias) || dias <= 0) throw new ErrorFabrica('Los días de poda deben ser un número positivo');
+  const base = path.join(home, '.nexakit', 'encargos');
+  const infoBase = await lstatSiExiste(base);
+  if (infoBase === null || infoBase.isSymbolicLink() || !infoBase.isDirectory()) return [];
+  const limite = Date.now() - dias * DIA_MS;
+  const borrados: string[] = [];
+  for (const id of (await readdir(base)).sort()) {
+    if (!PATRON_ID_ENCARGO.test(id)) continue;
+    const dir = path.join(base, id);
+    const info = await lstatSiExiste(dir);
+    if (info === null || info.isSymbolicLink() || !info.isDirectory() || info.mtimeMs >= limite) continue;
+    // Import dinámico: `worktree.ts` ya importa de este módulo.
+    const { quitarWorktreeDeCarpeta } = await import('./encargo/worktree.js');
+    try {
+      await quitarWorktreeDeCarpeta(dir, id);
+    } catch {
+      // Su proceso sigue vivo: no se toca.
+      continue;
+    }
+    await rm(dir, { recursive: true, force: true });
+    borrados.push(id);
+  }
+  return borrados;
+}
+
+/**
+ * Borra los rastros sin actividad en los últimos `dias` (y, con ellos, los encargos de `~/.nexakit/encargos/`). Nunca
+ * sigue enlaces: una carpeta de repo o de recorrido que sea un enlace se deja tal cual. Devuelve los ids de los
+ * recorridos borrados.
  */
 export async function podar(home: string, dias: number = DIAS_RASTRO): Promise<string[]> {
   if (!Number.isFinite(dias) || dias <= 0) throw new ErrorFabrica('Los días de poda deben ser un número positivo');
+  // Los encargos (`~/.nexakit/encargos/`) caducan con la misma limpieza; un fallo ahí no impide podar los rastros.
+  const encargos = podarEncargos(home, dias).catch(() => []);
+  try {
+    return await podarRastros(home, dias);
+  } finally {
+    await encargos;
+  }
+}
+
+async function podarRastros(home: string, dias: number): Promise<string[]> {
   const base = path.join(home, '.nexakit', 'fabrica');
   const infoBase = await lstatSiExiste(base);
   if (infoBase === null || infoBase.isSymbolicLink() || !infoBase.isDirectory()) return [];

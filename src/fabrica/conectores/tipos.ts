@@ -26,6 +26,8 @@ export interface ResultadoEstacion {
   modeloInformado: string | null;
   tokens: { entrada: number; salida: number; total: number } | null;
   denegaciones: Denegacion[];
+  /** Permisos aprobados (solo en modo escritura), para poder auditar el encargo. */
+  aprobaciones?: Denegacion[];
   motivo?: string;
 }
 

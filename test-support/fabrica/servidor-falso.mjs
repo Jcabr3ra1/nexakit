@@ -7,7 +7,7 @@
 // - `diferir: true` en un paso: no responde todavía; guarda el id de la petición para ese método.
 // - `responder: [{ metodo, resultado?, error? }]` en los efectos (pasos y `alResponder`): contesta la petición
 //   diferida de ese método. Va después de las notificaciones y peticiones del mismo efecto.
-import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, lstatSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
 const rutaGuion = process.argv[2];
@@ -23,6 +23,15 @@ if (process.argv[3] === '--version') {
 }
 if (guion.registroArgs) writeFileSync(guion.registroArgs, JSON.stringify(process.argv.slice(3)));
 if (guion.registroCwd) writeFileSync(guion.registroCwd, process.cwd());
+// `registroEnv`: guarda CODEX_HOME con que se lanzó el servidor y qué contiene (para probar el modo escritura de Codex).
+if (guion.registroEnv) {
+  const home = process.env.CODEX_HOME ?? null;
+  const archivos = home !== null && existsSync(home) ? readdirSync(home).sort() : null;
+  const modo = home !== null && existsSync(home) ? (lstatSync(home).mode & 0o777) : null;
+  const enlaceAuth = home !== null && archivos?.includes('auth.json') ? lstatSync(`${home}/auth.json`).isSymbolicLink() : null;
+  const temporales = { TMPDIR: process.env.TMPDIR ?? null, TMP: process.env.TMP ?? null, TEMP: process.env.TEMP ?? null };
+  writeFileSync(guion.registroEnv, JSON.stringify({ home, archivos, modo, enlaceAuth, temporales }));
+}
 const metodos = guion.metodos ?? {};
 const contadores = new Map();
 const diferidas = new Map();

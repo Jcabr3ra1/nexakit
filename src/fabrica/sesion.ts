@@ -10,7 +10,8 @@ import { cargarConfig } from './config.js';
 import * as ejecutor from './ejecutor.js';
 import { aplicarCambios, calcularHuella, proponer, type CambioRecorrido, type Catalogos, type Recorrido } from './enrutador.js';
 import { ErrorEntorno, ErrorFabrica } from './errores.js';
-import { IA, NombreEstacion } from './esquemas.js';
+import { IA, IAExterna, NombreEstacion } from './esquemas.js';
+import { exigirSinEncargo } from './encargo/candado.js';
 import * as rastro from './rastro.js';
 
 /**
@@ -72,7 +73,7 @@ export async function raizDelRepo(cwd: string): Promise<string> {
 export type Conectores = Partial<Record<IA, Conector>>;
 
 /** `NEXAKIT_FABRICA_*`: `[orden, ...argsPrefijo]` en JSON, o la ruta de la orden. Sin valor, el ejecutable real. */
-function opcionesDeEntorno(entorno: NodeJS.ProcessEnv, variable: string): OpcionesConectorCodex {
+export function opcionesDeEntorno(entorno: NodeJS.ProcessEnv, variable: string): Omit<OpcionesConectorCodex, 'escritura'> {
   const valor = entorno[variable];
   if (valor === undefined || valor === '') return {};
   if (!valor.startsWith('[')) return { orden: valor };
@@ -153,6 +154,7 @@ const RecorridoGuardado = z.object({
   estaciones: z.array(
     z.object({
       estacion: NombreEstacion,
+      revisionDe: IAExterna.optional(),
       ia: IA.nullable(),
       modelo: z.string().nullable(),
       esfuerzo: z.string().nullable(),
@@ -244,6 +246,8 @@ export async function lanzarAprobado(entrada: {
   antesDeLanzar?: (recorrido: Recorrido) => Promise<void> | void;
 }): Promise<Lanzamiento> {
   const { raiz, huella, cambios = [], home, entorno = process.env, avisar = sinAvisos, antesDeLanzar } = entrada;
+  // Un recorrido no arranca mientras haya un encargo vivo (candado global de encargos).
+  exigirSinEncargo(home);
   const propuesta = cargarPropuesta(home, await rastro.nombreRepo(raiz));
   if (propuesta === null || propuesta.huella !== huella || calcularHuella(propuesta) !== propuesta.huella) {
     throw new ErrorFabrica(MENSAJE_SIN_PROPUESTA);
