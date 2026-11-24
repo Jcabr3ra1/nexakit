@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { gitConfigGlobalVacio } from '../test-support/git-aislado.js';
 import { ejecutarEncargo, rutasVetadas, TIEMPO_ENCARGO_MS } from '../dist/fabrica/encargo/ejecutar.js';
 import { analizarParche } from '../dist/fabrica/encargo/parche.js';
@@ -113,8 +114,10 @@ function comprobarLimpio(e, informe) {
   assert.equal(existsSync(path.join(e.home, '.nexakit', 'fabrica', 'activo.json')), false, 'activo.json se retira');
   const guardado = JSON.parse(readFileSync(informe.rutaInforme, 'utf8'));
   assert.deepEqual(guardado, JSON.parse(JSON.stringify(informe)), 'informe.json es el informe devuelto');
-  assert.equal(modo(informe.rutaInforme), 0o600);
-  assert.equal(modo(carpeta), 0o700);
+  if (POSIX) {
+    assert.equal(modo(informe.rutaInforme), 0o600);
+    assert.equal(modo(carpeta), 0o700);
+  }
 }
 
 /** Espera a que la señal se aborte (enseguida, si ya lo está). */
@@ -185,7 +188,7 @@ test('devuelve el diff de un archivo modificado y uno nuevo, con permisos 0o600,
   assert.equal(activos[0].estaciones[0].estado, 'en-curso');
 
   assert.equal(informe.rutaDiff, path.join(e.home, '.nexakit', 'encargos', informe.id, 'cambios.diff'));
-  assert.equal(modo(informe.rutaDiff), 0o600);
+  if (POSIX) assert.equal(modo(informe.rutaDiff), 0o600);
   const diff = readFileSync(informe.rutaDiff, 'utf8');
   assert.match(diff, /b\/a\.txt/u);
   assert.match(diff, /b\/nuevo\.txt/u);
@@ -657,7 +660,7 @@ test('al empezar un encargo se borran los worktrees huérfanos de procesos muert
   const sinCandado = path.join(e.home, '.nexakit', 'encargos', 'sin-candado');
   mkdirSync(path.join(sinCandado, 'repo'), { recursive: true });
   writeFileSync(path.join(sinCandado, 'repo', 'x'), 'x');
-  assert.equal(modo(path.join(path.dirname(muerto.dir), 'candado.json')), 0o600);
+  if (POSIX) assert.equal(modo(path.join(path.dirname(muerto.dir), 'candado.json')), 0o600);
   writeFileSync(path.join(path.dirname(muerto.dir), 'candado.json'), JSON.stringify({ pid: pidMuerto(), raiz: e.raiz }));
   writeFileSync(path.join(path.dirname(muerto.dir), 'informe.json'), '{}');
 
@@ -730,7 +733,7 @@ test('el candado global de encargos: se toma con pid, id y fecha, se libera siem
   assert.equal(visto.datos.pid, process.pid);
   assert.equal(visto.datos.id, informe.id);
   assert.ok(Number.isFinite(Date.parse(visto.datos.fecha)));
-  assert.equal(visto.modo, 0o600);
+  if (POSIX) assert.equal(visto.modo, 0o600);
   assert.equal(existsSync(archivo), false, 'se libera al terminar');
 
   // Con un proceso vivo que lo tiene, no arranca nada (ni siquiera el conector) y el candado ajeno no se toca.
@@ -1120,4 +1123,59 @@ test('la poda de encargos caducados quita su worktree con git solo si el repo de
   assert.doesNotMatch(listado, new RegExp(viejo.id), 'el registro del caducado se limpia en su repo');
   assert.match(listado, new RegExp(vivo.id));
   assert.equal(git(b.raiz, 'worktree', 'list', '--porcelain'), antesB, 'el repo ajeno no se toca (ni remove ni prune)');
+});
+
+test('sin conectores inyectados, el conector real de Codex (con NEXAKIT_FABRICA_CODEX) recibe la copia como raíz escribible', async () => {
+  const e = entorno();
+  const guiones = fileURLToPath(new URL('../test-support/fabrica/', import.meta.url));
+  const servidor = path.join(guiones, 'servidor-falso.mjs');
+  const catalogo = JSON.parse(readFileSync(path.join(guiones, 'codex-catalogo.json'), 'utf8'));
+  const revision = JSON.parse(readFileSync(path.join(guiones, 'codex-revision.json'), 'utf8'));
+  const dir = mkdtempSync(path.join(tmpdir(), 'enc-ej-integracion-'));
+  temporales.push(dir);
+  const registro = path.join(dir, 'registro.ndjson');
+  const registroEnv = path.join(dir, 'env.json');
+  const rutaGuion = path.join(dir, 'guion.json');
+  writeFileSync(rutaGuion, JSON.stringify({ ...revision, metodos: { ...revision.metodos, 'model/list': catalogo.metodos['model/list'] }, registro, registroEnv }));
+  // CODEX_HOME de pruebas: el home aislado del modo escritura nunca enlaza el auth.json de la persona.
+  const codexHome = path.join(dir, 'codex-home');
+  mkdirSync(codexHome);
+  writeFileSync(path.join(codexHome, 'auth.json'), '{}');
+  const previo = process.env.CODEX_HOME;
+  process.env.CODEX_HOME = codexHome;
+  let informe;
+  try {
+    informe = await ejecutarEncargo(
+      opciones(e, {
+        entorno: { NEXAKIT_FABRICA_CODEX: JSON.stringify([process.execPath, servidor, rutaGuion]) },
+        modelo: 'gpt-5.5',
+        esfuerzo: 'high',
+      }),
+    );
+  } finally {
+    if (previo === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previo;
+  }
+  assert.equal(informe.estado, 'sin-cambios', informe.motivo);
+  assert.equal(informe.ia, 'codex');
+  const mensajes = readFileSync(registro, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const hilo = mensajes.find((m) => m.method === 'thread/start').params;
+  const turno = mensajes.find((m) => m.method === 'turn/start').params;
+  const carpeta = path.join(realpathSync(e.home), '.nexakit', 'encargos', informe.id);
+  const copia = path.join(carpeta, 'repo');
+  assert.equal(hilo.sandbox, 'workspace-write');
+  assert.equal(hilo.approvalPolicy, 'never');
+  assert.equal(hilo.cwd, copia);
+  assert.equal(turno.cwd, copia);
+  // La copia es la única raíz escribible del repo; la otra es la carpeta temporal del encargo, fuera del repo real.
+  assert.deepEqual(turno.sandboxPolicy.writableRoots, [copia, path.join(carpeta, 'tmp')]);
+  assert.equal(turno.sandboxPolicy.networkAccess, false);
+  assert.deepEqual(hilo.config.sandbox_workspace_write.writable_roots, [copia, path.join(carpeta, 'tmp')]);
+  assert.ok(!turno.sandboxPolicy.writableRoots.some((r) => r.startsWith(realpathSync(e.raiz))), 'el repo real nunca es escribible');
+  const env = JSON.parse(readFileSync(registroEnv, 'utf8'));
+  assert.notEqual(env.home, codexHome, 'CODEX_HOME aislado');
+  assert.equal(env.temporales.TMPDIR, path.join(carpeta, 'tmp'));
+  assert.match(turno.input[0].text, /Para comprobar tu trabajo usa solo estas órdenes: `npm test`, `npm run typecheck`/u);
+  assert.doesNotMatch(turno.input[0].text, /cualquier otra se rechaza/u);
+  comprobarLimpio(e, informe);
 });

@@ -14,6 +14,21 @@ const SERVIDOR = fileURLToPath(new URL('../test-support/fabrica/servidor-falso.m
 const GUIONES = fileURLToPath(new URL('../test-support/fabrica/', import.meta.url));
 const VERSION_TIPOS = readFileSync(new URL('../src/fabrica/protocolos/codex/VERSION', import.meta.url), 'utf8').trim();
 
+// El modo escritura crea un CODEX_HOME aislado que enlaza `auth.json` del real: en las pruebas, el «real» es una carpeta
+// temporal con un auth.json falso, nunca el de la persona.
+const CODEX_HOME_PREVIO = process.env.CODEX_HOME;
+const CODEX_HOME_PRUEBAS = mkdtempSync(join(tmpdir(), 'nexakit-codex-home-pruebas-'));
+writeFileSync(join(CODEX_HOME_PRUEBAS, 'auth.json'), '{}');
+test.before(() => {
+  process.env.CODEX_HOME = CODEX_HOME_PRUEBAS;
+});
+test.after(() => {
+  if (CODEX_HOME_PREVIO === undefined) delete process.env.CODEX_HOME;
+  else process.env.CODEX_HOME = CODEX_HOME_PREVIO;
+  rmSync(CODEX_HOME_PRUEBAS, { recursive: true, force: true });
+});
+const POSIX = process.platform !== 'win32';
+
 /** Prepara un guion con registro de mensajes y una carpeta de trabajo que hace de raíz del repo. */
 function preparar(nombre, cambios = {}, opcionesConector = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'nexakit-codex-'));
@@ -317,8 +332,11 @@ test('en modo escritura, el app-server arranca con un CODEX_HOME aislado sin rul
     assert.equal(resultado.estado, 'ok', resultado.motivo);
     const visto = JSON.parse(readFileSync(registroEnv, 'utf8'));
     home = visto.home;
-    assert.ok(home && home !== join(process.env.HOME ?? '', '.codex'));
-    assert.equal(visto.modo, 0o700);
+    assert.ok(home && home !== join(process.env.HOME ?? '', '.codex') && home !== CODEX_HOME_PRUEBAS);
+    if (POSIX) assert.equal(visto.modo, 0o700);
+    assert.equal(visto.enlaceAuth, true, 'enlaza el auth.json del CODEX_HOME de las pruebas');
+    // Sin carpeta temporal del encargo no se toca el TMPDIR heredado.
+    assert.equal(visto.temporales.TMPDIR, process.env.TMPDIR ?? null);
     assert.equal(visto.archivos.includes('rules'), false);
     assert.deepEqual(visto.archivos.filter((a) => a !== 'auth.json'), ['config.toml']);
   } finally {
@@ -350,7 +368,7 @@ test('crearHomeAislado enlaza solo auth.json del home real, con config mínima y
   writeFileSync(join(real, 'rules', 'default.rules'), 'prefix_rule(pattern=["git","push"], decision="allow")');
   try {
     const h = await crearHomeAislado({ CODEX_HOME: real }, base);
-    assert.equal(lstatSync(h.ruta).mode & 0o777, 0o700);
+    if (POSIX) assert.equal(lstatSync(h.ruta).mode & 0o777, 0o700);
     assert.deepEqual(readdirSync(h.ruta).sort(), ['auth.json', 'config.toml']);
     assert.equal(readlinkSync(join(h.ruta, 'auth.json')), join(real, 'auth.json'));
     await h.borrar();
@@ -359,6 +377,38 @@ test('crearHomeAislado enlaza solo auth.json del home real, con config mínima y
   } finally {
     rmSync(base, { recursive: true, force: true });
   }
+});
+
+test('con escritura: { raiz, tmp } la carpeta temporal del encargo es la otra raíz escribible y el app-server la exporta como TMPDIR', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'nexakit-codex-raiz-'));
+  const raiz = join(dir, 'repo');
+  const tmp = join(dir, 'tmp');
+  mkdirSync(raiz);
+  mkdirSync(tmp);
+  const p = preparar('revision', {}, { escritura: { raiz, tmp } });
+  const registroEnv = join(dir, 'env.json');
+  const guion = JSON.parse(readFileSync(p.rutaGuion, 'utf8'));
+  writeFileSync(p.rutaGuion, JSON.stringify({ ...guion, registroEnv }));
+  try {
+    const resultado = await (await p.conector).ejecutar(encargo(raiz), new AbortController().signal);
+    assert.equal(resultado.estado, 'ok', resultado.motivo);
+    const mensajes = p.mensajes();
+    const hilo = mensajes.find((m) => m.method === 'thread/start').params;
+    const turno = mensajes.find((m) => m.method === 'turn/start').params;
+    const [canonRaiz, canonTmp] = [realpathSync(raiz), realpathSync(tmp)];
+    assert.deepEqual(turno.sandboxPolicy.writableRoots, [canonRaiz, canonTmp]);
+    assert.equal(turno.sandboxPolicy.networkAccess, false);
+    assert.equal(turno.sandboxPolicy.excludeTmpdirEnvVar, true);
+    assert.equal(turno.sandboxPolicy.excludeSlashTmp, true);
+    assert.deepEqual(hilo.config.sandbox_workspace_write.writable_roots, [canonRaiz, canonTmp]);
+    assert.equal(hilo.cwd, canonRaiz, 'el cwd sigue siendo la copia, no la carpeta temporal');
+    const visto = JSON.parse(readFileSync(registroEnv, 'utf8'));
+    assert.deepEqual(visto.temporales, { TMPDIR: canonTmp, TMP: canonTmp, TEMP: canonTmp });
+  } finally {
+    await p.limpiar();
+    rmSync(dir, { recursive: true, force: true });
+  }
+  await assert.rejects(crearConectorCodex({ escritura: { raiz: tmpdir(), tmp: 'relativa' } }), /carpeta temporal del encargo debe ser una ruta absoluta/);
 });
 
 test('escritura.raiz debe ser absoluta y existir, con un error claro en español', async () => {
