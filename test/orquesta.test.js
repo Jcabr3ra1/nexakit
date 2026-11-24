@@ -42,10 +42,10 @@ test('fabrica es la única skill de revisión y revision-cruzada y revisar queda
   await assert.rejects(fs.access(new URL('../skills/revision-cruzada/SKILL.md', import.meta.url)));
   await assert.rejects(fs.access(new URL('../skills/revisar/SKILL.md', import.meta.url)));
   const fabrica = await leer('skills/fabrica/SKILL.md');
-  assert.doesNotMatch(fabrica, /revision-cruzada|automátic/u);
+  assert.doesNotMatch(fabrica, /(?<!--)revision-cruzada|automátic/u);
   const { RETIRED_SKILLS } = await import('../src/toolkit-setup.js');
   assert.ok(RETIRED_SKILLS.includes('revision-cruzada'));
   assert.ok(RETIRED_SKILLS.includes('revisar'));
   for (const rel of ['skills/quality-gate/SKILL.md', 'README.md', 'docs/guias/guia-de-comandos.md', 'docs/guias/guia-de-comandos.html', 'docs/skills/superpowers-integration.md', 'docs/agentes/coordinacion/fabrica.md'])
-    assert.doesNotMatch(await leer(rel), /revision-cruzada|[Rr]evisión automática/u, rel);
+    assert.doesNotMatch(await leer(rel), /(?<!--)revision-cruzada|[Rr]evisión automática/u, rel);
 });

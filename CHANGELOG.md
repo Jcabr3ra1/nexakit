@@ -1,5 +1,16 @@
 # Cambios
 
+## 0.13.0
+
+### Encargos a Codex y Antigravity y revisión cruzada
+
+- `nexakit encargar` (herramienta MCP `fabrica_encargar`) delega una tarea de programación en Codex o Antigravity. La IA trabaja en una copia aislada (un `git worktree` de `HEAD` en `~/.nexakit/encargos/<id>/repo`, que se borra siempre) y devuelve `cambios.diff` listo para `git apply` e `informe.json`. Si `node_modules` está ignorado, se enlaza en solo lectura. Los encargos caducan a los 90 días.
+- Límites: Codex corre en `workspace-write`, sin red y sin las reglas de `~/.codex/rules` (con un `CODEX_HOME` temporal); Antigravity solo escribe dentro de la copia y en esta versión no ejecuta órdenes. El encargo queda `invalido` si hay escrituras fuera de la copia (no edites el repo mientras corre), enlaces que salen del repo o cambios en `.git`, `.claude`, `.codex`, `.gemini`, `.agents`, `.nexakit`, `.vscode`, `.husky` o `.github/workflows`. Un trabajo a la vez, con el mismo candado que la fábrica. Las órdenes extra requieren aprobación de la persona.
+- `nexakit fabrica preferencias [--criterio calidad|barato] [--revision-cruzada si|no] [--json]` guarda cómo se elige el modelo de cada estación (por defecto, barato) y si la revisión cruzada está activa (por defecto, sí).
+- La estación `codigo` se revisa con Claude, Codex y Antigravity; un hallazgo que señalan varias IA aparece como «coinciden N IA» y sube su confianza.
+- Regla de orquestación nueva en CLAUDE.md, AGENTS.md y GEMINI.md: las tareas ligeras o normales con diseño claro se delegan primero con `fabrica_encargar`; el orquestador revisa el diff, lo aplica, ejecuta las pruebas e integra, y si falla lo resuelve con Claude. La revisión del diff incluye al menos una IA distinta de la que lo escribió. Las instalaciones con el bloque anterior se actualizan solas al volver a ejecutar `npx nexakit`.
+- La skill `fabrica`, el README, la guía de comandos y la guía de la fábrica documentan los encargos, las preferencias y la revisión cruzada.
+
 ## 0.12.3
 
 ### La fábrica se usa por su cuenta

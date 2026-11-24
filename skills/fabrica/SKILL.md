@@ -27,6 +27,19 @@ El servidor MCP `nexakit-fabrica` ofrece `fabrica_proponer`, `fabrica_lanzar`, `
 7. **Una sola tabla y veredictos.** Entrega una tabla con estación, hallazgo, gravedad, verificado (sí o no, con la prueba) y propuesta. Después, para que la fábrica aprenda, vuelve a llamar a `fabrica_resultado({ id, veredictos })` con un veredicto por hallazgo ya verificado: `{ clave, verificado }`, donde `clave` es la que trae cada hallazgo (columna «clave» de `consolidado.md`) y `verificado` es `real` (existe tras comprobarlo en el código), `falso` (no existe) o `dudoso` (no lo pudiste comprobar; no cuenta). No pases veredictos de hallazgos que no verificaste. Repetir un veredicto no suma dos veces, uno cambiado (o un `dudoso` posterior) deshace el anterior, y cada estación suma como mucho 5 veredictos por recorrido: da veredicto solo a los hallazgos que de verdad comprobaste. Solo vale para el repo del recorrido. Si la respuesta trae avisos en `aprendizaje`, díselos a la persona. Sin el servidor MCP: `~/.nexakit/nexakit fabrica resultado --id <id> --veredictos <archivo.json>`.
 8. **Corregir.** Corrige tú los hallazgos reales, sin pedir permiso, y vuelve a comprobar con pruebas; deja sin tocar los falsos y los dudosos, y dilos en la tabla. No repitas el recorrido para el mismo diff: si la persona lo pide, vuelve a proponer desde el paso 1, con un máximo de dos rondas por petición.
 
+## Encargar (delegar código en Codex o Antigravity)
+
+Las tareas ligeras o normales con diseño claro las delegas primero, sin preguntar, con `fabrica_encargar` (o `~/.nexakit/nexakit encargar --ia codex|antigravity|auto --encargo <archivo.md>`). La IA escribe en una copia aislada del repo y devuelve `cambios.diff` e `informe.json`. Detalles y límites en [la guía de la fábrica](../../docs/agentes/coordinacion/fabrica.md).
+
+1. **Revisar el diff** y aplicarlo con `git apply`; si el informe dice `invalido`, descártalo y resuélvelo con Claude.
+2. **Revisión con otra IA:** la revisión del diff incluye al menos una IA distinta de la que lo escribió (si programa Codex, revisa Antigravity o Claude, y al revés). Después, pruebas e integración.
+3. **No edites el repo mientras corre un encargo**: deja el encargo `invalido`.
+4. Las órdenes extra (`--ordenes`) solo con aprobación de la persona. Informa en una línea qué IA hizo cada encargo.
+
+## Preferencias y revisión cruzada
+
+`~/.nexakit/nexakit fabrica preferencias [--criterio calidad|barato] [--revision-cruzada si|no]` guarda cómo se elige el modelo (por defecto, barato) y si la estación `codigo` la revisan Claude, Codex y Antigravity a la vez (por defecto, sí). Cuando varias IA coinciden en un hallazgo, la propuesta lo marca como «coinciden N IA» y la confianza sube.
+
 ## Banco de pruebas de modelos (solo si la persona lo pide)
 
 El banco mide Codex y Antigravity con casos con fallos sembrados y suma el resultado a la evidencia que usa el enrutador. Un hallazgo acierta si señala el archivo y la línea de un fallo sembrado (con 3 líneas de margen) y nombra alguna de las claves del fallo (`claves` en `esperado.json`) en su categoría, su descripción o su evidencia; la categoría no tiene que coincidir. Desde el README de un caso de documentación solo vale una clave propia de ese fallo. Lo medido se suma a `~/.nexakit/fabrica/evidencia.json` por modelo, esfuerzo y estación: el enrutador elige con ella el modelo más barato que alcanza el umbral del riesgo (cuantil del 5 %), y la fase 2 saca de ella sus finalistas. Gasta tokens: nunca lo lances por tu cuenta, ni siquiera cuando un aviso de evidencia lo sugiera.

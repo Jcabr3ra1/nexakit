@@ -17,6 +17,24 @@ La fábrica pasa tus cambios por estaciones (seguridad, arquitectura, pruebas, c
 
 Las IA externas nunca escriben: se deniegan los cambios de archivos y los permisos de escritura, y las órdenes solo se aprueban si la estación las declara.
 
+## Preferencias y revisión cruzada
+
+`fabrica preferencias [--criterio calidad|barato] [--revision-cruzada si|no] [--json]` muestra o guarda el criterio global con que se elige cada modelo (por defecto, `barato`; `calidad` elige por la mejor calidad medida) y la revisión cruzada (por defecto, `si`): la estación `codigo` la revisan Claude, Codex y Antigravity, y un hallazgo señalado por varias IA aparece con «coinciden N IA» y más confianza. Con `--cambios` puedes ajustar una revisión adicional con `codigo-codex` o `codigo-antigravity`.
+
+## Encargar: delegar código en Codex o Antigravity
+
+`nexakit encargar` (herramienta MCP `fabrica_encargar`) delega una tarea de programación con diseño claro en Codex o Antigravity. Las tareas exigentes, altas o de seguridad siguen con subagentes de Claude.
+
+```text
+~/.nexakit/nexakit encargar --ia codex|antigravity|auto --encargo <archivo.md> [--modelo <m>] [--esfuerzo <e>] [--ordenes <archivo.json>] [--tiempo <min>]
+```
+
+- **Copia aislada.** La IA trabaja en un `git worktree` de `HEAD` en `~/.nexakit/encargos/<id>/repo`, que se borra siempre. Devuelve `cambios.diff` (para `git apply`), `informe.json` y el resumen de la IA. `node_modules` se enlaza en solo lectura si está ignorado.
+- **Límites.** Codex corre en `workspace-write`, sin red y sin las reglas de `~/.codex/rules` (un `CODEX_HOME` temporal). Antigravity solo escribe dentro de la copia y en esta versión no ejecuta órdenes. Las órdenes extra (`--ordenes`) requieren aprobación de la persona.
+- **Encargo `invalido`.** Si hay escrituras fuera de la copia (no edites el repo mientras corre), enlaces que salen del repo o cambios en `.git`, `.claude`, `.codex`, `.gemini`, `.agents`, `.nexakit`, `.vscode`, `.husky` o `.github/workflows`.
+- **Un trabajo a la vez**, con el mismo candado que la fábrica. Los encargos caducan a los 90 días.
+- **Revisión cruzada del diff.** El orquestador revisa el diff, lo aplica, ejecuta las pruebas y lo pasa por al menos una IA distinta de la que lo escribió; si falla, lo resuelve con Claude. Informa en una línea qué IA hizo cada encargo.
+
 ## Servidor y orden equivalente
 
 El servidor MCP es `nexakit-fabrica` (`bin/nexakit-fabrica-mcp.js`); la raíz es el directorio del proceso. Desde la terminal:
@@ -27,6 +45,7 @@ El servidor MCP es `nexakit-fabrica` (`bin/nexakit-fabrica-mcp.js`); la raíz es
 ~/.nexakit/nexakit fabrica estado --id <id>
 ~/.nexakit/nexakit fabrica resultado --id <id> [--veredictos <archivo.json>]
 ~/.nexakit/nexakit fabrica cancelar --id <id>
+~/.nexakit/nexakit fabrica preferencias [--criterio calidad|barato] [--revision-cruzada si|no]
 ~/.nexakit/nexakit fabrica banco planificar [--fase 1|2] [--estacion <estacion>]
 ~/.nexakit/nexakit fabrica banco ejecutar --huella <huella>
 ```
