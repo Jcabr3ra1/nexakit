@@ -819,6 +819,8 @@ test('el candado global de encargos: se toma con pid, id y fecha, se libera siem
   // Un candado de un proceso muerto, o ilegible, se sustituye.
   for (const viejo of [JSON.stringify({ pid: pidMuerto(), id: null, fecha: '' }), 'basura']) {
     writeFileSync(archivo, viejo);
+    const antiguo = new Date(Date.now() - 120_000);
+    utimesSync(archivo, antiguo, antiguo);
     const nuevo = fabrica('codex', async () => okDe());
     const r = await ejecutarEncargo(opciones(e, { conectores: { codex: nuevo.crear } }));
     assert.equal(r.estado, 'sin-cambios');
