@@ -56,8 +56,42 @@ async function huellaArchivo(ruta: string): Promise<string | undefined> {
 }
 
 /**
- * Recorre una carpeta de metadatos de Git (`hooks`, `info`) sin seguir enlaces: cada archivo con su contenido y su modo
- * (un hook que pasa a ejecutable cuenta), cada enlace con su destino. Una carpeta ausente queda como `absent`.
+ * Huella de un archivo de configuración de Git (`config`, `config.worktree`) con su tipo: ausente, archivo regular (su
+ * contenido), enlace simbólico (su destino y el contenido del destino resuelto con `realpath`, de modo que editar el
+ * destino se nota) u otra cosa. Nunca colapsa a «ausente» un enlace ni un tipo raro.
+ */
+async function huellaConfigGit(ruta: string, clave: string, entradas: Instantanea): Promise<void> {
+  let info;
+  try {
+    info = await lstat(ruta);
+  } catch (error) {
+    if (codigoError(error) !== 'ENOENT') throw error;
+    entradas.set(clave, { kind: 'git', sha256: digest('absent') });
+    return;
+  }
+  if (info.isSymbolicLink()) {
+    const destino = await readlink(ruta);
+    let contenido = 'unresolved';
+    try {
+      // `realpath` ya no pasa por enlaces: el destino es el archivo de verdad (o algo que no es un archivo).
+      contenido = (await huellaArchivo(await realpath(ruta))) ?? 'not-a-file';
+    } catch (error) {
+      if (codigoError(error) !== 'ENOENT') throw error;
+    }
+    entradas.set(clave, { kind: 'git-symlink', sha256: digest(`${destino}\0${contenido}`) });
+    return;
+  }
+  if (!info.isFile()) {
+    entradas.set(clave, { kind: 'git-other' });
+    return;
+  }
+  entradas.set(clave, { kind: 'git', sha256: (await huellaArchivo(ruta)) ?? digest('absent') });
+}
+
+/**
+ * Recorre una carpeta de metadatos de Git (`hooks`, `info`): cada archivo con su contenido y su modo (un hook que pasa
+ * a ejecutable cuenta), cada enlace con su destino. Una carpeta ausente queda como `absent`. Si la propia carpeta es un
+ * enlace se anota su destino y se recorre el destino resuelto con `realpath` (los enlaces de dentro no se siguen).
  */
 async function recorrerCarpetaGit(carpeta: string, clave: string, entradas: Instantanea): Promise<void> {
   let raizInfo;
@@ -68,22 +102,33 @@ async function recorrerCarpetaGit(carpeta: string, clave: string, entradas: Inst
     entradas.set(clave, { kind: 'git', sha256: digest('absent') });
     return;
   }
+  let directorio = carpeta;
+  if (raizInfo.isSymbolicLink()) {
+    entradas.set(clave, { kind: 'git-symlink', sha256: digest(await readlink(carpeta)) });
+    try {
+      directorio = await realpath(carpeta);
+      raizInfo = await lstat(directorio);
+    } catch (error) {
+      if (codigoError(error) !== 'ENOENT') throw error;
+      entradas.set(`${clave}/@destino`, { kind: 'git-unresolved' });
+      return;
+    }
+  }
   if (!raizInfo.isDirectory()) {
-    const destino = raizInfo.isSymbolicLink() ? await readlink(carpeta) : '';
-    entradas.set(clave, { kind: raizInfo.isSymbolicLink() ? 'git-symlink' : 'git-other', sha256: digest(destino) });
+    entradas.set(directorio === carpeta ? clave : `${clave}/@destino`, { kind: 'git-other' });
     return;
   }
   let contadas = 0;
-  const pendientes: Array<[string, string]> = [[carpeta, clave]];
+  const pendientes: Array<[string, string]> = [[directorio, clave]];
   while (pendientes.length > 0) {
-    const [directorio, prefijo] = pendientes.shift() as [string, string];
-    for (const nombre of (await readdir(directorio)).sort()) {
+    const [dir, prefijo] = pendientes.shift() as [string, string];
+    for (const nombre of (await readdir(dir)).sort()) {
       contadas += 1;
       if (contadas > MAX_ENTRADAS_GIT) {
         entradas.set(`${clave}/…`, { kind: 'git-truncated' });
         return;
       }
-      const completa = path.join(directorio, nombre);
+      const completa = path.join(dir, nombre);
       const relativa = `${prefijo}/${nombre}`;
       const info = await lstat(completa);
       if (info.isSymbolicLink()) {
@@ -112,7 +157,7 @@ async function instantaneaConfigGit(raiz: string, entradas: Instantanea): Promis
     ['.git/config', path.join(comun, 'config')],
     ['.git/config.worktree', await rutaGit('config.worktree')],
   ] as const) {
-    entradas.set(clave, { kind: 'git', sha256: (await huellaArchivo(ruta)) ?? digest('absent') });
+    await huellaConfigGit(ruta, clave, entradas);
   }
   const hooks = await rutaGit('hooks');
   await recorrerCarpetaGit(hooks, '.git/hooks', entradas);
