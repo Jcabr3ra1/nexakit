@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gitConfigGlobalVacio } from '../test-support/git-aislado.js';
-import { ejecutarEncargo, rutasVetadas, TIEMPO_ENCARGO_MS } from '../dist/fabrica/encargo/ejecutar.js';
+import { ejecutarEncargo, reglaDeOrdenes, rutasVetadas, TIEMPO_ENCARGO_MS } from '../dist/fabrica/encargo/ejecutar.js';
+import { ORDENES_ACTIVAS } from '../dist/fabrica/conectores/antigravity.js';
 import { analizarParche } from '../dist/fabrica/encargo/parche.js';
 import { barrerHuerfanos, borrarWorktree, crearWorktree, diffDelWorktree } from '../dist/fabrica/encargo/worktree.js';
 import { leerCandado } from '../dist/fabrica/encargo/candado.js';
@@ -71,13 +72,15 @@ const okDe = (cambios = {}) => ({
  * Fábrica de un conector falso. `ejecutar(encargo, señal, alProgreso)` hace de la IA; el registro guarda cómo se creó
  * el conector, qué encargos recibió y si se cerró.
  */
-function fabrica(ia, ejecutar, { catalogo = CATALOGO[ia], fallaAlCrear, fallaCatalogo } = {}) {
+function fabrica(ia, ejecutar, { catalogo = CATALOGO[ia], fallaAlCrear, fallaCatalogo, ordenesActivas } = {}) {
   const registro = { creaciones: [], encargos: [], cerrados: 0 };
   const crear = async (escritura) => {
     registro.creaciones.push(escritura);
     if (fallaAlCrear) throw new Error(fallaAlCrear);
     return {
       ia,
+      // Como el conector real de Antigravity, que dice si aprueba órdenes (plataforma y versión de agy).
+      ...(ordenesActivas === undefined ? {} : { ordenesActivas }),
       catalogo: async () => {
         if (fallaCatalogo) throw new Error(fallaCatalogo);
         return catalogo;
@@ -318,6 +321,33 @@ test('una escritura fuera del worktree invalida el encargo y no se guarda el dif
   assert.equal(existsSync(path.join(e.home, '.nexakit', 'encargos', informe.id, 'repo')), false);
 });
 
+test('escribir en .git/hooks, .git/config o .git/info del repo real, o en su node_modules, invalida el encargo', async () => {
+  const casos = [
+    ['.git/hooks/pre-commit', (raiz) => writeFileSync(path.join(raiz, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\nexit 0\n')],
+    ['.git/config', (raiz) => writeFileSync(path.join(raiz, '.git', 'config'), `${readFileSync(path.join(raiz, '.git', 'config'), 'utf8')}[core]\n\tfsmonitor = ./x\n`)],
+    ['.git/info/attributes', (raiz) => writeFileSync(path.join(raiz, '.git', 'info', 'attributes'), '* filter=x\n')],
+    ['node_modules/demo', (raiz) => writeFileSync(path.join(raiz, 'node_modules', 'demo', 'package.json'), '{"name":"demo","scripts":{"postinstall":"x"}}')],
+  ];
+  for (const [ruta, escribir] of casos) {
+    const e = entorno();
+    writeFileSync(path.join(e.raiz, '.gitignore'), 'node_modules\n');
+    mkdirSync(path.join(e.raiz, 'node_modules', 'demo'), { recursive: true });
+    writeFileSync(path.join(e.raiz, 'node_modules', 'demo', 'package.json'), '{"name":"demo"}');
+    git(e.raiz, 'add', '.gitignore');
+    git(e.raiz, 'commit', '-q', '-m', 'ignora node_modules');
+    mkdirSync(path.join(e.raiz, '.git', 'info'), { recursive: true });
+    const codex = fabrica('codex', async (encargo) => {
+      writeFileSync(path.join(encargo.raiz, 'a.txt'), 'dos\n');
+      escribir(e.raiz);
+      return okDe();
+    });
+    const informe = await ejecutarEncargo(opciones(e, { conectores: { codex: codex.crear } }));
+    assert.equal(informe.estado, 'invalido', ruta);
+    assert.ok(informe.escriturasFuera.includes(ruta), `${ruta}: ${informe.escriturasFuera.join(',')}`);
+    assert.equal(informe.rutaDiff, null, ruta);
+  }
+});
+
 test('una escritura en el repo real también invalida un encargo cancelado', async () => {
   const e = entorno();
   const control = new AbortController();
@@ -409,22 +439,65 @@ test('auto cae a Antigravity si Codex no está disponible, con su modelo recomen
   const agy = fabrica('antigravity', async (encargo) => {
     writeFileSync(path.join(encargo.raiz, 'nuevo.txt'), 'hola\n');
     return okDe({ informe: { hallazgos: [], resumen: 'Añadí nuevo.txt.' } });
-  });
+  }, { ordenesActivas: true });
   const informe = await ejecutarEncargo(opciones(e, { ia: 'auto', conectores: { codex: codex.crear, antigravity: agy.crear } }));
   assert.equal(informe.estado, 'ok', informe.motivo);
   assert.equal(informe.ia, 'antigravity');
   assert.equal(informe.modelo, 'gemini-4-hydrogen-medium');
   assert.equal(informe.esfuerzo, null);
   assert.match(informe.avisos.join('\n'), /IA descartada: codex no está disponible: Codex no está instalado/u);
-  // El texto no promete órdenes que Antigravity rechaza.
-  assert.match(agy.registro.encargos[0].instrucciones, /No se aprueba ninguna orden/u);
-  assert.doesNotMatch(agy.registro.encargos[0].instrucciones, /Solo se aprueban estas órdenes/u);
-  // En Antigravity las órdenes se pasan al conector, que en modo escritura no ejecuta ninguna.
+  // Con el conector que aprueba órdenes (macOS y agy verificado), el texto promete solo las de la lista.
+  const instrucciones = agy.registro.encargos[0].instrucciones;
+  assert.match(instrucciones, /solo se aprueban estas órdenes, escritas exactamente así y sin encadenar: `npm test`, `npm run typecheck`/u);
+  assert.match(instrucciones, /BypassSandbox se rechaza/u);
+  assert.doesNotMatch(instrucciones, /No se aprueba ninguna orden/u);
+  // Nunca promete la carpeta temporal de Codex.
+  assert.doesNotMatch(instrucciones, /carpeta temporal/u);
+  // En Antigravity las órdenes se pasan al conector, que las hace cumplir (coincidencia exacta).
   assert.deepEqual(agy.registro.creaciones[0].ordenesPermitidas, ['npm test', 'npm run typecheck']);
   assert.equal(codex.registro.encargos.length, 0);
   assert.equal(codex.registro.cerrados, 1);
   assert.equal(agy.registro.cerrados, 1);
   comprobarLimpio(e, informe);
+});
+
+test('Antigravity sin órdenes activas (otra plataforma o versión de agy): el texto no promete ninguna', async () => {
+  const e = entorno();
+  const agy = fabrica('antigravity', async () => okDe(), { ordenesActivas: false });
+  const informe = await ejecutarEncargo(opciones(e, { ia: 'antigravity', conectores: { antigravity: agy.crear } }));
+  assert.equal(informe.estado, 'sin-cambios', informe.motivo);
+  const instrucciones = agy.registro.encargos[0].instrucciones;
+  assert.match(instrucciones, /No se aprueba ninguna orden: no dependas de ejecutar pruebas/u);
+  assert.doesNotMatch(instrucciones, /solo se aprueban estas órdenes/u);
+  comprobarLimpio(e, informe);
+});
+
+test('un repo sin scripts test ni typecheck y sin --ordenes dice «No se aprueba ninguna orden», también con órdenes activas', async () => {
+  const e = entorno();
+  writeFileSync(path.join(e.raiz, 'package.json'), JSON.stringify({ name: 'demo' }));
+  git(e.raiz, 'commit', '-q', '-am', 'sin scripts');
+  const agy = fabrica('antigravity', async () => okDe(), { ordenesActivas: true });
+  const informe = await ejecutarEncargo(opciones(e, { ia: 'antigravity', conectores: { antigravity: agy.crear } }));
+  assert.equal(informe.estado, 'sin-cambios', informe.motivo);
+  assert.deepEqual(informe.ordenesPorDefecto, []);
+  assert.deepEqual(agy.registro.creaciones[0].ordenesPermitidas, []);
+  const instrucciones = agy.registro.encargos[0].instrucciones;
+  assert.match(instrucciones, /No se aprueba ninguna orden/u);
+  assert.doesNotMatch(instrucciones, /solo se aprueban estas órdenes/u);
+  comprobarLimpio(e, informe);
+});
+
+test('reglaDeOrdenes: ambas ramas se prueban en cualquier sistema inyectando si las órdenes están activas', () => {
+  const lista = ['npm test', 'npm run typecheck'];
+  assert.match(reglaDeOrdenes('antigravity', lista, true), /solo se aprueban estas órdenes, escritas exactamente así y sin encadenar: `npm test`, `npm run typecheck`/u);
+  assert.match(reglaDeOrdenes('antigravity', lista, false), /No se aprueba ninguna orden/u);
+  assert.match(reglaDeOrdenes('antigravity', [], true), /No se aprueba ninguna orden/u);
+  assert.match(reglaDeOrdenes('antigravity', [], false), /No se aprueba ninguna orden/u);
+  // Codex no depende de Antigravity: sus órdenes son una guía.
+  for (const activas of [true, false]) assert.match(reglaDeOrdenes('codex', lista, activas), /usa solo estas órdenes: `npm test`, `npm run typecheck`/u);
+  assert.match(reglaDeOrdenes('codex', [], false), /No se aprueba ninguna orden/u);
+  // Sin el dato se usa la plataforma (el valor de ORDENES_ACTIVAS).
+  assert.equal(reglaDeOrdenes('antigravity', lista), reglaDeOrdenes('antigravity', lista, ORDENES_ACTIVAS));
 });
 
 test('auto sin ninguna IA disponible dice por qué falló cada una', async () => {
@@ -1127,6 +1200,16 @@ test('la poda de encargos caducados quita su worktree con git solo si el repo de
 
 test('sin conectores inyectados, el conector real de Codex (con NEXAKIT_FABRICA_CODEX) recibe la copia como raíz escribible', async () => {
   const e = entorno();
+  // Un secreto en la carpeta personal de pruebas (que el perfil de macOS debe vetar) y un node_modules ignorado del repo
+  // real (que el worktree enlaza y el perfil deja leer).
+  mkdirSync(path.join(e.home, '.ssh'));
+  writeFileSync(path.join(e.home, '.ssh', 'id_test'), 'secreto');
+  // Sin barra final: un patrón `node_modules/` no ignora el enlace y el worktree lo quitaría.
+  writeFileSync(path.join(e.raiz, '.gitignore'), 'node_modules\n');
+  git(e.raiz, 'add', '-A');
+  git(e.raiz, 'commit', '-q', '-m', 'ignorar node_modules');
+  mkdirSync(path.join(e.raiz, 'node_modules', 'dep'), { recursive: true });
+  writeFileSync(path.join(e.raiz, 'node_modules', 'dep', 'index.js'), 'x');
   const guiones = fileURLToPath(new URL('../test-support/fabrica/', import.meta.url));
   const servidor = path.join(guiones, 'servidor-falso.mjs');
   const catalogo = JSON.parse(readFileSync(path.join(guiones, 'codex-catalogo.json'), 'utf8'));
@@ -1136,7 +1219,17 @@ test('sin conectores inyectados, el conector real de Codex (con NEXAKIT_FABRICA_
   const registro = path.join(dir, 'registro.ndjson');
   const registroEnv = path.join(dir, 'env.json');
   const rutaGuion = path.join(dir, 'guion.json');
-  writeFileSync(rutaGuion, JSON.stringify({ ...revision, metodos: { ...revision.metodos, 'model/list': catalogo.metodos['model/list'] }, registro, registroEnv }));
+  // En macOS el conector exige que Codex active el perfil de lectura acotada; en otras plataformas se ignora.
+  const hiloConPerfil = {
+    ...revision.metodos['thread/start'],
+    resultado: { ...revision.metodos['thread/start'].resultado, activePermissionProfile: { id: 'nexakit-encargo', extends: null } },
+  };
+  writeFileSync(rutaGuion, JSON.stringify({
+    ...revision,
+    metodos: { ...revision.metodos, 'thread/start': hiloConPerfil, 'model/list': catalogo.metodos['model/list'] },
+    registro,
+    registroEnv,
+  }));
   // CODEX_HOME de pruebas: el home aislado del modo escritura nunca enlaza el auth.json de la persona.
   const codexHome = path.join(dir, 'codex-home');
   mkdirSync(codexHome);
@@ -1163,16 +1256,36 @@ test('sin conectores inyectados, el conector real de Codex (con NEXAKIT_FABRICA_
   const turno = mensajes.find((m) => m.method === 'turn/start').params;
   const carpeta = path.join(realpathSync(e.home), '.nexakit', 'encargos', informe.id);
   const copia = path.join(carpeta, 'repo');
-  assert.equal(hilo.sandbox, 'workspace-write');
   assert.equal(hilo.approvalPolicy, 'never');
   assert.equal(hilo.cwd, copia);
   assert.equal(turno.cwd, copia);
-  // La copia es la única raíz escribible del repo; la otra es la carpeta temporal del encargo, fuera del repo real.
-  assert.deepEqual(turno.sandboxPolicy.writableRoots, [copia, path.join(carpeta, 'tmp')]);
-  assert.equal(turno.sandboxPolicy.networkAccess, false);
-  assert.deepEqual(hilo.config.sandbox_workspace_write.writable_roots, [copia, path.join(carpeta, 'tmp')]);
-  assert.ok(!turno.sandboxPolicy.writableRoots.some((r) => r.startsWith(realpathSync(e.raiz))), 'el repo real nunca es escribible');
   const env = JSON.parse(readFileSync(registroEnv, 'utf8'));
+  if (process.platform === 'darwin') {
+    // Perfil de permisos del CODEX_HOME aislado: la copia y su carpeta temporal escribibles, el home del encargo vetado
+    // salvo ese camino (aquí, la carpeta personal de pruebas), sin red.
+    assert.equal('sandbox' in hilo, false);
+    assert.equal('sandboxPolicy' in turno, false);
+    const escribibles = [...env.config.matchAll(/^(".*") = "write"$/gmu)].map((m) => JSON.parse(m[1]));
+    assert.deepEqual(escribibles, [copia, path.join(carpeta, 'tmp')]);
+    assert.ok(!escribibles.some((r) => r.startsWith(realpathSync(e.raiz))), 'el repo real nunca es escribible');
+    assert.match(env.config, /^\[permissions\.nexakit-encargo\.network\]\nenabled = false$/mu);
+    // El home del encargo (el de pruebas, no `os.homedir()`) llega al conector: su `.ssh` queda vetado, y el repo real solo
+    // se lee en su `node_modules` enlazado y su `.git`.
+    const entradas = (acceso) => [...env.config.matchAll(new RegExp(`^(".*") = "${acceso}"$`, 'gmu'))].map((m) => JSON.parse(m[1]));
+    assert.ok(entradas('none').includes(path.join(realpathSync(e.home), '.ssh')), 'el .ssh del home del encargo queda vetado');
+    const raizReal = realpathSync(e.raiz);
+    const leidas = entradas('read');
+    assert.ok(leidas.includes(path.join(raizReal, 'node_modules')), 'node_modules enlazado legible');
+    assert.ok(leidas.includes(path.join(raizReal, '.git')), '.git del repo real legible');
+    assert.ok(!leidas.includes(raizReal), 'el repo real entero no es legible');
+  } else {
+    assert.equal(hilo.sandbox, 'workspace-write');
+    // La copia es la única raíz escribible del repo; la otra es la carpeta temporal del encargo, fuera del repo real.
+    assert.deepEqual(turno.sandboxPolicy.writableRoots, [copia, path.join(carpeta, 'tmp')]);
+    assert.equal(turno.sandboxPolicy.networkAccess, false);
+    assert.deepEqual(hilo.config.sandbox_workspace_write.writable_roots, [copia, path.join(carpeta, 'tmp')]);
+    assert.ok(!turno.sandboxPolicy.writableRoots.some((r) => r.startsWith(realpathSync(e.raiz))), 'el repo real nunca es escribible');
+  }
   assert.notEqual(env.home, codexHome, 'CODEX_HOME aislado');
   assert.equal(env.temporales.TMPDIR, path.join(carpeta, 'tmp'));
   assert.match(turno.input[0].text, /Para comprobar tu trabajo usa solo estas órdenes: `npm test`, `npm run typecheck`/u);

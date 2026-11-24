@@ -1,12 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, readdirSync, readlinkSync, mkdtempSync, realpathSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readlinkSync, mkdtempSync, realpathSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Ajv } from 'ajv';
-import { crearConectorCodex, crearHomeAislado, esShellDelSistema, ordenPermitida, versionTiposCodex } from '../dist/fabrica/conectores/codex.js';
+import {
+  configDePerfil, crearConectorCodex, crearHomeAislado, esShellDelSistema, lecturasDeEjecutable, lecturasDelWorktree, ordenPermitida,
+  perfilDeEncargo, PERFIL_ENCARGO, versionTiposCodex, vetosDeLectura,
+} from '../dist/fabrica/conectores/codex.js';
 import { hallazgosJsonSchema } from '../dist/fabrica/esquemas.js';
 import { resolveCliInvocation } from '../src/cli-executable.js';
 
@@ -36,7 +39,9 @@ function preparar(nombre, cambios = {}, opcionesConector = {}) {
   guion.registro = join(dir, 'registro.ndjson');
   const rutaGuion = join(dir, 'guion.json');
   writeFileSync(rutaGuion, JSON.stringify(guion));
-  const conector = crearConectorCodex({ orden: process.execPath, argsPrefijo: [SERVIDOR, rutaGuion], ...opcionesConector });
+  // El modo escritura acota la lectura solo en macOS: estas pruebas fijan otra plataforma salvo que pidan darwin (con un
+  // home falso), para no depender del sistema ni recorrer la carpeta personal de quien las ejecuta.
+  const conector = crearConectorCodex({ orden: process.execPath, argsPrefijo: [SERVIDOR, rutaGuion], plataforma: 'linux', ...opcionesConector });
   return {
     dir,
     rutaGuion,
@@ -409,6 +414,421 @@ test('con escritura: { raiz, tmp } la carpeta temporal del encargo es la otra ra
     rmSync(dir, { recursive: true, force: true });
   }
   await assert.rejects(crearConectorCodex({ escritura: { raiz: tmpdir(), tmp: 'relativa' } }), /carpeta temporal del encargo debe ser una ruta absoluta/);
+});
+
+/** Carpeta personal falsa con secretos, otro proyecto, otro encargo y la copia y la carpeta temporal de un encargo. */
+function homeFalso() {
+  const home = realpathSync(mkdtempSync(join(tmpdir(), 'nexakit-home-falso-')));
+  const crear = (ruta, contenido = 'secreto') => {
+    mkdirSync(join(home, ruta, '..'), { recursive: true });
+    writeFileSync(join(home, ruta), contenido);
+  };
+  crear('.ssh/id_ed25519');
+  crear('.aws/credentials');
+  crear('.npmrc');
+  crear('.nexakit/fabrica/preferencias.json');
+  crear('.nexakit/encargos/otro/cambios.diff');
+  crear('proyectos/real/src/a.ts');
+  crear('proyectos/real/secreto.env');
+  crear('proyectos/real/node_modules/zod/index.js');
+  crear('proyectos/real/.git/HEAD');
+  crear('proyectos/otro/README.md');
+  crear('.nexakit/encargos/e1/repo/package.json', '{}');
+  mkdirSync(join(home, '.nexakit/encargos/e1/tmp'));
+  return {
+    home,
+    raiz: join(home, '.nexakit/encargos/e1/repo'),
+    tmp: join(home, '.nexakit/encargos/e1/tmp'),
+    limpiar: () => rmSync(home, { recursive: true, force: true }),
+  };
+}
+
+test('vetosDeLectura veta la carpeta personal entera salvo el camino hasta cada ruta permitida', () => {
+  const h = homeFalso();
+  try {
+    const real = join(h.home, 'proyectos/real');
+    const vetos = vetosDeLectura(h.home, [h.raiz, h.tmp, join(real, 'node_modules'), join(real, '.git')]).sort();
+    assert.deepEqual(vetos, [
+      '.aws', '.npmrc', '.nexakit/encargos/otro', '.nexakit/fabrica', '.ssh', 'proyectos/otro', 'proyectos/real/secreto.env',
+      'proyectos/real/src',
+    ].map((r) => join(h.home, r)).sort());
+    // Sin nada permitido dentro, la carpeta entera.
+    assert.deepEqual(vetosDeLectura(join(h.home, '.ssh'), [h.raiz]), [join(h.home, '.ssh')]);
+    // Dentro de una ruta permitida no se veta nada.
+    assert.deepEqual(vetosDeLectura(h.raiz, [h.raiz]), []);
+  } finally {
+    h.limpiar();
+  }
+});
+
+test('vetosDeLectura falla cerrado con un nombre que Codex no sabe vetar', () => {
+  const h = homeFalso();
+  try {
+    mkdirSync(join(h.home, 'fotos[2024]'));
+    assert.throws(() => vetosDeLectura(h.home, [h.raiz]), /No se puede vetar la lectura de .*fotos\[2024\]/);
+  } finally {
+    h.limpiar();
+  }
+});
+
+test('perfilDeEncargo: todo legible salvo el home vetado, las lecturas imprescindibles y las raíces escribibles', () => {
+  const h = homeFalso();
+  try {
+    const nodeModules = join(h.home, 'proyectos/real/node_modules');
+    const entradas = perfilDeEncargo({
+      home: h.home,
+      escribibles: [h.raiz, h.tmp],
+      // `/` (un ejecutable en /bin) anularía el veto y se ignora; lo que ya es escribible o está dentro de otra lectura, también.
+      legibles: [nodeModules, join(nodeModules, 'zod'), join(h.raiz, 'package.json'), join(h.home, '..', '..')],
+    });
+    assert.deepEqual(entradas[0], { ruta: ':root', acceso: 'read' });
+    assert.deepEqual(entradas.filter((e) => e.acceso === 'read').map((e) => e.ruta), [':root', nodeModules]);
+    assert.deepEqual(entradas.filter((e) => e.acceso === 'write').map((e) => e.ruta), [h.raiz, h.tmp]);
+    const vetadas = entradas.filter((e) => e.acceso === 'none').map((e) => e.ruta);
+    for (const r of ['.ssh', '.aws', '.npmrc', '.nexakit/encargos/otro', 'proyectos/real/src', 'proyectos/real/.git']) {
+      assert.ok(vetadas.includes(join(h.home, r)), r);
+    }
+    assert.equal(vetadas.some((r) => h.raiz.startsWith(r) || nodeModules.startsWith(r)), false, 'ningún antecesor vetado');
+
+    const toml = configDePerfil(entradas, h.tmp);
+    assert.match(toml, new RegExp(`^default_permissions = "${PERFIL_ENCARGO}"$`, 'm'));
+    assert.match(toml, /^\[permissions\.nexakit-encargo\.network\]\nenabled = false$/m);
+    assert.ok(toml.includes(`${JSON.stringify(join(h.home, '.ssh'))} = "none"`));
+    assert.ok(toml.includes(`[shell_environment_policy.set]\nHOME = ${JSON.stringify(h.tmp)}`));
+    assert.equal(configDePerfil([{ ruta: '/a\u007fb', acceso: 'none' }]).includes('"/a\\u007Fb" = "none"'), true, 'DEL escapado');
+  } finally {
+    h.limpiar();
+  }
+});
+
+/** Las rutas con acceso `acceso` que trae un config.toml de perfil. */
+const entradasDe = (config, acceso) => [...config.matchAll(new RegExp(`^(".*") = "${acceso}"$`, 'gmu'))].map((m) => JSON.parse(m[1]));
+
+test('vetosDeLectura no sigue enlaces simbólicos (a carpetas, a rutas permitidas o rotos): se vetan como entrada', { skip: !POSIX }, () => {
+  const h = homeFalso();
+  try {
+    symlinkSync(join(h.home, '.ssh'), join(h.home, 'enlace-ssh'));
+    symlinkSync(join(h.home, 'no-existe'), join(h.home, 'enlace-roto'));
+    symlinkSync(h.raiz, join(h.home, '.nexakit', 'encargos', 'enlace-a-e1'));
+    const vetos = vetosDeLectura(h.home, [h.raiz, h.tmp]);
+    for (const r of ['enlace-ssh', 'enlace-roto', '.nexakit/encargos/enlace-a-e1']) {
+      assert.ok(vetos.includes(join(h.home, r)), `${r} vetado como entrada`);
+    }
+    // Lo que cuelga de un enlace no se recorre: nunca aparece una ruta que pase por él.
+    assert.equal(vetos.some((v) => v.startsWith(`${join(h.home, 'enlace-ssh')}/`)), false);
+    // La copia real sigue sin vetar, ni ella ni su camino.
+    assert.equal(vetos.some((v) => h.raiz === v || h.raiz.startsWith(`${v}/`)), false);
+  } finally {
+    h.limpiar();
+  }
+});
+
+test('vetosDeLectura: un hermano con prefijo compartido de una ruta permitida se veta, y la permitida no', () => {
+  const h = homeFalso();
+  try {
+    // `e10` y `e1-copia` empiezan igual que `e1` (la carpeta del encargo), `repo2` igual que `repo`.
+    for (const ruta of ['.nexakit/encargos/e10/repo/x.js', '.nexakit/encargos/e1-copia/x.js', '.nexakit/encargos/e1/repo2/x.js', '.nexakit/encargos/e1/tmp2/x.js']) {
+      mkdirSync(join(h.home, ruta, '..'), { recursive: true });
+      writeFileSync(join(h.home, ruta), 'x');
+    }
+    const vetos = vetosDeLectura(h.home, [h.raiz, h.tmp]);
+    for (const r of ['.nexakit/encargos/e10', '.nexakit/encargos/e1-copia', '.nexakit/encargos/e1/repo2', '.nexakit/encargos/e1/tmp2']) {
+      assert.ok(vetos.includes(join(h.home, r)), `${r} vetado`);
+    }
+    for (const permitida of [h.raiz, h.tmp, join(h.home, '.nexakit/encargos/e1'), join(h.home, '.nexakit/encargos'), join(h.home, '.nexakit')]) {
+      assert.equal(vetos.includes(permitida), false, `${relative(h.home, permitida)} no se veta`);
+    }
+    // El mismo caso en perfilDeEncargo, con una lectura (la carpeta de un paquete) que comparte prefijo con otra.
+    const paquete = join(h.home, 'proyectos/real/node_modules');
+    mkdirSync(join(h.home, 'proyectos/real/node_modules2'), { recursive: true });
+    const vetadas = perfilDeEncargo({ home: h.home, escribibles: [h.raiz, h.tmp], legibles: [paquete] }).filter((e) => e.acceso === 'none').map((e) => e.ruta);
+    assert.ok(vetadas.includes(join(h.home, 'proyectos/real/node_modules2')));
+    assert.equal(vetadas.includes(paquete), false);
+  } finally {
+    h.limpiar();
+  }
+});
+
+test('lecturasDelWorktree: el node_modules enlazado y el gitdir (propio y común) de un worktree salen para leer', { skip: !POSIX }, () => {
+  const h = homeFalso();
+  try {
+    const real = join(h.home, 'proyectos/real');
+    const nodeModules = join(real, 'node_modules');
+    const propio = join(real, '.git/worktrees/e1');
+    mkdirSync(propio, { recursive: true });
+    writeFileSync(join(propio, 'commondir'), '../..\n');
+    symlinkSync(nodeModules, join(h.raiz, 'node_modules'));
+    writeFileSync(join(h.raiz, '.git'), `gitdir: ${propio}\n`);
+    assert.deepEqual(lecturasDelWorktree(h.raiz), [realpathSync(nodeModules), realpathSync(propio), realpathSync(join(real, '.git'))]);
+
+    // Sin `commondir` el gitdir propio es el común.
+    rmSync(join(propio, 'commondir'));
+    assert.deepEqual(lecturasDelWorktree(h.raiz), [realpathSync(nodeModules), realpathSync(propio), realpathSync(propio)]);
+
+    // Un `gitdir:` relativo se resuelve desde la copia.
+    writeFileSync(join(h.raiz, '.git'), `gitdir: ${relative(h.raiz, propio)}\n`);
+    assert.equal(lecturasDelWorktree(h.raiz)[1], realpathSync(propio));
+
+    // Un node_modules que es una carpeta normal, o un `.git` que es una carpeta, no piden lectura fuera de la copia.
+    rmSync(join(h.raiz, 'node_modules'));
+    rmSync(join(h.raiz, '.git'));
+    mkdirSync(join(h.raiz, 'node_modules'));
+    mkdirSync(join(h.raiz, '.git'));
+    assert.deepEqual(lecturasDelWorktree(h.raiz), []);
+    // Un `.git` con un gitdir que no existe no rompe nada.
+    rmSync(join(h.raiz, '.git'), { recursive: true });
+    writeFileSync(join(h.raiz, '.git'), 'gitdir: /no/existe/worktrees/e1\n');
+    assert.deepEqual(lecturasDelWorktree(h.raiz), []);
+  } finally {
+    h.limpiar();
+  }
+});
+
+test('lecturasDeEjecutable: dentro de la carpeta personal no abre ~/.cargo ni ~/.bun enteros, solo el paquete o el ejecutable y su lib', { skip: !POSIX }, () => {
+  const h = homeFalso();
+  const crear = (ruta, contenido = 'x') => {
+    mkdirSync(join(h.home, ruta, '..'), { recursive: true });
+    writeFileSync(join(h.home, ruta), contenido);
+  };
+  try {
+    // ~/.cargo/bin/codex: solo su carpeta; el registro y las credenciales de cargo quedan vetados.
+    crear('.cargo/bin/codex');
+    crear('.cargo/registry/index/secreto');
+    crear('.cargo/credentials.toml');
+    assert.deepEqual(lecturasDeEjecutable(join(h.home, '.cargo/bin/codex'), h.home), [join(h.home, '.cargo/bin')]);
+
+    // ~/.nvm/versions/node/v22/bin/node: su carpeta y `../lib` (npm); no `include` ni `share`.
+    crear('.nvm/versions/node/v22/bin/node');
+    crear('.nvm/versions/node/v22/lib/node_modules/npm/package.json', '{}');
+    crear('.nvm/versions/node/v22/include/node/node.h');
+    assert.deepEqual(lecturasDeEjecutable(join(h.home, '.nvm/versions/node/v22/bin/node'), h.home), [
+      join(h.home, '.nvm/versions/node/v22/bin'), join(h.home, '.nvm/versions/node/v22/lib'),
+    ]);
+
+    // ~/.bun/bin/codex es un enlace a un paquete: solo la carpeta del paquete (su `vendor` incluido), no ~/.bun.
+    const paquete = join(h.home, '.bun/install/global/node_modules/@openai/codex');
+    crear('.bun/install/global/node_modules/@openai/codex/package.json', '{}');
+    crear('.bun/install/global/node_modules/@openai/codex/bin/codex.js');
+    crear('.bun/install/global/node_modules/@openai/codex/vendor/x/codex');
+    crear('.bun/install/cache/secreto');
+    mkdirSync(join(h.home, '.bun/bin'), { recursive: true });
+    symlinkSync(join(paquete, 'bin/codex.js'), join(h.home, '.bun/bin/codex'));
+    assert.deepEqual(lecturasDeEjecutable(join(h.home, '.bun/bin/codex'), h.home), [realpathSync(paquete)]);
+
+    // En el perfil, lo demás de esas carpetas queda vetado y lo permitido, legible.
+    const entradas = perfilDeEncargo({
+      home: h.home,
+      escribibles: [h.raiz, h.tmp],
+      legibles: ['.cargo/bin/codex', '.nvm/versions/node/v22/bin/node', '.bun/bin/codex'].flatMap((r) => lecturasDeEjecutable(join(h.home, r), h.home)),
+    });
+    const vetadas = entradas.filter((e) => e.acceso === 'none').map((e) => e.ruta);
+    for (const r of ['.cargo/registry', '.cargo/credentials.toml', '.nvm/versions/node/v22/include', '.bun/install/cache']) {
+      assert.ok(vetadas.includes(join(h.home, r)), `${r} vetado`);
+    }
+    const leidas = entradas.filter((e) => e.acceso === 'read').map((e) => e.ruta);
+    assert.ok(leidas.includes(join(h.home, '.cargo/bin')));
+    assert.ok(leidas.includes(realpathSync(paquete)));
+    assert.equal(leidas.includes(join(h.home, '.cargo')), false);
+    assert.equal(leidas.includes(join(h.home, '.bun')), false);
+  } finally {
+    h.limpiar();
+  }
+});
+
+test('lecturasDeEjecutable: fuera de la carpeta personal vale el prefijo; un ejecutable suelto en ella, solo él; rutas inexistentes, nada', { skip: !POSIX }, () => {
+  const h = homeFalso();
+  const fuera = realpathSync(mkdtempSync(join(tmpdir(), 'nexakit-instalacion-')));
+  try {
+    mkdirSync(join(fuera, 'bin'));
+    writeFileSync(join(fuera, 'bin', 'codex'), 'x');
+    assert.deepEqual(lecturasDeEjecutable(join(fuera, 'bin', 'codex'), h.home), [fuera]);
+    writeFileSync(join(h.home, 'codex-suelto'), 'x');
+    assert.deepEqual(lecturasDeEjecutable(join(h.home, 'codex-suelto'), h.home), [join(h.home, 'codex-suelto')]);
+    assert.deepEqual(lecturasDeEjecutable(join(h.home, 'no-existe'), h.home), []);
+    assert.deepEqual(lecturasDeEjecutable('codex', h.home), []);
+    assert.deepEqual(lecturasDeEjecutable('', h.home), []);
+  } finally {
+    h.limpiar();
+    rmSync(fuera, { recursive: true, force: true });
+  }
+});
+
+test('en macOS el perfil da lectura al node_modules y al .git del repo real y al CODEX_HOME aislado, y el resto del home queda vetado', { skip: !POSIX }, async () => {
+  const h = homeFalso();
+  const real = join(h.home, 'proyectos/real');
+  const propio = join(real, '.git/worktrees/e1');
+  mkdirSync(propio, { recursive: true });
+  writeFileSync(join(propio, 'commondir'), '../..\n');
+  symlinkSync(join(real, 'node_modules'), join(h.raiz, 'node_modules'));
+  writeFileSync(join(h.raiz, '.git'), `gitdir: ${propio}\n`);
+  const p = preparar('revision', { metodos: guionConPerfil({ id: PERFIL_ENCARGO, extends: null }) }, {
+    escritura: { raiz: h.raiz, tmp: h.tmp }, plataforma: 'darwin', home: h.home,
+  });
+  const registroEnv = join(p.dir, 'env.json');
+  const guion = JSON.parse(readFileSync(p.rutaGuion, 'utf8'));
+  writeFileSync(p.rutaGuion, JSON.stringify({ ...guion, registroEnv }));
+  try {
+    const resultado = await (await p.conector).ejecutar(encargo(h.raiz), new AbortController().signal);
+    assert.equal(resultado.estado, 'ok', resultado.motivo);
+    const { config, home: codexHome } = JSON.parse(readFileSync(registroEnv, 'utf8'));
+    const leidas = entradasDe(config, 'read');
+    const vetadas = entradasDe(config, 'none');
+    // Lectura: el node_modules real, el gitdir común del repo real y el CODEX_HOME aislado (en su ruta canónica).
+    assert.ok(leidas.includes(join(real, 'node_modules')), 'node_modules real');
+    assert.ok(leidas.includes(join(real, '.git')), '.git del repo real');
+    assert.ok(leidas.includes(realpathSync(codexHome)), 'CODEX_HOME aislado');
+    // Fuera de eso, el resto de la carpeta personal falsa sigue vetado, sin que un veto cubra lo permitido.
+    for (const r of ['.ssh', '.aws', '.npmrc', 'proyectos/otro', 'proyectos/real/src', 'proyectos/real/secreto.env', '.nexakit/encargos/otro', '.nexakit/fabrica']) {
+      assert.ok(vetadas.includes(join(h.home, r)), `${r} vetado`);
+    }
+    for (const permitida of [join(real, 'node_modules'), join(real, '.git'), h.raiz, h.tmp]) {
+      assert.equal(vetadas.some((v) => permitida === v || permitida.startsWith(`${v}/`)), false, `${permitida} no queda vetado`);
+    }
+    // Nada dentro de la carpeta personal es legible salvo lo anterior.
+    const dentro = leidas.filter((r) => r !== ':root' && (r === h.home || r.startsWith(`${h.home}/`)));
+    assert.deepEqual(dentro.sort(), [join(real, '.git'), join(real, 'node_modules')].sort());
+  } finally {
+    await p.limpiar();
+    h.limpiar();
+  }
+});
+
+/** El guion `revision` con la respuesta de `config/read` que se dé (por ejemplo, con capas de proyecto). */
+function guionConConfigLeida(resultado) {
+  const base = JSON.parse(readFileSync(join(GUIONES, 'codex-revision.json'), 'utf8'));
+  return { ...base.metodos, 'config/read': { ...base.metodos['config/read'], resultado } };
+}
+
+test('modo escritura: una config de proyecto (.codex/config.toml) que Codex aplicaría detiene el encargo; la desactivada por falta de confianza vale', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'nexakit-codex-raiz-'));
+  const raiz = join(dir, 'repo');
+  mkdirSync(raiz);
+  const carpeta = join(raiz, '.codex');
+  const capa = (extra = {}) => ({ name: { type: 'project', dotCodexFolder: carpeta }, version: 'sha256:x', config: { default_permissions: 'evil' }, ...extra });
+  const usuario = { name: { type: 'user', file: '/x/config.toml', profile: null }, version: 'sha256:y', config: {} };
+  const base = { config: {}, origins: {} };
+  try {
+    for (const [layers, motivo] of [
+      [[capa(), usuario], /Codex aplicaría la configuración del proyecto \(.*\.codex\).*redefinir el perfil de permisos/],
+      [[usuario, capa({ disabledReason: '' })], /Codex aplicaría la configuración del proyecto/],
+      [null, /No se pudo comprobar que Codex ignore la configuración del proyecto/],
+      [undefined, /No se pudo comprobar que Codex ignore la configuración del proyecto/],
+    ]) {
+      const p = preparar('revision', { metodos: guionConConfigLeida({ ...base, layers }) }, { escritura: { raiz } });
+      try {
+        const resultado = await (await p.conector).ejecutar(encargo(raiz), new AbortController().signal);
+        assert.equal(resultado.estado, 'fallida', JSON.stringify(layers));
+        assert.match(resultado.motivo, motivo);
+        const mensajes = p.mensajes();
+        assert.deepEqual(mensajes.find((m) => m.method === 'config/read').params, { cwd: realpathSync(raiz), includeLayers: true });
+        assert.equal(mensajes.some((m) => m.method === 'thread/start'), false, 'no se abre el hilo');
+      } finally {
+        await p.limpiar();
+      }
+    }
+    // Capa de proyecto desactivada (carpeta sin confianza en el CODEX_HOME aislado) o ausente: sigue adelante.
+    for (const layers of [[capa({ disabledReason: 'add the project as a trusted project' }), usuario], [usuario], []]) {
+      const p = preparar('revision', { metodos: guionConConfigLeida({ ...base, layers }) }, { escritura: { raiz } });
+      try {
+        const resultado = await (await p.conector).ejecutar(encargo(raiz), new AbortController().signal);
+        assert.equal(resultado.estado, 'ok', resultado.motivo);
+      } finally {
+        await p.limpiar();
+      }
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('modo lectura: no pide las capas de configuración ni comprueba el proyecto', async () => {
+  const p = preparar('revision', { metodos: guionConConfigLeida({ config: {}, origins: {}, layers: null }) });
+  try {
+    const resultado = await (await p.conector).ejecutar(encargo(p.dir), new AbortController().signal);
+    assert.equal(resultado.estado, 'ok', resultado.motivo);
+    assert.deepEqual(p.mensajes().find((m) => m.method === 'config/read').params, { cwd: p.dir });
+  } finally {
+    await p.limpiar();
+  }
+});
+
+/** El guion `revision` con el perfil activo que devuelve thread/start (o sin él). */
+function guionConPerfil(perfil) {
+  const base = JSON.parse(readFileSync(join(GUIONES, 'codex-revision.json'), 'utf8'));
+  const hilo = base.metodos['thread/start'];
+  return { ...base.metodos, 'thread/start': { ...hilo, resultado: { ...hilo.resultado, activePermissionProfile: perfil } } };
+}
+
+test('en macOS el modo escritura corre con el perfil que veta leer la carpeta personal, sin sandbox ni sandboxPolicy', async () => {
+  const h = homeFalso();
+  const p = preparar('revision', { metodos: guionConPerfil({ id: PERFIL_ENCARGO, extends: null }) }, {
+    escritura: { raiz: h.raiz, tmp: h.tmp }, plataforma: 'darwin', home: h.home,
+  });
+  const registroEnv = join(p.dir, 'env.json');
+  const guion = JSON.parse(readFileSync(p.rutaGuion, 'utf8'));
+  writeFileSync(p.rutaGuion, JSON.stringify({ ...guion, registroEnv }));
+  try {
+    const resultado = await (await p.conector).ejecutar(encargo(h.raiz), new AbortController().signal);
+    assert.equal(resultado.estado, 'ok', resultado.motivo);
+    const mensajes = p.mensajes();
+    const hilo = mensajes.find((m) => m.method === 'thread/start').params;
+    const turno = mensajes.find((m) => m.method === 'turn/start').params;
+    // `sandbox` o `sandboxPolicy` sustituirían el perfil por defecto (comprobado con codex-cli 0.171.0).
+    assert.equal('sandbox' in hilo, false);
+    assert.equal('sandboxPolicy' in turno, false);
+    assert.equal(hilo.config.sandbox_workspace_write, undefined);
+    assert.equal(hilo.approvalPolicy, 'never');
+    assert.equal(turno.approvalPolicy, 'never');
+    assert.equal(hilo.cwd, h.raiz);
+    assert.deepEqual(hilo.config.mcp_servers, { memoria: { enabled: false }, railway: { enabled: false } });
+
+    const { config } = JSON.parse(readFileSync(registroEnv, 'utf8'));
+    assert.match(config, new RegExp(`^default_permissions = "${PERFIL_ENCARGO}"$`, 'm'));
+    assert.ok(config.includes('":root" = "read"'));
+    for (const r of ['.ssh', '.aws', '.npmrc', 'proyectos', '.nexakit/encargos/otro', '.nexakit/fabrica']) {
+      assert.ok(config.includes(`${JSON.stringify(join(h.home, r))} = "none"`), r);
+    }
+    assert.ok(config.includes(`${JSON.stringify(h.raiz)} = "write"`));
+    assert.ok(config.includes(`${JSON.stringify(h.tmp)} = "write"`));
+    assert.ok(config.includes(`HOME = ${JSON.stringify(h.tmp)}`));
+    assert.match(config, /enabled = false/);
+  } finally {
+    await p.limpiar();
+    h.limpiar();
+  }
+});
+
+test('en macOS, si Codex no aplica el perfil de lectura acotada, el encargo falla cerrado antes del turno', async () => {
+  const h = homeFalso();
+  try {
+    for (const perfil of [null, { id: ':workspace', extends: null }]) {
+      const p = preparar('revision', { metodos: guionConPerfil(perfil) }, {
+        escritura: { raiz: h.raiz, tmp: h.tmp }, plataforma: 'darwin', home: h.home,
+      });
+      try {
+        const resultado = await (await p.conector).ejecutar(encargo(h.raiz), new AbortController().signal);
+        assert.equal(resultado.estado, 'fallida');
+        assert.match(resultado.motivo, /no aplicó el perfil de permisos nexakit-encargo/);
+        assert.equal(p.mensajes().some((m) => m.method === 'turn/start'), false);
+      } finally {
+        await p.limpiar();
+      }
+    }
+  } finally {
+    h.limpiar();
+  }
+});
+
+test('el modo lectura no usa el perfil aunque sea macOS', async () => {
+  const p = preparar('revision', {}, { plataforma: 'darwin' });
+  try {
+    const resultado = await (await p.conector).ejecutar(encargo(p.dir), new AbortController().signal);
+    assert.equal(resultado.estado, 'ok', resultado.motivo);
+    const hilo = p.mensajes().find((m) => m.method === 'thread/start').params;
+    assert.equal(hilo.sandbox, 'read-only');
+  } finally {
+    await p.limpiar();
+  }
 });
 
 test('escritura.raiz debe ser absoluta y existir, con un error claro en español', async () => {

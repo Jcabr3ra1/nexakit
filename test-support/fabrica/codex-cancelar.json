@@ -23,7 +23,7 @@
           }
         },
         "origins": {},
-        "layers": null
+        "layers": []
       }
     },
     "mcpServerStatus/list": {

@@ -4,10 +4,22 @@
 // El modo escritura es opcional y explícito (`escritura: { raiz, tmp? }`): `workspace-write` acotado a esa raíz (que
 // debe ser también el cwd) y a su carpeta temporal, sin red y con un CODEX_HOME aislado sin reglas de execpolicy. Ahí
 // `approvalPolicy` es `never`: Codex no pide aprobación, así que `ordenesPermitidas` NO se aplica (es una guía que se
-// comunica a la IA) y la frontera real es el sandbox. Riesgo residual: el sandbox acota la escritura, no la lectura;
-// Codex puede LEER todo el disco de la persona. Quien encarga revisa el diff y el resumen antes de aplicarlo.
+// comunica a la IA) y la frontera real es el sandbox. En macOS el modo escritura acota también la LECTURA: en vez de
+// `workspace-write` (que deja leer todo el disco), el hilo corre con el perfil de permisos `nexakit-encargo` del
+// CODEX_HOME aislado (`default_permissions`): disco legible salvo la carpeta personal, vetada entrada a entrada excepto el
+// camino hasta la copia y su carpeta temporal (escritura), el `node_modules` real enlazado y el gitdir común del repo
+// (lectura), la instalación de node y de Codex y el CODEX_HOME aislado; las órdenes corren con HOME = la carpeta temporal.
+// Se comprueba que Codex activó el perfil (falla cerrado). La `.codex/config.toml` del repo (el worktree sale del repo de
+// la persona) podría redefinir ese perfil: con el CODEX_HOME aislado, sin `[projects]`, Codex la lista como capa de
+// proyecto con `disabledReason` (carpeta sin confianza) y no la aplica; aun así `config/read` con las capas se comprueba
+// antes de abrir el hilo y, si una capa de proyecto está activa o no se puede comprobar, el encargo falla cerrado. Un
+// ejecutable o paquete dentro de la carpeta personal (`~/.cargo/bin`, `~/.bun/...`) solo abre su carpeta, nunca `~/.cargo`
+// entera (`lecturasDeEjecutable`). Comprobado con codex-cli 0.171.0 (`codex sandbox -P`,
+// `command/exec` y un encargo real). Riesgo residual: fuera de la carpeta personal todo es legible (TMPDIR de la persona,
+// /tmp, /Volumes); lo creado en ella después de arrancar no queda vetado; en Linux y Windows sigue `workspace-write`, que
+// deja leer todo el disco. Quien encarga revisa el diff y el resumen antes de aplicarlo.
 import { execFile } from 'node:child_process';
-import { realpathSync, statSync } from 'node:fs';
+import { lstatSync, readdirSync, readFileSync, realpathSync, statSync, type Dirent } from 'node:fs';
 import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -91,6 +103,10 @@ export interface OpcionesConectorCodex {
    * es de solo lectura, como siempre.
    */
   escritura?: { raiz: string; tmp?: string };
+  /** Solo para pruebas: plataforma con la que se decide si se acota la lectura (por defecto, la del proceso). */
+  plataforma?: NodeJS.Platform;
+  /** Carpeta personal cuya lectura se veta en el modo escritura (por defecto, `os.homedir()`). */
+  home?: string;
 }
 
 export interface VersionTiposCodex {
@@ -139,6 +155,7 @@ async function resolverInvocacion(opciones: OpcionesConectorCodex): Promise<Invo
 export async function crearHomeAislado(
   entorno: NodeJS.ProcessEnv = process.env,
   base: string = os.tmpdir(),
+  configuracion: (ruta: string) => string = () => '',
 ): Promise<{ ruta: string; borrar: () => Promise<void> }> {
   const ruta = await mkdtemp(path.join(base, 'nexakit-codex-home-'));
   const borrar = () => rm(ruta, { recursive: true, force: true });
@@ -149,12 +166,201 @@ export async function crearHomeAislado(
     } catch {
       // Sin autenticación enlazada Codex fallará al iniciar sesión, nunca al revés.
     }
-    await writeFile(path.join(ruta, 'config.toml'), '# Configuración mínima de un encargo de nexakit.\n', { mode: 0o600 });
+    await writeFile(path.join(ruta, 'config.toml'), `# Configuración mínima de un encargo de nexakit.\n${configuracion(ruta)}`, { mode: 0o600 });
   } catch (error) {
     await borrar();
     throw error;
   }
   return { ruta, borrar };
+}
+
+/** Perfil de permisos (`[permissions.<id>]` de la config de Codex) con el que corre el modo escritura en macOS. */
+export const PERFIL_ENCARGO = 'nexakit-encargo';
+/** Tope de entradas vetadas: más allá, el encargo no arranca (falla cerrado). */
+const MAX_VETOS = 20_000;
+/** Codex no veta una ruta con caracteres de patrón (`a[b]`, `x*`): ni literal ni como patrón (comprobado con 0.171.0). */
+const CARACTERES_PATRON = /[*?[\]{}\\]/u;
+
+export interface EntradaDisco {
+  /** Ruta absoluta y canónica, o `:root` (todo el disco). */
+  ruta: string;
+  acceso: 'read' | 'write' | 'none';
+}
+
+/** `ruta` es `carpeta` o está dentro de ella (rutas absolutas y canónicas). */
+function contiene(carpeta: string, ruta: string): boolean {
+  const relativa = path.relative(carpeta, ruta);
+  return relativa === '' || (relativa !== '..' && !relativa.startsWith(`..${path.sep}`) && !path.isAbsolute(relativa));
+}
+
+/**
+ * Rutas que hay que vetar para que no se pueda leer nada de `carpeta` salvo `permitidas`. Codex veta con
+ * `deny file-read*`, que incluye los metadatos: vetar la carpeta entera rompería `realpath` de cualquier ruta interior
+ * (node no arranca). Por eso se vetan, una a una, las entradas hermanas del camino hasta cada ruta permitida: las
+ * carpetas de ese camino se pueden listar, pero nada de lo que cuelga de ellas fuera del camino. Los enlaces no se
+ * siguen (se vetan como entrada). Lanza si una entrada no se puede vetar (nombre con caracteres de patrón) o si hay
+ * demasiadas: el encargo no arranca.
+ */
+export function vetosDeLectura(carpeta: string, permitidas: readonly string[]): string[] {
+  const vetos: string[] = [];
+  const vetar = (ruta: string): void => {
+    if (CARACTERES_PATRON.test(path.basename(ruta))) {
+      throw new Error(`No se puede vetar la lectura de ${recortar(ruta)}: Codex no acepta nombres con * ? [ ] { } o \\; renómbrala para encargar con Codex`);
+    }
+    vetos.push(ruta);
+    if (vetos.length > MAX_VETOS) throw new Error(`Hay más de ${MAX_VETOS} rutas que vetar a Codex en ${recortar(carpeta)}`);
+  };
+  const recorrer = (dir: string): void => {
+    if (permitidas.some((p) => contiene(p, dir))) return;
+    const interiores = permitidas.filter((p) => contiene(dir, p));
+    if (interiores.length === 0) {
+      vetar(dir);
+      return;
+    }
+    let entradas: Dirent[];
+    try {
+      entradas = readdirSync(dir, { withFileTypes: true });
+    } catch (error) {
+      throw new Error(`No se pudo listar ${recortar(dir)} para vetar su lectura a Codex: ${mensajeDe(error)}`);
+    }
+    for (const entrada of entradas) {
+      const ruta = path.join(dir, entrada.name);
+      if (entrada.isDirectory() && interiores.some((p) => contiene(ruta, p))) recorrer(ruta);
+      else if (!permitidas.some((p) => contiene(p, ruta))) vetar(ruta);
+    }
+  };
+  recorrer(carpeta);
+  return vetos;
+}
+
+/**
+ * Entradas del perfil del modo escritura: todo el disco legible salvo la carpeta personal, que se veta entera excepto
+ * el camino hasta las raíces escribibles (escritura) y lo imprescindible para trabajar (solo lectura).
+ */
+export function perfilDeEncargo(opciones: { home: string; escribibles: string[]; legibles: string[] }): EntradaDisco[] {
+  const home = canonica(opciones.home);
+  const escribibles = [...new Set(opciones.escribibles.map(canonica))];
+  // Una lectura que abarque la carpeta personal (un ejecutable en `/bin` da el prefijo `/`) anularía el veto: se ignora.
+  const candidatas = [...new Set(opciones.legibles.map(canonica))].filter((r) => !contiene(r, home));
+  const legibles = candidatas.filter((r) =>
+    !escribibles.some((e) => contiene(e, r)) && !candidatas.some((otra) => otra !== r && contiene(otra, r)));
+  return [
+    { ruta: ':root', acceso: 'read' },
+    ...vetosDeLectura(home, [...escribibles, ...legibles]).map((ruta): EntradaDisco => ({ ruta, acceso: 'none' })),
+    ...legibles.map((ruta): EntradaDisco => ({ ruta, acceso: 'read' })),
+    ...escribibles.map((ruta): EntradaDisco => ({ ruta, acceso: 'write' })),
+  ];
+}
+
+/** Cadena básica de TOML: JSON ya escapa comillas, barras y controles salvo DEL. */
+function cadenaToml(valor: string): string {
+  return JSON.stringify(valor).replace(/\u007f/gu, '\\u007F');
+}
+
+/**
+ * Config del CODEX_HOME aislado con el perfil del encargo como permisos por defecto, sin red. `homeOrdenes` es el HOME
+ * de las órdenes que lance Codex: el real está vetado y git o npm fallarían al leer su configuración.
+ */
+export function configDePerfil(entradas: readonly EntradaDisco[], homeOrdenes?: string): string {
+  return [
+    `default_permissions = ${cadenaToml(PERFIL_ENCARGO)}`,
+    '',
+    `[permissions.${PERFIL_ENCARGO}.filesystem]`,
+    ...entradas.map((e) => `${cadenaToml(e.ruta)} = ${cadenaToml(e.acceso)}`),
+    '',
+    `[permissions.${PERFIL_ENCARGO}.network]`,
+    'enabled = false',
+    ...(homeOrdenes === undefined ? [] : ['', '[shell_environment_policy.set]', `HOME = ${cadenaToml(homeOrdenes)}`]),
+    '',
+  ].join('\n');
+}
+
+/** Una carpeta de verdad (no un enlace) y no un archivo. */
+function esCarpeta(ruta: string): boolean {
+  return lstatSync(ruta, { throwIfNoEntry: false })?.isDirectory() === true;
+}
+
+/** Un paquete de npm: su carpeta tiene `package.json`. */
+function esPaquete(ruta: string): boolean {
+  return lstatSync(path.join(ruta, 'package.json'), { throwIfNoEntry: false })?.isFile() === true;
+}
+
+/**
+ * Lo que el sandbox debe poder leer para lanzar un ejecutable (siguiendo enlaces); vacío si no existe. Fuera de la
+ * carpeta personal es la carpeta de instalación (`<prefijo>/bin/x` da `<prefijo>`). Dentro de ella (`~/.cargo/bin/x`,
+ * `~/.bun/...`), el prefijo abriría carpetas enteras con credenciales y cachés (`~/.cargo`, `~/.bun`): se da solo la
+ * carpeta del paquete si es uno (`package.json`) y, si no, la del ejecutable y su `../lib` (donde viven `npm` y sus
+ * módulos), nunca la carpeta personal entera.
+ */
+export function lecturasDeEjecutable(ejecutable: string, home: string): string[] {
+  if (!path.isAbsolute(ejecutable)) return [];
+  let real: string;
+  try {
+    real = realpathSync(ejecutable);
+  } catch {
+    return [];
+  }
+  const bin = path.dirname(real);
+  const prefijo = path.dirname(bin);
+  const personal = canonica(home);
+  if (!contiene(personal, bin)) return [prefijo];
+  // El ejecutable cuelga directamente de la carpeta personal: solo él, no la carpeta.
+  if (bin === personal) return [real];
+  if (prefijo !== personal && esPaquete(prefijo)) return [prefijo];
+  const lib = path.join(prefijo, 'lib');
+  return [bin, ...(prefijo !== personal && esCarpeta(lib) ? [lib] : [])];
+}
+
+/**
+ * Lo que el worktree necesita leer fuera de sí: el `node_modules` real al que apunta su enlace y el gitdir común del
+ * repo (sin él, `git status` falla). Se lee antes de que Codex toque la copia.
+ */
+export function lecturasDelWorktree(raiz: string): string[] {
+  const lecturas: string[] = [];
+  const nodeModules = path.join(raiz, 'node_modules');
+  try {
+    if (lstatSync(nodeModules).isSymbolicLink()) lecturas.push(realpathSync(nodeModules));
+  } catch {
+    // Sin node_modules enlazado no hay nada que leer.
+  }
+  try {
+    const punteroGit = path.join(raiz, '.git');
+    if (lstatSync(punteroGit).isFile()) {
+      const gitdir = /^gitdir: (.+)$/mu.exec(readFileSync(punteroGit, 'utf8'))?.[1]?.trim();
+      if (gitdir !== undefined) {
+        const propio = realpathSync(path.resolve(raiz, gitdir));
+        let comun = propio;
+        try {
+          comun = realpathSync(path.resolve(propio, readFileSync(path.join(propio, 'commondir'), 'utf8').trim()));
+        } catch {
+          // Sin `commondir` el gitdir es el común.
+        }
+        lecturas.push(propio, comun);
+      }
+    }
+  } catch {
+    // Sin `.git` de worktree, git no tiene nada fuera que leer.
+  }
+  return lecturas;
+}
+
+/**
+ * Carpetas `.codex` de proyecto cuya configuración (`.codex/config.toml`, con `default_permissions` o `[permissions.*]`
+ * propios) Codex aplica en `config/read`. Una capa de proyecto con `disabledReason` (la carpeta no es de confianza en el
+ * CODEX_HOME aislado, que no tiene `[projects]`; comprobado con codex-cli 0.171.0) no cuenta. `null` si la respuesta
+ * no trae las capas: no se puede comprobar.
+ */
+function capasDeProyectoActivas(leida: unknown): string[] | null {
+  const capas = esObjeto(leida) ? leida['layers'] : undefined;
+  if (!Array.isArray(capas)) return null;
+  const activas: string[] = [];
+  for (const capa of capas) {
+    const nombre = esObjeto(capa) ? capa['name'] : undefined;
+    if (!esObjeto(nombre) || nombre['type'] !== 'project') continue;
+    const desactivada = esObjeto(capa) && typeof capa['disabledReason'] === 'string' && capa['disabledReason'] !== '';
+    if (!desactivada) activas.push(recortar(texto(nombre['dotCodexFolder']) ?? 'proyecto'));
+  }
+  return activas;
 }
 
 function esObjeto(valor: unknown): valor is Record<string, unknown> {
@@ -335,11 +541,36 @@ class ConectorCodex implements Conector {
   private readonly raizEscritura: string | undefined;
   /** Carpeta temporal propia del encargo (canónica), también escribible; undefined si no hay. */
   private readonly tmpEscritura: string | undefined;
+  /**
+   * Modo escritura con lectura acotada (solo macOS, donde está comprobado): el hilo corre con el perfil
+   * `PERFIL_ENCARGO` del CODEX_HOME aislado en vez de `workspace-write`, que deja leer todo el disco.
+   */
+  private readonly lecturaAcotada: boolean;
 
   constructor(opciones: OpcionesConectorCodex, raizEscritura?: string, tmpEscritura?: string) {
     this.opciones = opciones;
     this.raizEscritura = raizEscritura;
     this.tmpEscritura = tmpEscritura;
+    this.lecturaAcotada = raizEscritura !== undefined && (opciones.plataforma ?? process.platform) === 'darwin';
+  }
+
+  /** Config del CODEX_HOME aislado: el perfil de lectura acotada si toca; si no, ninguna. */
+  private configDeHome(invocacion: Invocacion, codexHome: string): string {
+    if (!this.lecturaAcotada || this.raizEscritura === undefined) return '';
+    const home = this.opciones.home ?? os.homedir();
+    const legibles = [
+      ...lecturasDelWorktree(this.raizEscritura),
+      // El node con el que corre nexakit, el ejecutable de Codex (su ayudante de disco se relanza dentro del sandbox) y
+      // el CODEX_HOME aislado (atajos de `apply_patch`).
+      ...[process.execPath, invocacion.orden, invocacion.argsPrefijo[0] ?? ''].flatMap((ruta) => lecturasDeEjecutable(ruta, home)),
+      codexHome,
+    ];
+    const entradas = perfilDeEncargo({
+      home,
+      escribibles: this.raicesEscribibles(this.raizEscritura),
+      legibles,
+    });
+    return configDePerfil(entradas, this.tmpEscritura);
   }
 
   /** Raíces escribibles del modo escritura: la del encargo y, si hay, su carpeta temporal. */
@@ -388,7 +619,8 @@ class ConectorCodex implements Conector {
       const paramsHilo: ThreadStartParams = {
         model: encargo.modelo,
         cwd,
-        sandbox: this.raizEscritura === undefined ? 'read-only' : 'workspace-write',
+        // Con lectura acotada no se da `sandbox`: pisaría el perfil por defecto del CODEX_HOME aislado.
+        ...(this.lecturaAcotada ? {} : { sandbox: this.raizEscritura === undefined ? 'read-only' : 'workspace-write' }),
         approvalPolicy: this.raizEscritura === undefined ? 'untrusted' : 'never',
         // Las aprobaciones las contesta este conector, nunca un revisor automático de Codex.
         approvalsReviewer: 'user',
@@ -401,6 +633,13 @@ class ConectorCodex implements Conector {
       const idHilo = esObjeto(hilo) && esObjeto(hilo['thread']) ? texto(hilo['thread']['id']) : null;
       if (idHilo === null) throw new Error('Codex no devolvió el identificador del hilo');
       threadId = idHilo;
+      if (this.lecturaAcotada) {
+        // Falla cerrado: un Codex que no aplique el perfil dejaría leer todo el disco.
+        const activo = esObjeto(hilo) && esObjeto(hilo['activePermissionProfile']) ? texto(hilo['activePermissionProfile']['id']) : null;
+        if (activo !== PERFIL_ENCARGO) {
+          throw new ErrorAislamiento(`Codex no aplicó el perfil de permisos ${PERFIL_ENCARGO} que acota la lectura (perfil activo: ${activo ?? 'ninguno'}); actualiza Codex`);
+        }
+      }
       resultado.modeloInformado = esObjeto(hilo) ? texto(hilo['model']) : null;
 
       let terminarTurno: (fin: FinTurno) => void = () => {};
@@ -423,16 +662,19 @@ class ConectorCodex implements Conector {
         model: encargo.modelo,
         ...(encargo.esfuerzo !== null ? { effort: encargo.esfuerzo } : {}),
         outputSchema: (this.raizEscritura === undefined ? hallazgosJsonSchema() : ESQUEMA_RESUMEN) as JsonValue,
-        sandboxPolicy: this.raizEscritura === undefined
-          ? { type: 'readOnly', networkAccess: false }
-          : {
-            type: 'workspaceWrite',
-            writableRoots: this.raicesEscribibles(this.raizEscritura),
-            networkAccess: false,
-            // Solo la raíz y la carpeta temporal del encargo: ni el directorio temporal de la persona ni /tmp.
-            excludeTmpdirEnvVar: true,
-            excludeSlashTmp: true,
-          },
+        // Con lectura acotada el turno hereda el perfil del hilo: una `sandboxPolicy` lo sustituiría.
+        ...(this.lecturaAcotada ? {} : {
+          sandboxPolicy: this.raizEscritura === undefined
+            ? { type: 'readOnly', networkAccess: false }
+            : {
+              type: 'workspaceWrite',
+              writableRoots: this.raicesEscribibles(this.raizEscritura),
+              networkAccess: false,
+              // Solo la raíz y la carpeta temporal del encargo: ni el directorio temporal de la persona ni /tmp.
+              excludeTmpdirEnvVar: true,
+              excludeSlashTmp: true,
+            },
+        } satisfies Pick<TurnStartParams, 'sandboxPolicy'>),
         approvalPolicy: this.raizEscritura === undefined ? 'untrusted' : 'never',
         approvalsReviewer: 'user',
       };
@@ -493,14 +735,24 @@ class ConectorCodex implements Conector {
    * tabla en vez de sustituirla; hay que desactivarlos por nombre.
    */
   private async configAislada(cliente: ClienteJsonRpc, raiz: string): Promise<{ [clave: string]: JsonValue }> {
-    const params: ConfigReadParams = { cwd: raiz };
+    // En modo escritura se piden también las capas para comprobar que ninguna config del proyecto redefine el perfil.
+    const params: ConfigReadParams = { cwd: raiz, ...(this.raizEscritura === undefined ? {} : { includeLayers: true }) };
     const leida: unknown = await cliente.solicitar('config/read', params, { timeoutMs: TIEMPO_PETICION_MS });
+    if (this.raizEscritura !== undefined) {
+      const activas = capasDeProyectoActivas(leida);
+      if (activas === null) {
+        throw new ErrorAislamiento('No se pudo comprobar que Codex ignore la configuración del proyecto (.codex/config.toml); se detuvo el encargo');
+      }
+      if (activas.length > 0) {
+        throw new ErrorAislamiento(`Codex aplicaría la configuración del proyecto (${activas.join(', ')}), que podría redefinir el perfil de permisos del encargo; se detuvo el encargo`);
+      }
+    }
     const config = esObjeto(leida) ? leida['config'] : undefined;
     const servidores = esObjeto(config) && esObjeto(config['mcp_servers']) ? Object.keys(config['mcp_servers']) : [];
     return {
       mcp_servers: Object.fromEntries(servidores.map((nombre) => [nombre, { enabled: false }])),
       features: Object.fromEntries(FUNCIONES_DESACTIVADAS.map((funcion) => [funcion, false])),
-      ...(this.raizEscritura === undefined ? {} : {
+      ...(this.raizEscritura === undefined || this.lecturaAcotada ? {} : {
         // Defensa en profundidad: la configuración de la persona no ensancha la política hasta el primer turno.
         sandbox_workspace_write: {
           writable_roots: this.raicesEscribibles(this.raizEscritura),
@@ -574,7 +826,7 @@ class ConectorCodex implements Conector {
         let env: NodeJS.ProcessEnv | undefined;
         if (this.raizEscritura !== undefined) {
           await this.borrarHomeAislado();
-          const home = await crearHomeAislado();
+          const home = await crearHomeAislado(process.env, os.tmpdir(), (ruta) => this.configDeHome(invocacion, ruta));
           this.homeAislado = home;
           const tmp = this.tmpEscritura;
           env = { ...process.env, CODEX_HOME: home.ruta, ...(tmp === undefined ? {} : { TMPDIR: tmp, TMP: tmp, TEMP: tmp }) };

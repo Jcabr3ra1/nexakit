@@ -30,7 +30,8 @@ if (guion.registroEnv) {
   const modo = home !== null && existsSync(home) ? (lstatSync(home).mode & 0o777) : null;
   const enlaceAuth = home !== null && archivos?.includes('auth.json') ? lstatSync(`${home}/auth.json`).isSymbolicLink() : null;
   const temporales = { TMPDIR: process.env.TMPDIR ?? null, TMP: process.env.TMP ?? null, TEMP: process.env.TEMP ?? null };
-  writeFileSync(guion.registroEnv, JSON.stringify({ home, archivos, modo, enlaceAuth, temporales }));
+  const config = home !== null && archivos?.includes('config.toml') ? readFileSync(`${home}/config.toml`, 'utf8') : null;
+  writeFileSync(guion.registroEnv, JSON.stringify({ home, archivos, modo, enlaceAuth, temporales, config }));
 }
 const metodos = guion.metodos ?? {};
 const contadores = new Map();

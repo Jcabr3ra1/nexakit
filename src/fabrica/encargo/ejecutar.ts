@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { inspectModels, recommendAntigravity } from '../../../src/model-command.js';
 import { REGLA_ORDENES_SIMPLES } from '../../../src/regla-ordenes-simples.js';
-import { crearConectorAntigravity, esComponenteProtegido } from '../conectores/antigravity.js';
+import { crearConectorAntigravity, esComponenteProtegido, ORDENES_ACTIVAS } from '../conectores/antigravity.js';
 import { crearConectorCodex } from '../conectores/codex.js';
 import type { AlProgreso, Conector, Denegacion, Encargo, ResultadoEstacion } from '../conectores/tipos.js';
 import { comparar, instantanea } from '../disco.js';
@@ -98,7 +98,8 @@ export interface InformeEncargo {
   aprobaciones: Denegacion[];
   /**
    * Órdenes que el repo declara (`npm test`, `npm run typecheck`). En Codex son una guía que se comunica a la IA (su
-   * frontera real es el sandbox: solo escribe en la copia y sin red); Antigravity en esta versión no ejecuta órdenes.
+   * frontera real es el sandbox: solo escribe en la copia y sin red). En Antigravity, solo en macOS, son la lista que
+   * se aprueba (coincidencia exacta) y corren en su sandbox sin red; fuera de macOS no ejecuta órdenes.
    */
   ordenesPorDefecto: string[];
   /** Órdenes extra que pidió quien encargó (con la aprobación de la persona): informativas en Codex, como las anteriores. */
@@ -123,13 +124,17 @@ export interface InformeEncargo {
 // ---------------------------------------------------------------------------------------------
 // Conectores y modelo
 
-/** Los conectores reales, con la misma configuración de entorno que la fábrica, en modo escritura. */
-function fabricasDeEntorno(entorno: NodeJS.ProcessEnv): FabricasConectores {
+/**
+ * Los conectores reales, con la misma configuración de entorno que la fábrica, en modo escritura. `home` es la carpeta
+ * personal cuya lectura Codex tiene vetada (salvo el camino hasta el encargo) donde sabe acotarla.
+ */
+function fabricasDeEntorno(entorno: NodeJS.ProcessEnv, home: string): FabricasConectores {
   return {
     codex: (escritura) =>
       crearConectorCodex({
         ...opcionesDeEntorno(entorno, 'NEXAKIT_FABRICA_CODEX'),
         escritura: { raiz: escritura.raiz, ...(escritura.tmp === undefined ? {} : { tmp: escritura.tmp }) },
+        home,
       }),
     antigravity: (escritura) =>
       crearConectorAntigravity({
@@ -171,11 +176,21 @@ async function ordenesDelRepo(dir: string): Promise<string[]> {
 }
 
 /**
- * `ordenes` vacío si la IA no ejecuta ninguna (Antigravity en modo escritura): el texto no promete lo que se va a
- * rechazar. Con Codex las órdenes son una guía: su frontera real es el sandbox (solo escribe en la copia, sin red), no
- * una lista que se haga cumplir, así que el texto no promete que se rechace ninguna otra.
+ * La regla de órdenes que se le da a la IA. Con Codex las órdenes son una guía: su frontera real es el sandbox (solo
+ * escribe en la copia, sin red), no una lista que se haga cumplir. Con Antigravity la lista sí se hace cumplir
+ * (coincidencia exacta) y solo en macOS, donde se verificó su sandbox; fuera de macOS no se aprueba ninguna y el texto
+ * no promete lo que se va a rechazar.
  */
-function instruccionesDelEncargo(texto: string, lecciones: readonly Leccion[], ordenes: readonly string[]): string {
+export function reglaDeOrdenes(ia: IAEncargo, ordenes: readonly string[], ordenesActivas: boolean = ORDENES_ACTIVAS): string {
+  const lista = ordenes.map((o) => `\`${o}\``).join(', ');
+  if (ordenes.length === 0 || (ia === 'antigravity' && !ordenesActivas)) return '- No se aprueba ninguna orden: no dependas de ejecutar pruebas.';
+  if (ia === 'antigravity') {
+    return `- Para comprobar tu trabajo solo se aprueban estas órdenes, escritas exactamente así y sin encadenar: ${lista}. Corren en el sandbox de Antigravity, sin red y sin poder escribir fuera de esta carpeta (puede que tampoco dentro). Si una falla por el sandbox, no la repitas fuera de él (BypassSandbox se rechaza): dilo en el resumen.`;
+  }
+  return `- Para comprobar tu trabajo usa solo estas órdenes: ${lista}. Trabajas en un sandbox sin red que solo puede escribir en esta carpeta y en su carpeta temporal.`;
+}
+
+function instruccionesDelEncargo(texto: string, lecciones: readonly Leccion[], reglaOrdenes: string): string {
   const partes = [
     'Programa este encargo en la carpeta de trabajo actual, que es una copia aislada del repositorio: edita los archivos directamente ahí.',
     'No hagas commit ni push, no cambies de rama y no toques nada fuera de esta carpeta. Quien te encarga revisará el diff y lo aplicará.',
@@ -186,11 +201,7 @@ function instruccionesDelEncargo(texto: string, lecciones: readonly Leccion[], o
   const lecc = bloqueLecciones(lecciones);
   if (lecc !== '') partes.push('', lecc);
   partes.push('', 'Reglas de trabajo:', `- ${REGLA_ORDENES_SIMPLES}`);
-  partes.push(
-    ordenes.length === 0
-      ? '- No se aprueba ninguna orden: no dependas de ejecutar pruebas.'
-      : `- Para comprobar tu trabajo usa solo estas órdenes: ${ordenes.map((o) => `\`${o}\``).join(', ')}. Trabajas en un sandbox sin red que solo puede escribir en esta carpeta y en su carpeta temporal.`,
-  );
+  partes.push(reglaOrdenes);
   partes.push('', 'Al terminar, responde con un resumen breve en texto (qué cambiaste y qué queda pendiente), sin pegar el diff.');
   return `${partes.join('\n')}\n`;
 }
@@ -319,7 +330,7 @@ export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<Inform
   if (!extras.every((o) => typeof o === 'string' && o.trim() !== '')) throw new ErrorFabrica('Las órdenes permitidas deben ser textos no vacíos');
 
   const inicio = Date.now();
-  const fabricas = opciones.conectores ?? fabricasDeEntorno(entorno);
+  const fabricas = opciones.conectores ?? fabricasDeEntorno(entorno, home);
   // La raíz del repo, no una subcarpeta: la instantánea del disco, las lecciones y el rastro hablan del repo entero.
   const raiz = await raizDelRepoGit(raizPedida);
   // Un encargo a la vez en toda la máquina: el candado va antes del barrido y de crear nada, y se libera en el `finally`.
@@ -526,7 +537,7 @@ export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<Inform
       // Siempre el worktree: es también la raíz de escritura del conector, que rechaza cualquier otra.
       raiz: w.dir,
       base: w.base,
-      instrucciones: instruccionesDelEncargo(texto, lecciones, iaElegida === 'antigravity' ? [] : ordenes),
+      instrucciones: instruccionesDelEncargo(texto, lecciones, reglaDeOrdenes(iaElegida, ordenes, conector.ordenesActivas)),
       ordenesPermitidas: ordenes,
     };
 

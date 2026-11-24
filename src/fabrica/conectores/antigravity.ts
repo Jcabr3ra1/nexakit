@@ -25,13 +25,25 @@
 // y, si es una orden, coincide exactamente con `ordenesPermitidas` y no está encadenada. El resto se rechaza y se
 // anota. Las reglas persistentes de la persona (`permissions.allow`) no se aplican gracias a `--gemini-dir`; las del
 // repo (`.gemini/`) se rechazan por la lista blanca de personalizaciones, que sigue vigente en este modo.
-import { spawn } from 'node:child_process';
+// Órdenes en modo escritura, comprobado con una sesión real contra agy 1.5.14 en macOS (`gemini-3.8-flash-low`, unos
+// 11 000 tokens; no hay subcomando para ejecutar una orden en el sandbox sin el modelo): con `--sandbox`, la orden
+// `npm test` aprobada corre en el sandbox (el binario usa `/usr/bin/sandbox-exec`) y su script no pudo escribir fuera del `cwd` (carpeta personal, carpeta
+// hermana, el `node_modules` enlazado, `.git/hooks` y `.git/config` del repo real; también desde un `sh` hijo), ni leer
+// fuera de él, ni usar la red (DNS y HTTPS: ENOTFOUND). Sí pudo escribir en `/tmp` y en el `TMPDIR` del sistema, que
+// no son el repo. Tampoco pudo escribir dentro del `cwd` cuando este cuelga de una carpeta oculta (`~/.nexakit/...`):
+// las órdenes que generan archivos fallan, pero no escapan. La petición llega como `kind: execute`, `name: run_command`
+// y `rawInput` = { CommandLine, BypassSandbox, WaitMsBeforeAsync, toolSummary } (repetido en `args`); salir del sandbox
+// (`BypassSandbox` distinto de `false`, o ausente) se rechaza siempre. Solo en macOS y con agy 1.5.14 o superior de la
+// serie 1.5 (`agy --version`, una vez al crear el conector): en Linux y Windows, o con otra versión, no se verificó y no
+// se aprueba ninguna orden (`ORDENES_ACTIVAS`, `comprobarOrdenes`).
+import { execFile, spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { lstatSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Readable, Writable } from 'node:stream';
+import { promisify } from 'node:util';
 import { client, ndJsonStream, PROTOCOL_VERSION, RequestError } from '@agentclientprotocol/sdk';
 import type {
   AnyMessage,
@@ -92,6 +104,10 @@ export interface OpcionesConectorAntigravity {
    * coincidan exactamente con `ordenesPermitidas`. Sin esta opción se rechaza todo permiso.
    */
   escritura?: { raiz: string; ordenesPermitidas: string[] };
+  /** Solo para pruebas: plataforma con la que se decide si se aprueban órdenes (por defecto, la del proceso). */
+  plataforma?: NodeJS.Platform;
+  /** Solo para pruebas: fuerza órdenes aprobables o no, sin mirar la plataforma ni la versión de `agy`. */
+  ordenesActivas?: boolean;
 }
 
 /** Modo escritura ya validado: raíz canónica y órdenes recortadas. */
@@ -102,15 +118,22 @@ interface Escritura {
   ordenes: Set<string>;
 }
 
+/** Herramienta de órdenes de agy (`name` de la petición, si la trae). */
+const HERRAMIENTA_ORDENES = 'run_command';
 /** Tipos de petición de permiso que el modo escritura puede llegar a aprobar. */
 const TIPOS_APROBABLES = new Set(['read', 'edit', 'delete', 'move', 'search', 'execute']);
 /**
- * Interruptor interno: mientras no se verifique qué confina el `--sandbox` de `agy`, el modo escritura no aprueba
- * ninguna orden (una orden permitida, como `npm test`, ejecuta código del worktree con los permisos de la persona).
- * Con `true` se reactiva la lista `ordenesPermitidas` (coincidencia exacta).
+ * El modo escritura aprueba órdenes de `ordenesPermitidas` (coincidencia exacta) solo donde se verificó el `--sandbox`
+ * de `agy`: en macOS (ver la cabecera). En Linux y Windows no se verificó, así que allí no se aprueba ninguna orden
+ * (una orden permitida, como `npm test`, ejecuta código del worktree). Es solo la condición de plataforma: el conector
+ * además comprueba la versión de `agy` (`comprobarOrdenes`).
  */
-const ORDENES_ACTIVAS = false;
-const MOTIVO_ORDENES_DESACTIVADAS = 'órdenes desactivadas en Antigravity hasta verificar su sandbox';
+export const ORDENES_ACTIVAS = process.platform === 'darwin';
+const MOTIVO_ORDENES_DESACTIVADAS = 'órdenes desactivadas en Antigravity fuera de macOS: su sandbox solo se verificó en macOS';
+/** Versión de `agy` con la que se verificó el sandbox: esa o una superior de la misma serie 1.5.x. */
+const VERSION_AGY_VERIFICADA = { mayor: 1, menor: 5, parche: 14 };
+const TIEMPO_VERSION_MS = 10_000;
+const ejecutarArchivo = promisify(execFile);
 /** Encadenados, redirecciones y sustituciones: una orden con cualquiera se rechaza aunque empiece por una permitida. */
 const ENCADENADO = /[;&|<>`\n\r]|\$\(/u;
 /** Componentes que el agente no puede escribir dentro de la raíz (personalización, hooks y metadatos de git). */
@@ -133,10 +156,22 @@ const CLAVES_ADMITIDAS: Record<string, Set<string>> = {
   move: new Set(CLAVES_RUTA),
   read: new Set([...CLAVES_RUTA, ...CLAVES_LECTURA]),
   search: new Set([...CLAVES_RUTA, ...CLAVES_BUSQUEDA]),
-  execute: new Set(['command', 'cwd']),
+  // agy 1.5.14 (`run_command`) manda `CommandLine`, `BypassSandbox`, `WaitMsBeforeAsync` y `toolSummary`.
+  execute: new Set(['command', 'commandline', 'cwd', 'bypasssandbox', 'waitmsbeforeasync', 'toolsummary', 'toolaction']),
 };
+/** Claves informativas de una orden (texto que el agente pone para la persona); no cambian lo que se ejecuta. */
+const CLAVES_ORDEN_INFORMATIVAS = new Set(['toolsummary', 'toolaction']);
 /** Tipos que escriben: sus rutas no pueden tocar los componentes protegidos. */
 const TIPOS_ESCRITURA = new Set(['edit', 'delete', 'move']);
+
+/** JSON con las claves ordenadas, para comparar dos objetos sin depender del orden. */
+function canonico(valor: unknown): string {
+  if (Array.isArray(valor)) return `[${valor.map(canonico).join(',')}]`;
+  if (esObjeto(valor)) {
+    return `{${Object.keys(valor).sort().map((k) => `${JSON.stringify(k)}:${canonico(valor[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(valor) ?? 'undefined';
+}
 
 function normalizarClave(clave: string): string {
   return clave.toLowerCase().replace(/[_-]/gu, '');
@@ -209,6 +244,8 @@ interface PeticionAnalizada {
   rutas: string[];
   orden: string | null;
   cwd: string | null;
+  /** La orden trae `BypassSandbox: false` explícito (una clave ausente no vale: no se sabe dónde correría). */
+  sandboxExplicito: boolean;
   motivo: string | null;
 }
 
@@ -217,7 +254,7 @@ interface PeticionAnalizada {
  * o una orden que no es un texto de `rawInput.command` rechazan la petición (nunca se usa el título).
  */
 function analizarPeticion(tipo: string, llamada: Record<string, unknown>): PeticionAnalizada {
-  const resultado: PeticionAnalizada = { rutas: [], orden: null, cwd: null, motivo: null };
+  const resultado: PeticionAnalizada = { rutas: [], orden: null, cwd: null, sandboxExplicito: false, motivo: null };
   const rechazo = (motivo: string): PeticionAnalizada => ({ ...resultado, motivo });
   if (Array.isArray(llamada['locations'])) {
     for (const l of llamada['locations']) {
@@ -237,13 +274,30 @@ function analizarPeticion(tipo: string, llamada: Record<string, unknown>): Petic
   if (crudo === undefined || crudo === null) return resultado;
   if (!esObjeto(crudo)) return rechazo('rawInput no es un objeto');
   const admitidas = CLAVES_ADMITIDAS[tipo] ?? new Set<string>();
+  const vistas = new Set<string>();
   for (const [clave, valor] of Object.entries(crudo)) {
     const normal = normalizarClave(clave);
+    // `{ cwd: '/tmp', Cwd: raiz }`: la segunda taparía a la primera y se aprobaría; no se sabe cuál usa la herramienta.
+    if (vistas.has(normal)) return rechazo(`clave repetida con otra capitalización: ${recortar(clave)}`);
+    vistas.add(normal);
     if (!admitidas.has(normal)) return rechazo(`campo no reconocido: ${recortar(clave)}`);
     if (tipo === 'execute') {
-      if (typeof valor !== 'string') return rechazo(`el campo ${clave} no es un texto`);
-      if (normal === 'command') resultado.orden = valor.trim();
-      else resultado.cwd = valor;
+      if (normal === 'bypasssandbox') {
+        // Salir del sandbox nunca se aprueba: solo vale `false` explícito.
+        if (valor !== false) return rechazo('la orden pide ejecutarse fuera del sandbox (BypassSandbox)');
+        resultado.sandboxExplicito = true;
+      } else if (normal === 'waitmsbeforeasync') {
+        if (typeof valor !== 'number' || !Number.isFinite(valor)) return rechazo(`el campo ${clave} no es un número`);
+      } else if (typeof valor !== 'string') {
+        return rechazo(`el campo ${clave} no es un texto`);
+      } else if (normal === 'command' || normal === 'commandline') {
+        if (resultado.orden !== null) return rechazo('la petición trae más de una orden');
+        resultado.orden = valor.trim();
+      } else if (normal === 'cwd') {
+        resultado.cwd = valor;
+      } else if (!CLAVES_ORDEN_INFORMATIVAS.has(normal)) {
+        return rechazo(`campo no reconocido: ${recortar(clave)}`);
+      }
     } else if (CLAVES_RUTA.has(normal)) {
       if (typeof valor !== 'string') return rechazo(`el campo ${clave} no es un texto`);
       resultado.rutas.push(valor);
@@ -260,10 +314,23 @@ export function motivoPermisoRechazado(
   escritura: { raiz: string; raizPedida?: string; ordenes: ReadonlySet<string> },
   llamada: Record<string, unknown>,
   ordenesActivas: boolean = ORDENES_ACTIVAS,
+  motivoDesactivadas: string = MOTIVO_ORDENES_DESACTIVADAS,
 ): string | null {
   const tipo = texto(llamada['kind']);
   if (tipo === null || !TIPOS_APROBABLES.has(tipo)) return `tipo de petición no admitido: ${tipo ?? 'desconocido'}`;
-  if (tipo === 'execute' && !ordenesActivas) return MOTIVO_ORDENES_DESACTIVADAS;
+  if (tipo === 'execute') {
+    if (!ordenesActivas) return motivoDesactivadas;
+    if (!esObjeto(llamada['rawInput'])) return 'la orden no trae rawInput';
+    // `run_command` es la herramienta de órdenes de agy; si la petición dice otra, no se sabe qué se ejecutaría.
+    if (llamada['name'] !== undefined && llamada['name'] !== HERRAMIENTA_ORDENES) {
+      return `la herramienta no es ${HERRAMIENTA_ORDENES}: ${recortar(String(llamada['name']))}`;
+    }
+    // agy repite la entrada de la orden en `args`: si dice otra cosa que `rawInput`, no se sabe cuál se ejecuta.
+    if (llamada['args'] !== undefined) {
+      if (!esObjeto(llamada['args'])) return 'la orden trae args que no son un objeto';
+      if (canonico(llamada['args']) !== canonico(llamada['rawInput'])) return 'la orden trae args distintos de rawInput';
+    }
+  }
   const peticion = analizarPeticion(tipo, llamada);
   if (peticion.motivo !== null) return peticion.motivo;
   const escribe = TIPOS_ESCRITURA.has(tipo);
@@ -276,6 +343,7 @@ export function motivoPermisoRechazado(
     if (orden === null || orden === '') return 'orden no reconocible';
     if (ENCADENADO.test(orden)) return `orden encadenada o con redirección: ${recortar(orden)}`;
     if (!escritura.ordenes.has(orden)) return `orden no permitida: ${recortar(orden)}`;
+    if (!peticion.sandboxExplicito) return 'la orden no declara BypassSandbox: false';
     if (peticion.cwd !== null) {
       let canonica: string | null = null;
       try {
@@ -532,10 +600,15 @@ class ConectorAntigravity implements Conector {
   private readonly modosSinSesion = new Map<string, string | null>();
   private cerrado = false;
   private readonly escritura: Escritura | undefined;
+  /** Si el modo escritura aprueba órdenes (plataforma y versión de `agy` verificadas); lo decide `comprobarOrdenes`. */
+  readonly ordenesActivas: boolean;
+  private readonly motivoOrdenesDesactivadas: string;
 
-  constructor(opciones: OpcionesConectorAntigravity, escritura?: Escritura) {
+  constructor(opciones: OpcionesConectorAntigravity, escritura?: Escritura, ordenes: EstadoOrdenes = { activas: false, motivo: MOTIVO_ORDENES_DESACTIVADAS }) {
     this.opciones = opciones;
     this.escritura = escritura;
+    this.ordenesActivas = ordenes.activas;
+    this.motivoOrdenesDesactivadas = ordenes.motivo ?? MOTIVO_ORDENES_DESACTIVADAS;
   }
 
   async catalogo(): Promise<Array<{ modelo: string; esfuerzos: string[] }>> {
@@ -908,7 +981,7 @@ class ConectorAntigravity implements Conector {
     const opciones = Array.isArray(p['options']) ? p['options'].filter(esObjeto) : [];
     let motivo: string | null = null;
     if (this.escritura !== undefined) {
-      motivo = enCurso === undefined ? 'sesión desconocida' : motivoPermisoRechazado(this.escritura, llamada);
+      motivo = enCurso === undefined ? 'sesión desconocida' : motivoPermisoRechazado(this.escritura, llamada, this.ordenesActivas, this.motivoOrdenesDesactivadas);
       if (motivo === null) {
         const permitir = opciones.find((o) => o['kind'] === 'allow_once' && typeof o['optionId'] === 'string');
         if (permitir) {
@@ -938,14 +1011,63 @@ class ConectorAntigravity implements Conector {
   }
 }
 
+/** Resultado de decidir si el modo escritura aprueba órdenes: `motivo` explica por qué no, o es null. */
+export interface EstadoOrdenes {
+  activas: boolean;
+  motivo: string | null;
+}
+
+/** La salida de `agy --version` corresponde a la serie y versión con las que se verificó el sandbox (1.5.14 o superior de 1.5.x). */
+export function versionAgyVerificada(salida: string): boolean {
+  const encontrada = /(?<![\d.])(\d+)\.(\d+)\.(\d+)(?![\d.]|-\w)/u.exec(salida);
+  if (encontrada === null) return false;
+  const [mayor, menor, parche] = [encontrada[1], encontrada[2], encontrada[3]].map((n) => Number.parseInt(n ?? '', 10));
+  return mayor === VERSION_AGY_VERIFICADA.mayor && menor === VERSION_AGY_VERIFICADA.menor && (parche ?? -1) >= VERSION_AGY_VERIFICADA.parche;
+}
+
+/**
+ * Decide, una vez al crear el conector en modo escritura, si se aprueban órdenes: solo en macOS y solo si `agy
+ * --version` (con tope de tiempo) dice una versión verificada. Si falla o no coincide, quedan desactivadas con el motivo.
+ * `plataforma` y `ordenesActivas` existen para probar ambas ramas en cualquier sistema.
+ */
+export async function comprobarOrdenes(opciones: OpcionesConectorAntigravity = {}): Promise<EstadoOrdenes> {
+  if (opciones.ordenesActivas !== undefined) {
+    return opciones.ordenesActivas ? { activas: true, motivo: null } : { activas: false, motivo: MOTIVO_ORDENES_DESACTIVADAS };
+  }
+  if ((opciones.plataforma ?? process.platform) !== 'darwin') return { activas: false, motivo: MOTIVO_ORDENES_DESACTIVADAS };
+  const verificada = `${VERSION_AGY_VERIFICADA.mayor}.${VERSION_AGY_VERIFICADA.menor}.${VERSION_AGY_VERIFICADA.parche}`;
+  let salida: string;
+  try {
+    const invocacion = await resolverInvocacion(opciones);
+    // Fuera de cualquier repo: ni `--version` debe cargar personalizaciones del directorio de quien llama.
+    const { stdout } = await ejecutarArchivo(invocacion.orden, [...invocacion.argsPrefijo, '--version'], {
+      timeout: TIEMPO_VERSION_MS,
+      windowsHide: true,
+      cwd: tmpdir(),
+    });
+    salida = stdout;
+  } catch (error) {
+    return { activas: false, motivo: `órdenes desactivadas en Antigravity: no se pudo obtener la versión de agy (${recortar(mensajeDe(error))})` };
+  }
+  if (!versionAgyVerificada(salida)) {
+    return {
+      activas: false,
+      motivo: `órdenes desactivadas en Antigravity: su sandbox solo se verificó con agy ${verificada} o superior de la serie ${VERSION_AGY_VERIFICADA.mayor}.${VERSION_AGY_VERIFICADA.menor} (versión instalada: ${recortar(salida.trim()) || 'desconocida'})`,
+    };
+  }
+  return { activas: true, motivo: null };
+}
+
 export async function crearConectorAntigravity(opciones: OpcionesConectorAntigravity = {}): Promise<Conector> {
   let escritura: Escritura | undefined;
+  let ordenes: EstadoOrdenes | undefined;
   if (opciones.escritura !== undefined) {
     escritura = {
       raiz: validarRaizEscritura(opciones.escritura.raiz),
       raizPedida: path.normalize(opciones.escritura.raiz),
       ordenes: new Set(opciones.escritura.ordenesPermitidas.map((o) => o.trim()).filter((o) => o !== '' && !ENCADENADO.test(o))),
     };
+    ordenes = await comprobarOrdenes(opciones);
   }
-  return new ConectorAntigravity(opciones, escritura);
+  return new ConectorAntigravity(opciones, escritura, ordenes);
 }
