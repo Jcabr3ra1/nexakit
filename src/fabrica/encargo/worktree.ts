@@ -130,6 +130,7 @@ async function enlazarNodeModules(raiz: string, dir: string): Promise<void> {
   const enlace = path.join(dir, 'node_modules');
   await symlink(origen, enlace, process.platform === 'win32' ? 'junction' : 'dir');
   // Un patrón `node_modules/` (solo carpetas) ignora la carpeta real pero no el enlace, que entraría en el diff: se quita.
+  // (En Windows git ve la junction como carpeta y la ignora: `check-ignore` acierta y se queda, sin entrar en el diff.)
   try {
     await git(dir, ['check-ignore', '-q', 'node_modules']);
   } catch {
@@ -343,12 +344,22 @@ async function leerCandadoWorktree(carpeta: string): Promise<{ pid: number; raiz
   }
 }
 
+/**
+ * Clave para comparar rutas. En Windows git imprime `C:/Users/...` (barras normales) y la ruta real viene con `\` y quizá con
+ * otra caja de letras, así que ahí se igualan separadores y caja; en POSIX la ruta se compara tal cual.
+ */
+function claveDeRuta(ruta: string): string {
+  const sinFinal = ruta.replace(/\r$/u, '');
+  if (process.platform !== 'win32') return sinFinal;
+  return sinFinal.replace(/\\/gu, '/').replace(/\/+$/u, '').toLowerCase();
+}
+
 /** `true` si el repo `raiz` tiene registrado `dir` como worktree (`git worktree list`); solo entonces se ejecuta `remove` o `prune`. */
 async function worktreeRegistrado(raiz: string, dir: string): Promise<boolean> {
   try {
     const listado = (await git(raiz, ['worktree', 'list', '--porcelain'])).split('\n');
-    const buscados = new Set([dir, await realpath(dir).catch(() => dir)]);
-    return listado.some((l) => l.startsWith('worktree ') && buscados.has(l.slice('worktree '.length)));
+    const buscados = new Set([claveDeRuta(dir), claveDeRuta(await realpath(dir).catch(() => dir))]);
+    return listado.some((l) => l.startsWith('worktree ') && buscados.has(claveDeRuta(l.slice('worktree '.length))));
   } catch {
     return false;
   }

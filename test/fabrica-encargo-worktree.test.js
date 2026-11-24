@@ -169,6 +169,8 @@ test('un .git reescrito por la IA no hace ejecutar nada al leer el diff', async 
   cpSync(path.join(raiz, '.git'), path.join(malo, 'gitdir'), { recursive: true });
   const config = path.join(malo, 'gitdir', 'config');
   writeFileSync(config, `${readFileSync(config, 'utf8')}[core]\n\tfsmonitor = touch ${testigo}; true\n`);
+  // En Windows git marca `.git` como oculto y abrirlo para escribir da EPERM: se borra antes (como haría la IA).
+  rmSync(path.join(w.dir, '.git'), { force: true });
   writeFileSync(path.join(w.dir, '.git'), `gitdir: ${path.join(malo, 'gitdir')}\n`);
   writeFileSync(path.join(w.dir, 'nuevo.txt'), 'x\n');
   // Comprobación previa: sin las protecciones, git sí ejecutaría la orden.
@@ -260,7 +262,15 @@ test('si el patrón solo ignora carpetas (node_modules/), el enlace no se crea p
   git(raiz, 'add', '-A');
   git(raiz, 'commit', '-q', '-m', 'patron carpeta');
   const w = await crearWorktree(raiz, home);
-  assert.equal(existsSync(path.join(w.dir, 'node_modules')), false);
+  if (POSIX) assert.equal(existsSync(path.join(w.dir, 'node_modules')), false);
+  else {
+    // En Windows el enlace es una junction y git la trata como carpeta: `node_modules/` sí la ignora, así que puede quedar.
+    // Lo que importa es lo mismo: no entra en el diff.
+    writeFileSync(path.join(w.dir, 'a.txt'), 'dos\n');
+    const diff = (await diffDelWorktree(w)).toString('utf8');
+    assert.doesNotMatch(diff, /node_modules/u);
+    assert.deepEqual((await cambiosDelWorktree(w)).map((c) => c.ruta), ['a.txt']);
+  }
   await borrarWorktree(w);
 });
 

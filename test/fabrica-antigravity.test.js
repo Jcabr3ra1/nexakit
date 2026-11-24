@@ -743,7 +743,9 @@ test('I1: rechaza rutas con ~, variables, esquemas de URI y unidades', () => {
     for (const ruta of ['~/.ssh/authorized_keys', '~', '$HOME/.zshrc', 'src/$X/a.js', '%USERPROFILE%\\x', 'file:///etc/passwd', 'http://x/a', 'C:foo', 'C:\\x\\a', 'vscode-remote:src/a.js']) {
       assert.notEqual(motivo(e, edicion(ruta)), null, ruta);
     }
-    assert.equal(motivo(e, edicion('src/a:b.js')), null, 'un «:» que no es esquema vale en POSIX');
+    // En POSIX un «:» que no es esquema vale; en Windows es un flujo alterno de NTFS y se rechaza siempre.
+    if (process.platform === 'win32') assert.notEqual(motivo(e, edicion('src/a:b.js')), null, 'en Windows un «:» en la ruta se rechaza');
+    else assert.equal(motivo(e, edicion('src/a:b.js')), null, 'un «:» que no es esquema vale en POSIX');
   });
 });
 
