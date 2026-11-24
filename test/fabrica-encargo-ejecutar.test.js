@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gitConfigGlobalVacio } from '../test-support/git-aislado.js';
-import { ejecutarEncargo, rutasVetadas, TIEMPO_ENCARGO_MS } from '../dist/fabrica/encargo/ejecutar.js';
+import { ejecutarEncargo, reglaDeOrdenes, rutasVetadas, TIEMPO_ENCARGO_MS } from '../dist/fabrica/encargo/ejecutar.js';
 import { ORDENES_ACTIVAS } from '../dist/fabrica/conectores/antigravity.js';
 import { analizarParche } from '../dist/fabrica/encargo/parche.js';
 import { barrerHuerfanos, borrarWorktree, crearWorktree, diffDelWorktree } from '../dist/fabrica/encargo/worktree.js';
@@ -72,13 +72,15 @@ const okDe = (cambios = {}) => ({
  * Fábrica de un conector falso. `ejecutar(encargo, señal, alProgreso)` hace de la IA; el registro guarda cómo se creó
  * el conector, qué encargos recibió y si se cerró.
  */
-function fabrica(ia, ejecutar, { catalogo = CATALOGO[ia], fallaAlCrear, fallaCatalogo } = {}) {
+function fabrica(ia, ejecutar, { catalogo = CATALOGO[ia], fallaAlCrear, fallaCatalogo, ordenesActivas } = {}) {
   const registro = { creaciones: [], encargos: [], cerrados: 0 };
   const crear = async (escritura) => {
     registro.creaciones.push(escritura);
     if (fallaAlCrear) throw new Error(fallaAlCrear);
     return {
       ia,
+      // Como el conector real de Antigravity, que dice si aprueba órdenes (plataforma y versión de agy).
+      ...(ordenesActivas === undefined ? {} : { ordenesActivas }),
       catalogo: async () => {
         if (fallaCatalogo) throw new Error(fallaCatalogo);
         return catalogo;
@@ -437,23 +439,18 @@ test('auto cae a Antigravity si Codex no está disponible, con su modelo recomen
   const agy = fabrica('antigravity', async (encargo) => {
     writeFileSync(path.join(encargo.raiz, 'nuevo.txt'), 'hola\n');
     return okDe({ informe: { hallazgos: [], resumen: 'Añadí nuevo.txt.' } });
-  });
+  }, { ordenesActivas: true });
   const informe = await ejecutarEncargo(opciones(e, { ia: 'auto', conectores: { codex: codex.crear, antigravity: agy.crear } }));
   assert.equal(informe.estado, 'ok', informe.motivo);
   assert.equal(informe.ia, 'antigravity');
   assert.equal(informe.modelo, 'gemini-4-hydrogen-medium');
   assert.equal(informe.esfuerzo, null);
   assert.match(informe.avisos.join('\n'), /IA descartada: codex no está disponible: Codex no está instalado/u);
-  // El texto no promete órdenes que Antigravity rechaza: en macOS solo las de la lista; fuera, ninguna.
+  // Con el conector que aprueba órdenes (macOS y agy verificado), el texto promete solo las de la lista.
   const instrucciones = agy.registro.encargos[0].instrucciones;
-  if (ORDENES_ACTIVAS) {
-    assert.match(instrucciones, /solo se aprueban estas órdenes, escritas exactamente así y sin encadenar: `npm test`, `npm run typecheck`/u);
-    assert.match(instrucciones, /BypassSandbox se rechaza/u);
-    assert.doesNotMatch(instrucciones, /No se aprueba ninguna orden/u);
-  } else {
-    assert.match(instrucciones, /No se aprueba ninguna orden/u);
-    assert.doesNotMatch(instrucciones, /solo se aprueban estas órdenes/u);
-  }
+  assert.match(instrucciones, /solo se aprueban estas órdenes, escritas exactamente así y sin encadenar: `npm test`, `npm run typecheck`/u);
+  assert.match(instrucciones, /BypassSandbox se rechaza/u);
+  assert.doesNotMatch(instrucciones, /No se aprueba ninguna orden/u);
   // Nunca promete la carpeta temporal de Codex.
   assert.doesNotMatch(instrucciones, /carpeta temporal/u);
   // En Antigravity las órdenes se pasan al conector, que las hace cumplir (coincidencia exacta).
@@ -462,6 +459,45 @@ test('auto cae a Antigravity si Codex no está disponible, con su modelo recomen
   assert.equal(codex.registro.cerrados, 1);
   assert.equal(agy.registro.cerrados, 1);
   comprobarLimpio(e, informe);
+});
+
+test('Antigravity sin órdenes activas (otra plataforma o versión de agy): el texto no promete ninguna', async () => {
+  const e = entorno();
+  const agy = fabrica('antigravity', async () => okDe(), { ordenesActivas: false });
+  const informe = await ejecutarEncargo(opciones(e, { ia: 'antigravity', conectores: { antigravity: agy.crear } }));
+  assert.equal(informe.estado, 'sin-cambios', informe.motivo);
+  const instrucciones = agy.registro.encargos[0].instrucciones;
+  assert.match(instrucciones, /No se aprueba ninguna orden: no dependas de ejecutar pruebas/u);
+  assert.doesNotMatch(instrucciones, /solo se aprueban estas órdenes/u);
+  comprobarLimpio(e, informe);
+});
+
+test('un repo sin scripts test ni typecheck y sin --ordenes dice «No se aprueba ninguna orden», también con órdenes activas', async () => {
+  const e = entorno();
+  writeFileSync(path.join(e.raiz, 'package.json'), JSON.stringify({ name: 'demo' }));
+  git(e.raiz, 'commit', '-q', '-am', 'sin scripts');
+  const agy = fabrica('antigravity', async () => okDe(), { ordenesActivas: true });
+  const informe = await ejecutarEncargo(opciones(e, { ia: 'antigravity', conectores: { antigravity: agy.crear } }));
+  assert.equal(informe.estado, 'sin-cambios', informe.motivo);
+  assert.deepEqual(informe.ordenesPorDefecto, []);
+  assert.deepEqual(agy.registro.creaciones[0].ordenesPermitidas, []);
+  const instrucciones = agy.registro.encargos[0].instrucciones;
+  assert.match(instrucciones, /No se aprueba ninguna orden/u);
+  assert.doesNotMatch(instrucciones, /solo se aprueban estas órdenes/u);
+  comprobarLimpio(e, informe);
+});
+
+test('reglaDeOrdenes: ambas ramas se prueban en cualquier sistema inyectando si las órdenes están activas', () => {
+  const lista = ['npm test', 'npm run typecheck'];
+  assert.match(reglaDeOrdenes('antigravity', lista, true), /solo se aprueban estas órdenes, escritas exactamente así y sin encadenar: `npm test`, `npm run typecheck`/u);
+  assert.match(reglaDeOrdenes('antigravity', lista, false), /No se aprueba ninguna orden/u);
+  assert.match(reglaDeOrdenes('antigravity', [], true), /No se aprueba ninguna orden/u);
+  assert.match(reglaDeOrdenes('antigravity', [], false), /No se aprueba ninguna orden/u);
+  // Codex no depende de Antigravity: sus órdenes son una guía.
+  for (const activas of [true, false]) assert.match(reglaDeOrdenes('codex', lista, activas), /usa solo estas órdenes: `npm test`, `npm run typecheck`/u);
+  assert.match(reglaDeOrdenes('codex', [], false), /No se aprueba ninguna orden/u);
+  // Sin el dato se usa la plataforma (el valor de ORDENES_ACTIVAS).
+  assert.equal(reglaDeOrdenes('antigravity', lista), reglaDeOrdenes('antigravity', lista, ORDENES_ACTIVAS));
 });
 
 test('auto sin ninguna IA disponible dice por qué falló cada una', async () => {

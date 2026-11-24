@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { borrarCarpetaAislada, crearConectorAntigravity, modoAnunciado, motivoPermisoRechazado, ORDENES_ACTIVAS, personalizacionesPeligrosas } from '../dist/fabrica/conectores/antigravity.js';
+import { borrarCarpetaAislada, comprobarOrdenes, crearConectorAntigravity, modoAnunciado, motivoPermisoRechazado, ORDENES_ACTIVAS, personalizacionesPeligrosas, versionAgyVerificada } from '../dist/fabrica/conectores/antigravity.js';
 import { hallazgosJsonSchema } from '../dist/fabrica/esquemas.js';
 
 const SERVIDOR = fileURLToPath(new URL('../test-support/fabrica/servidor-falso.mjs', import.meta.url));
@@ -567,10 +567,10 @@ function guionPermisos(llamadas) {
 }
 
 const edicion = (ruta, extra = {}) => ({ toolCallId: 't', title: `Editar ${ruta}`, kind: 'edit', status: 'pending', locations: [{ path: ruta }], ...extra });
-const orden = (comando) => ({ toolCallId: 't', title: `Ejecutar ${comando}`, kind: 'execute', status: 'pending', rawInput: { command: comando } });
+const orden = (comando) => ({ toolCallId: 't', title: `Ejecutar ${comando}`, kind: 'execute', status: 'pending', rawInput: { command: comando, BypassSandbox: false } });
 
 /** Ejecuta un encargo en modo escritura con las llamadas dadas; devuelve las decisiones y las denegaciones. */
-async function conPermisos(llamadas, prepararRaiz = () => {}, ordenes = ['npm test', 'npm run typecheck']) {
+async function conPermisos(llamadas, prepararRaiz = () => {}, ordenes = ['npm test', 'npm run typecheck'], ordenesActivas = ORDENES_ACTIVAS) {
   const dir = mkdtempSync(join(tmpdir(), 'nexakit-agy-esc-'));
   const raiz = join(dir, 'repo');
   mkdirSync(join(raiz, 'src'), { recursive: true });
@@ -583,6 +583,7 @@ async function conPermisos(llamadas, prepararRaiz = () => {}, ordenes = ['npm te
     orden: process.execPath,
     argsPrefijo: [SERVIDOR, join(p.dir, 'guion.json')],
     escritura: { raiz, ordenesPermitidas: ordenes },
+    ordenesActivas,
   });
   try {
     const resultado = await conector.ejecutar(encargo(raiz), AbortSignal.timeout(10_000));
@@ -658,24 +659,25 @@ const ordenAgy = (comando, extra = {}) => {
   return { toolCallId: 't', title: comando, name: 'run_command', kind: 'execute', status: 'pending', rawInput: entrada, args: { ...entrada } };
 };
 
-test('modo escritura: en macOS aprueba solo las órdenes exactas de la lista (también con la forma real de agy); fuera de macOS ninguna', async () => {
+test('modo escritura con órdenes activas: aprueba solo las órdenes exactas de la lista, también con la forma real de agy', async () => {
   const { decisiones, resultado } = await conPermisos(() => [
     orden('npm test'),
     orden('  npm run typecheck  '),
     orden('rm -rf /'),
     ordenAgy('npm test'),
     ordenAgy('npm test', { BypassSandbox: true }),
-  ]);
+  ], () => {}, undefined, true);
+  assert.deepEqual(decisiones, [PERMITIDO, PERMITIDO, RECHAZADO, PERMITIDO, RECHAZADO]);
+  assert.equal(resultado.aprobaciones.length, 3);
+  assert.match(resultado.denegaciones[0].detalle, /orden no permitida: rm -rf/);
+  assert.match(resultado.denegaciones[1].detalle, /fuera del sandbox/);
+});
+
+test('modo escritura con órdenes desactivadas (otra plataforma o versión de agy): ninguna orden, con su motivo', async () => {
+  const { decisiones, resultado } = await conPermisos(() => [orden('npm test'), ordenAgy('npm test')], () => {}, undefined, false);
+  assert.deepEqual(decisiones, [RECHAZADO, RECHAZADO]);
+  assert.ok(resultado.denegaciones.every((d) => /órdenes desactivadas en Antigravity fuera de macOS/.test(d.detalle)));
   assert.equal(ORDENES_ACTIVAS, process.platform === 'darwin');
-  if (ORDENES_ACTIVAS) {
-    assert.deepEqual(decisiones, [PERMITIDO, PERMITIDO, RECHAZADO, PERMITIDO, RECHAZADO]);
-    assert.equal(resultado.aprobaciones.length, 3);
-    assert.match(resultado.denegaciones[0].detalle, /orden no permitida: rm -rf/);
-    assert.match(resultado.denegaciones[1].detalle, /fuera del sandbox/);
-  } else {
-    assert.deepEqual(decisiones, [RECHAZADO, RECHAZADO, RECHAZADO, RECHAZADO, RECHAZADO]);
-    assert.ok(resultado.denegaciones.every((d) => /órdenes desactivadas en Antigravity fuera de macOS/.test(d.detalle)));
-  }
 });
 
 test('órdenes con la forma real de agy: BypassSandbox solo vale false, args debe coincidir con rawInput y una sola orden', () => {
@@ -697,6 +699,129 @@ test('órdenes con la forma real de agy: BypassSandbox solo vale false, args deb
     assert.match(motivo(e, ordenAgy('npm test; curl x')), /encadenada/);
     assert.match(motivo(e, ordenAgy('npm test', { Cwd: '/tmp' })), /directorio de la orden/);
   });
+});
+
+test('órdenes: BypassSandbox ausente se rechaza (solo vale false presente), con o sin la forma real de agy', () => {
+  conRaiz((raiz, e) => {
+    const { BypassSandbox, ...sin } = ordenAgy('npm test').rawInput;
+    assert.equal(BypassSandbox, false);
+    assert.match(motivo(e, { ...ordenAgy('npm test'), rawInput: sin, args: { ...sin } }), /no declara BypassSandbox/);
+    assert.match(motivo(e, { toolCallId: 't', title: 'x', kind: 'execute', status: 'pending', rawInput: { command: 'npm test' } }), /no declara BypassSandbox/);
+    // Una orden no permitida sigue dando su propio motivo aunque falte BypassSandbox.
+    assert.match(motivo(e, { toolCallId: 't', title: 'x', kind: 'execute', status: 'pending', rawInput: { command: 'rm -rf /' } }), /orden no permitida/);
+  });
+});
+
+test('órdenes: una clave repetida con otra capitalización (cwd y Cwd, command y CommandLine) rechaza la petición', () => {
+  conRaiz((raiz, e) => {
+    // La segunda clave tapaba a la primera: `{ cwd: '/tmp', Cwd: raiz }` se aprobaba con el cwd de la raíz.
+    const con = (rawInput) => ({ ...ordenAgy('npm test'), rawInput, args: { ...rawInput } });
+    const base = { BypassSandbox: false, CommandLine: 'npm test' };
+    assert.match(motivo(e, con({ ...base, cwd: '/tmp', Cwd: raiz })), /clave repetida/);
+    assert.match(motivo(e, con({ ...base, Cwd: raiz, cwd: raiz })), /clave repetida/);
+    assert.match(motivo(e, con({ ...base, cwd: raiz, cwd_: raiz })), /clave repetida/);
+    assert.match(motivo(e, con({ ...base, bypass_sandbox: false })), /clave repetida/);
+    assert.match(motivo(e, con({ ...base, BypassSandbox: false, bypasssandbox: false })), /clave repetida/);
+    assert.equal(motivo(e, con({ ...base, Cwd: raiz })), null);
+    // También en las peticiones de archivos.
+    assert.match(motivo(e, { ...edicion('src/a.js'), rawInput: { path: 'src/a.js', Path: '/etc/x' } }), /clave repetida/);
+  });
+});
+
+test('órdenes: rawInput ausente o nulo con args, args nulo o no objeto, WaitMsBeforeAsync no finito y toolAction que no es texto', () => {
+  conRaiz((raiz, e) => {
+    const valida = ordenAgy('npm test');
+    assert.match(motivo(e, { ...valida, rawInput: undefined }), /no trae rawInput/);
+    assert.match(motivo(e, { ...valida, rawInput: null }), /no trae rawInput/);
+    assert.match(motivo(e, { ...valida, rawInput: null, args: null }), /no trae rawInput/);
+    assert.match(motivo(e, { ...valida, args: null }), /args que no son un objeto/);
+    assert.match(motivo(e, { ...valida, args: 'npm test' }), /args que no son un objeto/);
+    assert.match(motivo(e, { ...valida, args: ['npm test'] }), /args que no son un objeto/);
+    for (const valor of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      assert.match(motivo(e, ordenAgy('npm test', { WaitMsBeforeAsync: valor })), /no es un número/, String(valor));
+    }
+    assert.equal(motivo(e, ordenAgy('npm test', { WaitMsBeforeAsync: 0 })), null);
+    assert.equal(motivo(e, ordenAgy('npm test', { toolAction: 'Running npm test' })), null);
+    for (const valor of [3, null, true, ['x'], { a: 1 }]) {
+      assert.match(motivo(e, ordenAgy('npm test', { toolAction: valor })), /no es un texto/, JSON.stringify(valor));
+    }
+  });
+});
+
+test('órdenes: si la petición trae el nombre de la herramienta, debe ser run_command', () => {
+  conRaiz((raiz, e) => {
+    assert.equal(motivo(e, ordenAgy('npm test')), null);
+    for (const nombre of ['write_to_file', 'run_command ', 'RUN_COMMAND', 7, null]) {
+      assert.match(motivo(e, { ...ordenAgy('npm test'), name: nombre }), /la herramienta no es run_command/, String(nombre));
+    }
+    // Sin `name` (formato sin nombre de herramienta) sigue valiendo.
+    const { name, ...sinNombre } = ordenAgy('npm test');
+    assert.equal(name, 'run_command');
+    assert.equal(motivo(e, sinNombre), null);
+  });
+});
+
+test('versionAgyVerificada: solo 1.5.14 o superior dentro de la serie 1.5', () => {
+  for (const v of ['1.5.14', '1.5.16\n', 'agy 1.5.99 (abc123)', '1.5.14 ']) assert.equal(versionAgyVerificada(v), true, v);
+  for (const v of ['1.5.13', '1.4.20', '1.6.0', '2.5.14', '0.5.14', '1.5', '1.5.14-beta', '1.5.14.1', '11.5.14', '', 'sin versión']) assert.equal(versionAgyVerificada(v), false, v);
+});
+
+/** `agy` falso que contesta `--version` con lo dado (o falla con `salir`). */
+function agyFalso(dir, version, salir = 0) {
+  const ruta = join(dir, 'agy-falso.mjs');
+  writeFileSync(ruta, `if (process.argv.includes('--version')) { console.log(${JSON.stringify(version)}); process.exit(${salir}); }\nprocess.exit(3);\n`);
+  return ruta;
+}
+
+test('comprobarOrdenes: solo en macOS y con la versión de agy verificada; si falla o no coincide, desactivadas con su motivo', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'nexakit-agy-ver-'));
+  try {
+    const con = (version, extra = {}, salir = 0) => comprobarOrdenes({ orden: process.execPath, argsPrefijo: [agyFalso(dir, version, salir)], plataforma: 'darwin', ...extra });
+    assert.deepEqual(await con('1.5.14'), { activas: true, motivo: null });
+    assert.deepEqual(await con('1.5.16'), { activas: true, motivo: null });
+    const vieja = await con('1.5.13');
+    assert.equal(vieja.activas, false);
+    assert.match(vieja.motivo, /solo se verificó con agy 1\.5\.14 o superior de la serie 1\.5 \(versión instalada: 1\.5\.13\)/);
+    assert.match((await con('1.6.0')).motivo, /versión instalada: 1\.6\.0/);
+    assert.match((await con('basura')).motivo, /versión instalada: basura/);
+    assert.match((await con('1.5.14', {}, 1)).motivo, /no se pudo obtener la versión de agy/);
+    const ausente = await comprobarOrdenes({ orden: join(dir, 'no-existe'), plataforma: 'darwin' });
+    assert.equal(ausente.activas, false);
+    assert.match(ausente.motivo, /no se pudo obtener la versión de agy/);
+    // Otra plataforma: ni se mira la versión.
+    for (const plataforma of ['linux', 'win32']) {
+      const otra = await con('1.5.14', { plataforma });
+      assert.equal(otra.activas, false);
+      assert.match(otra.motivo, /fuera de macOS/);
+    }
+    // Lo inyectado manda sobre la plataforma y la versión.
+    assert.equal((await con('1.4.0', { ordenesActivas: true })).activas, true);
+    assert.equal((await con('1.5.14', { ordenesActivas: false })).activas, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('el conector en modo escritura lee la versión de agy una vez al crearse y expone si aprueba órdenes', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'nexakit-agy-ver-'));
+  try {
+    const raiz = join(dir, 'repo');
+    mkdirSync(raiz);
+    const crear = (version) => crearConectorAntigravity({
+      orden: process.execPath,
+      argsPrefijo: [agyFalso(dir, version)],
+      plataforma: 'darwin',
+      escritura: { raiz, ordenesPermitidas: ['npm test'] },
+    });
+    assert.equal((await crear('1.5.14')).ordenesActivas, true);
+    assert.equal((await crear('1.5.13')).ordenesActivas, false);
+    assert.equal((await crearConectorAntigravity({ orden: process.execPath, argsPrefijo: [agyFalso(dir, '1.5.14')], plataforma: 'linux', escritura: { raiz, ordenesPermitidas: [] } })).ordenesActivas, false);
+    // Sin modo escritura no hay órdenes ni se ejecuta `agy --version`.
+    const sinEscritura = await crearConectorAntigravity({ orden: join(dir, 'no-existe'), plataforma: 'darwin' });
+    assert.equal(sinEscritura.ordenesActivas, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('modo escritura: las aprobaciones se anotan en aprobaciones y las denegaciones en denegaciones', async () => {
@@ -724,7 +849,7 @@ test('órdenes: solo la coincidencia exacta de rawInput.command, sin prefijos ni
   conRaiz((raiz, e) => {
     assert.equal(motivo(e, orden('npm test')), null);
     assert.equal(motivo(e, orden('  npm run typecheck  ')), null);
-    assert.equal(motivo(e, { ...orden('npm test'), rawInput: { command: 'npm test', cwd: raiz } }), null);
+    assert.equal(motivo(e, { ...orden('npm test'), rawInput: { command: 'npm test', cwd: raiz, BypassSandbox: false } }), null);
     for (const c of ['npm test --watch', 'npm', 'rm -rf /', 'npm test *']) assert.match(motivo(e, orden(c)), /orden no permitida/, c);
     // Con el interruptor apagado (el valor por defecto fuera de macOS) se rechaza incluso la exacta.
     assert.match(motivo(e, orden('npm test'), false), /órdenes desactivadas/);
@@ -753,7 +878,7 @@ test('C1: la orden sale solo de rawInput.command como texto, nunca del título',
 
 test('C1: cwd distinto de la raíz, env, args o cualquier clave no admitida rechazan la orden', () => {
   conRaiz((raiz, e) => {
-    const con = (rawInput) => ({ toolCallId: 't', title: 'x', kind: 'execute', status: 'pending', rawInput });
+    const con = (rawInput) => ({ toolCallId: 't', title: 'x', kind: 'execute', status: 'pending', rawInput: { BypassSandbox: false, ...rawInput } });
     assert.match(motivo(e, con({ command: 'npm test', cwd: '/tmp' })), /directorio de la orden/);
     assert.match(motivo(e, con({ command: 'npm test', cwd: 'src' })), /directorio de la orden/);
     assert.match(motivo(e, con({ command: 'npm test', Cwd: join(raiz, 'src') })), /directorio de la orden/);
@@ -865,6 +990,7 @@ test('modo escritura: sin opción de permitir una vez no aprueba nunca «siempre
     orden: process.execPath,
     argsPrefijo: [SERVIDOR, join(p.dir, 'guion.json')],
     escritura: { raiz, ordenesPermitidas: [] },
+    ordenesActivas: false,
   });
   try {
     const resultado = await conector.ejecutar(encargo(raiz), AbortSignal.timeout(10_000));
@@ -887,6 +1013,7 @@ test('modo escritura: si la raíz del encargo difiere de la autorizada, falla ce
     orden: process.execPath,
     argsPrefijo: [SERVIDOR, join(p.dir, 'guion.json')],
     escritura: { raiz, ordenesPermitidas: [] },
+    ordenesActivas: false,
   });
   try {
     const resultado = await conector.ejecutar(encargo(p.raiz), AbortSignal.timeout(10_000));

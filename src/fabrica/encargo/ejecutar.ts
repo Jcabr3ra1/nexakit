@@ -181,9 +181,9 @@ async function ordenesDelRepo(dir: string): Promise<string[]> {
  * (coincidencia exacta) y solo en macOS, donde se verificó su sandbox; fuera de macOS no se aprueba ninguna y el texto
  * no promete lo que se va a rechazar.
  */
-function reglaDeOrdenes(ia: IAEncargo, ordenes: readonly string[]): string {
+export function reglaDeOrdenes(ia: IAEncargo, ordenes: readonly string[], ordenesActivas: boolean = ORDENES_ACTIVAS): string {
   const lista = ordenes.map((o) => `\`${o}\``).join(', ');
-  if (ordenes.length === 0 || (ia === 'antigravity' && !ORDENES_ACTIVAS)) return '- No se aprueba ninguna orden: no dependas de ejecutar pruebas.';
+  if (ordenes.length === 0 || (ia === 'antigravity' && !ordenesActivas)) return '- No se aprueba ninguna orden: no dependas de ejecutar pruebas.';
   if (ia === 'antigravity') {
     return `- Para comprobar tu trabajo solo se aprueban estas órdenes, escritas exactamente así y sin encadenar: ${lista}. Corren en el sandbox de Antigravity, sin red y sin poder escribir fuera de esta carpeta (puede que tampoco dentro). Si una falla por el sandbox, no la repitas fuera de él (BypassSandbox se rechaza): dilo en el resumen.`;
   }
@@ -537,7 +537,7 @@ export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<Inform
       // Siempre el worktree: es también la raíz de escritura del conector, que rechaza cualquier otra.
       raiz: w.dir,
       base: w.base,
-      instrucciones: instruccionesDelEncargo(texto, lecciones, reglaDeOrdenes(iaElegida, ordenes)),
+      instrucciones: instruccionesDelEncargo(texto, lecciones, reglaDeOrdenes(iaElegida, ordenes, conector.ordenesActivas)),
       ordenesPermitidas: ordenes,
     };
 
