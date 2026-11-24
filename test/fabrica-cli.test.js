@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { gitConfigGlobalVacio } from '../test-support/git-aislado.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ejecutarCli, tablaRecorrido } from '../dist/fabrica/cli.js';
+import { ejecutarCli, lineasInforme, tablaRecorrido } from '../dist/fabrica/cli.js';
 import { calcularHuella } from '../dist/fabrica/enrutador.js';
 import { actualizar, evidenciaVacia, guardar } from '../dist/fabrica/evidencia.js';
 import { nombreRepo } from '../dist/fabrica/rastro.js';
@@ -210,7 +210,7 @@ test('con evidencia en el HOME la CLI explica la elección medida', async () => 
   await guardar(e.home, ev, ahora);
   const { codigo, out } = await cli(['proponer', '--base', 'main'], e);
   assert.equal(codigo, 0);
-  assert.match(out, /^ {2}pruebas: gpt-6\.1-terra medium: calidad ≥ 0,9\d \(102 obs\.\), ~4,0k tokens \(criterio barato\)$/mu);
+  assert.match(out, /^ {2}pruebas: gpt-6\.1-terra medium: calidad ≥ 0,9\d \(102 obs\.\), ~4,0k tokens; criterio barato$/mu);
   assert.doesNotMatch(out, /^Aviso: pruebas:/mu);
 });
 
@@ -813,6 +813,23 @@ test('encargar con un encargo invalido sale con 1 y enseña las rutas vetadas', 
   assert.match(out, /Encargo [^\n]+: invalido/u);
   assert.match(out, /Rutas vetadas \(no se guarda ningún diff\):\n {2}- \.claude\/settings\.json \(cambia «\.claude»\)/u);
   assert.doesNotMatch(out, /^Diff:/mu);
+});
+
+test('encargar --help y -h muestran la ayuda con código 0', async () => {
+  const e = escenario();
+  for (const bandera of ['--help', '-h']) {
+    const r = await cli(['encargar', bandera], e);
+    assert.equal(r.codigo, 0, bandera);
+    assert.equal(r.err, '');
+    assert.match(r.out, /nexakit encargar --ia/u);
+  }
+});
+
+test('un encargo invalido por escrituras fuera de la copia avisa de no editar el repo', () => {
+  const base = { id: 'x', estado: 'invalido', ia: null, modelo: null, esfuerzo: null, segundos: 1, tokens: null, ordenesPorDefecto: [], ordenesExtra: [], rutaDiff: null, archivos: [], rutasVetadas: [], escriturasFuera: ['/tmp/a'], denegaciones: [], avisos: [], resumen: '', rutaInforme: '/tmp/i' };
+  const aviso = 'No edites el repo mientras corre un encargo: cualquier cambio fuera de la copia lo invalida.';
+  assert.ok(lineasInforme(base).includes(aviso));
+  assert.ok(!lineasInforme({ ...base, escriturasFuera: [] }).includes(aviso));
 });
 
 test('encargar con una IA que falla sale con 1 y con --ia auto cae a la siguiente', async () => {

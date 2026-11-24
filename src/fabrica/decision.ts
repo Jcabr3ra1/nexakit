@@ -167,7 +167,7 @@ const sinDatosDe = (c: Candidato): Descartado => ({ candidato: c, motivo: 'sin d
  */
 export function elegir(entrada: EntradaElegir): Decision {
   const { estacion, riesgo, evidencia, criterio = CRITERIO_PREDETERMINADO } = entrada;
-  const notaCriterio = ` (criterio ${criterio})`;
+  const notaCriterio = `; criterio ${criterio}`;
   const candidatos = entrada.candidatos.filter((c, i, todos) => todos.findIndex((otro) => mismoCandidato(otro, c)) === i);
   const primero = candidatos[0];
   if (primero === undefined) throw new ErrorFabrica(`No hay candidatos para elegir modelo en la estación ${estacion}`);
@@ -195,7 +195,7 @@ export function elegir(entrada: EntradaElegir): Decision {
       eleccion: primero,
       calidad: null,
       tokensEsperados: null,
-      explicacion: `${nombreDe(primero)}: sin datos medidos, se usa la tabla manual (conviene medir con el banco)${notaCriterio}`,
+      explicacion: `${nombreDe(primero)}: sin datos medidos, se usa la tabla manual (conviene medir con el banco)`,
       descartados: sinMedirOrdenados(primero),
       sinDatos: true,
       alcanzaUmbral: false,
@@ -211,7 +211,7 @@ export function elegir(entrada: EntradaElegir): Decision {
       eleccion: tabla,
       calidad: null,
       tokensEsperados: null,
-      explicacion: `ningún modelo medido alcanza el umbral; se usa ${nombreDe(tabla)} de la tabla, sin datos medidos${notaCriterio}`,
+      explicacion: `ningún modelo medido alcanza el umbral; se usa ${nombreDe(tabla)} de la tabla, sin datos medidos`,
       descartados: [
         ...ordenarPorCoste(medidos).map((m) => ({ candidato: m.candidato, motivo: motivoCalidad(m) })),
         ...sinMedirOrdenados(tabla),

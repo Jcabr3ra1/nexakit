@@ -411,6 +411,9 @@ export function lineasInforme(i: InformeEncargo): string[] {
   if (i.rutasVetadas.length > 0) lineas.push('Rutas vetadas (no se guarda ningún diff):', ...i.rutasVetadas.map((r) => `  - ${enUnaLinea(r)}`));
   if (i.escriturasFuera.length > 0) lineas.push('Escrituras fuera de la copia:', ...i.escriturasFuera.map((r) => `  - ${enUnaLinea(r)}`));
   if (i.denegaciones.length > 0) lineas.push(`Denegaciones: ${i.denegaciones.length}`);
+  if (i.estado === 'invalido' && i.escriturasFuera.length > 0) {
+    lineas.push('No edites el repo mientras corre un encargo: cualquier cambio fuera de la copia lo invalida.');
+  }
   for (const a of i.avisos) lineas.push(`Aviso: ${enUnaLinea(a)}`);
   if (i.resumen !== '') lineas.push('', 'Resumen de la IA:', limpiar(i.resumen).trimEnd());
   lineas.push('', `Informe: ${i.rutaInforme}`);
@@ -661,6 +664,10 @@ export async function ejecutarCli(argv: string[], io: IoCli, opciones: OpcionesC
     await io.err(AYUDA);
     return 2;
   }
+  if (orden === 'encargar' && (resto.includes('--help') || resto.includes('-h'))) {
+    await io.out(AYUDA);
+    return 0;
+  }
   const especificacion = orden === undefined ? undefined : Object.hasOwn(OPCIONES, orden) ? OPCIONES[orden] : undefined;
   if (orden === undefined || especificacion === undefined) {
     if (orden !== undefined) await io.err(`Orden desconocida: ${limpiar(orden)}\n`);
@@ -675,7 +682,7 @@ export async function ejecutarCli(argv: string[], io: IoCli, opciones: OpcionesC
       if (analizado.positionals.length > 0) throw new ErrorUso('Sobran argumentos');
       valores = analizado.values;
     } catch (error) {
-      throw error instanceof ErrorUso ? error : new ErrorUso(`Argumentos no válidos para «fabrica ${orden}»`);
+      throw error instanceof ErrorUso ? error : new ErrorUso(`Argumentos no válidos para «${orden === 'encargar' ? '' : 'fabrica '}${orden}»`);
     }
     const json = valores['json'] === true;
     switch (orden) {

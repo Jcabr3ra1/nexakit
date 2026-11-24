@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { chmod, lstat, mkdir, readdir, readFile, realpath, rm } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readdir, readFile, realpath, rm, symlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { prefijoRepoTemporal } from '../banco/ejecutar.js';
@@ -104,6 +104,32 @@ const mensajeDe = (error: unknown): string => (error instanceof Error ? error.me
 
 const borrarCarpeta = (ruta: string): Promise<void> => rm(ruta, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
 
+/**
+ * Enlaza `node_modules` del repo real en el worktree para que la IA pueda compilar y probar sin red.
+ * Solo si es una carpeta real (no un enlace) y git la tiene ignorada, también ya como enlace dentro del worktree: así no entra en el diff ni dispara el análisis
+ * de enlaces que salen del repo. Codex escribe con sandbox por ruta real (no puede tocar el `node_modules` real) y
+ * Antigravity veta componentes que sean enlaces. Riesgo residual: la IA puede LEER las dependencias.
+ * `borrarWorktree` borra el enlace sin seguirlo.
+ */
+async function enlazarNodeModules(raiz: string, dir: string): Promise<void> {
+  const origen = path.join(raiz, 'node_modules');
+  const info = await lstat(origen).catch(() => null);
+  if (info === null || !info.isDirectory() || info.isSymbolicLink()) return;
+  try {
+    await git(raiz, ['check-ignore', '-q', 'node_modules']);
+  } catch {
+    return;
+  }
+  const enlace = path.join(dir, 'node_modules');
+  await symlink(origen, enlace, process.platform === 'win32' ? 'junction' : 'dir');
+  // Un patrón `node_modules/` (solo carpetas) ignora la carpeta real pero no el enlace, que entraría en el diff: se quita.
+  try {
+    await git(dir, ['check-ignore', '-q', 'node_modules']);
+  } catch {
+    await rm(enlace, { force: true });
+  }
+}
+
 export interface OpcionesCrearWorktree {
   /** Solo para pruebas: se llama justo después de crear el worktree; si lanza, se prueba la limpieza. */
   despuesDeCrear?: () => Promise<void>;
@@ -143,6 +169,7 @@ export async function crearWorktree(raiz: string, home: string, opciones: Opcion
       // Sin hooks: el `post-checkout` del repo real correría sobre él antes de la comprobación del disco.
       await git(raiz, ['-c', `core.hooksPath=${os.devNull}`, 'worktree', 'add', '--detach', '--quiet', '--', dir, base]);
       await chmod(dir, 0o700);
+      await enlazarNodeModules(raiz, dir);
       await opciones.despuesDeCrear?.();
       // Ahora el `.git` del worktree es el que escribió git: se guarda su gitdir real, que no volverá a leerse de ahí.
       const gitDir = path.resolve(dir, (await git(dir, ['rev-parse', '--absolute-git-dir'])).trim());

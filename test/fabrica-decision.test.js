@@ -155,7 +155,7 @@ test('un candidato sin datos nunca supera el umbral, aunque sea el más barato: 
 
 test('la explicación nombra calidad, observaciones, tokens y la alternativa más barata descartada', () => {
   const d = elegir({ estacion: 'codigo', riesgo: 'medio', candidatos: [LUNA, FLASH, SOL], evidencia: EV });
-  assert.equal(d.explicacion, 'gpt-6-luna low: calidad ≥ 0,79 (12 obs.), ~3,2k tokens; descartado gemini-3.8-flash-low (≥ 0,48 < 0,75) (criterio barato)');
+  assert.equal(d.explicacion, 'gpt-6-luna low: calidad ≥ 0,79 (12 obs.), ~3,2k tokens; descartado gemini-3.8-flash-low (≥ 0,48 < 0,75); criterio barato');
   assert.equal(d.explicacion.includes('\n'), false);
 });
 
@@ -224,7 +224,7 @@ test('evidencia mixta: si ningún medido alcanza el umbral, manda el primer cand
   assert.equal(d.alcanzaUmbral, false);
   assert.equal(d.calidad, null);
   assert.equal(d.tokensEsperados, null);
-  assert.equal(d.explicacion, 'ningún modelo medido alcanza el umbral; se usa gpt-6-sol high de la tabla, sin datos medidos (criterio barato)');
+  assert.equal(d.explicacion, 'ningún modelo medido alcanza el umbral; se usa gpt-6-sol high de la tabla, sin datos medidos');
   assert.equal(d.descartados.length, 2);
   assert.deepEqual(d.descartados[0].candidato, FLASH);
   assert.match(d.descartados[0].motivo, /^calidad ≥ 0,\d\d < 0,85$/u);

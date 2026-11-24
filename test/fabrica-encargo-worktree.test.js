@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, readlinkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { gitConfigGlobalVacio } from '../test-support/git-aislado.js';
-import { borrarWorktree, crearWorktree, diffDelWorktree } from '../dist/fabrica/encargo/worktree.js';
+import { borrarWorktree, cambiosDelWorktree, crearWorktree, diffDelWorktree } from '../dist/fabrica/encargo/worktree.js';
 
 process.env.GIT_CONFIG_GLOBAL = gitConfigGlobalVacio;
 process.env.GIT_CONFIG_NOSYSTEM = '1';
@@ -212,4 +212,48 @@ test('si falla la creación se limpia todo, también la entrada de .git/worktree
   assert.equal(git(raiz, 'worktree', 'list').split('\n').length, 1);
   assert.equal(existsSync(path.join(raiz, '.git', 'worktrees')) ? readdirSync(path.join(raiz, '.git', 'worktrees')).length : 0, 0);
   assert.deepEqual(readdirSync(path.join(home, '.nexakit', 'encargos')), []);
+});
+
+function conNodeModules(ignorado) {
+  const { raiz, home } = entorno();
+  if (ignorado) {
+    writeFileSync(path.join(raiz, '.gitignore'), 'node_modules\n');
+    git(raiz, 'add', '-A');
+    git(raiz, 'commit', '-q', '-m', 'ignora');
+  }
+  mkdirSync(path.join(raiz, 'node_modules', 'dep'), { recursive: true });
+  writeFileSync(path.join(raiz, 'node_modules', 'dep', 'i.js'), 'x\n');
+  return { raiz, home };
+}
+
+test('enlaza node_modules ignorado, no entra en el diff y borrar no toca el real', async () => {
+  const { raiz, home } = conNodeModules(true);
+  const w = await crearWorktree(raiz, home);
+  const enlace = path.join(w.dir, 'node_modules');
+  assert.ok(lstatSync(enlace).isSymbolicLink());
+  assert.equal(readlinkSync(enlace), path.join(raiz, 'node_modules'));
+  assert.equal(readFileSync(path.join(enlace, 'dep', 'i.js'), 'utf8'), 'x\n');
+  writeFileSync(path.join(w.dir, 'a.txt'), 'dos\n');
+  await diffDelWorktree(w);
+  assert.deepEqual((await cambiosDelWorktree(w)).map((c) => c.ruta), ['a.txt']);
+  await borrarWorktree(w);
+  assert.equal(existsSync(w.dir), false);
+  assert.equal(readFileSync(path.join(raiz, 'node_modules', 'dep', 'i.js'), 'utf8'), 'x\n');
+});
+
+test('no enlaza node_modules si no está ignorado por git', async () => {
+  const { raiz, home } = conNodeModules(false);
+  const w = await crearWorktree(raiz, home);
+  assert.equal(existsSync(path.join(w.dir, 'node_modules')), false);
+  await borrarWorktree(w);
+});
+
+test('si el patrón solo ignora carpetas (node_modules/), el enlace no se crea para no entrar en el diff', async () => {
+  const { raiz, home } = conNodeModules(true);
+  writeFileSync(path.join(raiz, '.gitignore'), 'node_modules/\n');
+  git(raiz, 'add', '-A');
+  git(raiz, 'commit', '-q', '-m', 'patron carpeta');
+  const w = await crearWorktree(raiz, home);
+  assert.equal(existsSync(path.join(w.dir, 'node_modules')), false);
+  await borrarWorktree(w);
 });
