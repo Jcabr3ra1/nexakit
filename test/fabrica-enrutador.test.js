@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { gitConfigGlobalVacio } from '../test-support/git-aislado.js';
 import path from 'node:path';
@@ -14,6 +14,7 @@ import {
 } from '../dist/fabrica/enrutador.js';
 import { ErrorFabrica } from '../dist/fabrica/errores.js';
 import { actualizar, evidenciaVacia, guardar } from '../dist/fabrica/evidencia.js';
+import { ejecutarCli } from '../dist/fabrica/cli.js';
 
 process.env.GIT_CONFIG_GLOBAL = gitConfigGlobalVacio;
 process.env.GIT_CONFIG_NOSYSTEM = '1';
@@ -445,7 +446,74 @@ test('con evidencia elige el modelo más barato que alcanza el umbral y lo expli
   assert.equal(seguridad.esfuerzo, 'high');
   assert.ok(seguridad.calidad > 0.85 && seguridad.calidad < 1, String(seguridad.calidad));
   assert.match(seguridad.explicacion, /^gpt-6-sol high: calidad ≥ 0,9\d \(\d+ obs\.\)/u);
+  assert.match(seguridad.explicacion, /criterio barato/u);
   assert.ok(r.avisos.every((a) => !a.startsWith('seguridad:')), r.avisos.join('\n'));
+});
+
+async function preferencias(homeDirectory, ...args) {
+  let salida = '';
+  let error = '';
+  const codigo = await ejecutarCli(['preferencias', ...args], {
+    out: (texto) => { salida += texto; },
+    err: (texto) => { error += texto; },
+  }, { homeDirectory });
+  return { codigo, salida, error };
+}
+
+test('preferencias guarda y muestra el criterio global que usa el enrutador', async () => {
+  const raiz = crearRepo();
+  escribir(raiz, 'hooks/pre-tool.js', 'export {};\n');
+  const home = await homeConEvidencia([
+    ['codex', 'gpt-6.1-sol', 'high', 'seguridad', 200, 2, 9000],
+    ['codex', 'gpt-6-sol', 'high', 'seguridad', 200, 12, 3000],
+  ]);
+  const proponerSeguridad = async () => porNombre(await proponerReal({ raiz, base: 'main', catalogos: CATALOGOS, home }), 'seguridad');
+  const archivo = path.join(home, '.nexakit', 'fabrica', 'preferencias.json');
+  assert.deepEqual(await preferencias(home), { codigo: 0, salida: 'Criterio de la fábrica: barato\n', error: '' });
+  assert.equal(existsSync(archivo), false);
+  assert.equal((await proponerSeguridad()).modelo, 'gpt-6-sol');
+
+  assert.equal((await preferencias(home, '--criterio', 'calidad')).codigo, 0);
+  for (const texto of [readFileSync(archivo, 'utf8'), (await preferencias(home, '--json')).salida]) {
+    assert.deepEqual(JSON.parse(texto), { criterio: 'calidad' });
+  }
+  if (process.platform !== 'win32') {
+    assert.equal(statSync(archivo).mode & 0o777, 0o600);
+    assert.equal(statSync(path.dirname(archivo)).mode & 0o777, 0o700);
+  }
+  const seguridad = await proponerSeguridad();
+  assert.equal(seguridad.modelo, 'gpt-6.1-sol');
+  assert.match(seguridad.explicacion, /criterio calidad/u);
+
+  assert.equal((await preferencias(home, '--criterio', '')).codigo, 2);
+  assert.equal((await proponerSeguridad()).modelo, 'gpt-6.1-sol');
+  writeFileSync(archivo, '{"criterio":"inválido"}');
+  assert.equal((await proponerSeguridad()).modelo, 'gpt-6-sol');
+  assert.equal((await preferencias(home, '--criterio', 'barato')).codigo, 0);
+  assert.deepEqual(JSON.parse(readFileSync(archivo, 'utf8')), { criterio: 'barato' });
+});
+
+test('preferencias ignora enlaces al leer y rechaza las carpetas enlazadas al guardar', { skip: process.platform === 'win32' }, async () => {
+  const home = mkdtempSync(path.join(tmpdir(), 'fabrica-preferencias-'));
+  temporales.push(home);
+  const destino = path.join(home, 'destino');
+  mkdirSync(path.join(destino, 'fabrica'), { recursive: true });
+  const original = '{"criterio":"calidad"}';
+  const archivo = path.join(destino, 'fabrica', 'preferencias.json');
+  writeFileSync(archivo, original);
+  symlinkSync(destino, path.join(home, '.nexakit'), 'dir');
+  assert.deepEqual(JSON.parse((await preferencias(home, '--json')).salida), { criterio: 'barato' });
+  assert.equal((await preferencias(home, '--criterio', 'barato')).codigo, 1);
+  assert.equal(readFileSync(archivo, 'utf8'), original);
+
+  rmSync(path.join(home, '.nexakit'));
+  const fabrica = path.join(home, '.nexakit', 'fabrica');
+  mkdirSync(fabrica, { recursive: true });
+  symlinkSync(archivo, path.join(fabrica, 'preferencias.json'));
+  assert.deepEqual(JSON.parse((await preferencias(home, '--json')).salida), { criterio: 'barato' });
+  assert.equal((await preferencias(home, '--criterio', 'barato')).codigo, 0);
+  assert.equal(readFileSync(archivo, 'utf8'), original);
+  assert.deepEqual(JSON.parse(readFileSync(path.join(fabrica, 'preferencias.json'), 'utf8')), { criterio: 'barato' });
 });
 
 test('la explicación y la calidad entran en la huella', async () => {

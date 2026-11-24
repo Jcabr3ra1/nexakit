@@ -64,6 +64,32 @@ test('con evidencia sintética se elige el más barato con cuantil >= umbral, au
   assert.equal(d.descartados.length, 2);
 });
 
+test('el criterio calidad elige el mayor cuantil entre los medidos que alcanzan el umbral', () => {
+  const d = elegir({ estacion: 'codigo', riesgo: 'medio', candidatos: [LUNA, FLASH, SOL], evidencia: EV, criterio: 'calidad' });
+  assert.deepEqual(d.eleccion, SOL);
+  assert.equal(d.alcanzaUmbral, true);
+  assert.match(d.explicacion, /criterio calidad/u);
+  assert.match(d.descartados.find((m) => m.candidato === LUNA).motivo, /menor cuantil/u);
+});
+
+test('con el mismo cuantil, calidad desempata por tokens exactos', () => {
+  const ev = evidenciaCon(
+    fila('codex', LUNA.modelo, LUNA.esfuerzo, 100, 0, 3001),
+    fila('codex', SOL.modelo, SOL.esfuerzo, 100, 0, 3000),
+  );
+  const d = elegir({ estacion: 'codigo', riesgo: 'medio', candidatos: [LUNA, SOL], evidencia: ev, criterio: 'calidad' });
+  assert.deepEqual(d.eleccion, SOL);
+  assert.equal(d.tokensEsperados, 3000);
+});
+
+test('con calidad y ningún modelo por encima del umbral se elige el mejor medido', () => {
+  const ev = { ...EV, filas: EV.filas.filter((f) => f.modelo !== SOL.modelo) };
+  const d = elegir({ estacion: 'codigo', riesgo: 'alto', candidatos: [SOL, LUNA, FLASH], evidencia: ev, criterio: 'calidad' });
+  assert.deepEqual(d.eleccion, LUNA);
+  assert.equal(d.alcanzaUmbral, false);
+  assert.match(d.explicacion, /ningún modelo alcanza el umbral.*criterio calidad/u);
+});
+
 test('con riesgo alto se elige otro, más caro', () => {
   const medio = elegir({ estacion: 'codigo', riesgo: 'medio', candidatos: [LUNA, FLASH, SOL], evidencia: EV });
   const alto = elegir({ estacion: 'codigo', riesgo: 'alto', candidatos: [LUNA, FLASH, SOL], evidencia: EV });
@@ -129,7 +155,7 @@ test('un candidato sin datos nunca supera el umbral, aunque sea el más barato: 
 
 test('la explicación nombra calidad, observaciones, tokens y la alternativa más barata descartada', () => {
   const d = elegir({ estacion: 'codigo', riesgo: 'medio', candidatos: [LUNA, FLASH, SOL], evidencia: EV });
-  assert.equal(d.explicacion, 'gpt-6-luna low: calidad ≥ 0,79 (12 obs.), ~3,2k tokens; descartado gemini-3.8-flash-low (≥ 0,48 < 0,75)');
+  assert.equal(d.explicacion, 'gpt-6-luna low: calidad ≥ 0,79 (12 obs.), ~3,2k tokens; descartado gemini-3.8-flash-low (≥ 0,48 < 0,75) (criterio barato)');
   assert.equal(d.explicacion.includes('\n'), false);
 });
 
@@ -198,7 +224,7 @@ test('evidencia mixta: si ningún medido alcanza el umbral, manda el primer cand
   assert.equal(d.alcanzaUmbral, false);
   assert.equal(d.calidad, null);
   assert.equal(d.tokensEsperados, null);
-  assert.equal(d.explicacion, 'ningún modelo medido alcanza el umbral; se usa gpt-6-sol high de la tabla, sin datos medidos');
+  assert.equal(d.explicacion, 'ningún modelo medido alcanza el umbral; se usa gpt-6-sol high de la tabla, sin datos medidos (criterio barato)');
   assert.equal(d.descartados.length, 2);
   assert.deepEqual(d.descartados[0].candidato, FLASH);
   assert.match(d.descartados[0].motivo, /^calidad ≥ 0,\d\d < 0,85$/u);

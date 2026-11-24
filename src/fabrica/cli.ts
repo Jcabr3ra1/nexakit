@@ -10,6 +10,7 @@ import { describirPlan, ejecutarBanco, planificarBanco, verificarPlanAprobado, t
 import { type FabricasConectores, type InformeEncargo, type OpcionesEncargo, ejecutarEncargo } from './encargo/ejecutar.js';
 import { ErrorEntorno, ErrorFabrica } from './errores.js';
 import { cargar } from './evidencia.js';
+import { esCriterio, guardarCriterio, leerCriterio } from './preferencias.js';
 import { consumirPlanBanco, guardarPlanBanco, nombreRepo } from './rastro.js';
 import {
   cerrarConectores,
@@ -50,6 +51,7 @@ const AYUDA = `Uso: nexakit fabrica proponer --base <rama> [--foco <texto>] [--j
      nexakit fabrica estado --id <id> [--json]
      nexakit fabrica resultado --id <id> [--veredictos <archivo.json>] [--json]
      nexakit fabrica cancelar --id <id>
+     nexakit fabrica preferencias [--criterio calidad|barato] [--json]
      nexakit encargar --ia codex|antigravity|auto --encargo <archivo.md> [--modelo <modelo>] [--esfuerzo <esfuerzo>]
                       [--ordenes <archivo.json>] [--tiempo <min>] [--json]
      nexakit fabrica banco planificar [--fase 1|2] [--estacion <estacion>] [--json]
@@ -57,8 +59,9 @@ const AYUDA = `Uso: nexakit fabrica proponer --base <rama> [--foco <texto>] [--j
 
 proponer lee el diff contra la rama base, consulta los modelos disponibles y muestra el
 recorrido de revisión: estaciones, IA, modelo, esfuerzo, órdenes permitidas y huella. Cada
-modelo se elige con la evidencia medida (el más barato que basta según el riesgo) y se explica;
+modelo externo se elige con la evidencia medida, el umbral del riesgo y el criterio global;
 sin datos manda la tabla manual y se avisa de que conviene medir.
+preferencias muestra el criterio global o lo guarda con --criterio (por defecto, barato).
 lanzar ejecuta ese recorrido en primer plano si la huella coincide con la propuesta y el
 diff sigue siendo el mismo; muestra el progreso y, al terminar, la ruta de consolidado.md.
   --cambios es un JSON con una lista de { "estacion", "quitar"?, "ia"?, "modelo"?, "esfuerzo"? }.
@@ -575,7 +578,18 @@ async function ordenBancoEjecutar(ctx: Contexto, huella: string, json: boolean):
 // ---------------------------------------------------------------------------------------------
 // Entrada
 
+async function ordenPreferencias(ctx: Contexto, valor: unknown, json: boolean): Promise<number> {
+  if (valor !== undefined && !esCriterio(valor)) {
+    throw new ErrorUso('El criterio debe ser «calidad» o «barato»');
+  }
+  const criterio = valor ?? await leerCriterio(ctx.home);
+  if (valor !== undefined) await guardarCriterio(ctx.home, criterio);
+  await salida(ctx, json ? JSON.stringify({ criterio }) : `Criterio de la fábrica: ${criterio}`);
+  return 0;
+}
+
 const OPCIONES: Record<string, ParseArgsOptionsConfig> = {
+  preferencias: { criterio: { type: 'string' }, json: { type: 'boolean' } },
   proponer: { base: { type: 'string' }, foco: { type: 'string' }, json: { type: 'boolean' } },
   lanzar: { huella: { type: 'string' }, cambios: { type: 'string' }, json: { type: 'boolean' } },
   estado: { id: { type: 'string' }, json: { type: 'boolean' } },
@@ -650,6 +664,8 @@ export async function ejecutarCli(argv: string[], io: IoCli, opciones: OpcionesC
     }
     const json = valores['json'] === true;
     switch (orden) {
+      case 'preferencias':
+        return await ordenPreferencias(ctx, valores['criterio'], json);
       case 'proponer':
         return await ordenProponer(ctx, exigir(valorTexto(valores, 'base'), '--base'), valorTexto(valores, 'foco'), json);
       case 'lanzar':

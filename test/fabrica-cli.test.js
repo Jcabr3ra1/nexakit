@@ -207,7 +207,7 @@ test('con evidencia en el HOME la CLI explica la elección medida', async () => 
   await guardar(e.home, ev, ahora);
   const { codigo, out } = await cli(['proponer', '--base', 'main'], e);
   assert.equal(codigo, 0);
-  assert.match(out, /^ {2}pruebas: gpt-6\.1-terra medium: calidad ≥ 0,9\d \(102 obs\.\), ~4,0k tokens$/mu);
+  assert.match(out, /^ {2}pruebas: gpt-6\.1-terra medium: calidad ≥ 0,9\d \(102 obs\.\), ~4,0k tokens \(criterio barato\)$/mu);
   assert.doesNotMatch(out, /^Aviso: pruebas:/mu);
 });
 

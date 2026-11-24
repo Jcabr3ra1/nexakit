@@ -2,6 +2,7 @@ import type { Categoria } from './diff.js';
 import { ErrorFabrica } from './errores.js';
 import { cuantil05, type Evidencia, type FilaEvidencia } from './evidencia.js';
 import type { IA, NombreEstacion } from './esquemas.js';
+import { CRITERIO_PREDETERMINADO, type Criterio } from './preferencias.js';
 
 export type Riesgo = 'bajo' | 'medio' | 'alto';
 
@@ -25,6 +26,7 @@ export interface EntradaElegir {
   /** Candidatos en el orden de la tabla manual: si no hay evidencia de ninguno, se elige el primero. */
   candidatos: readonly Candidato[];
   evidencia: Evidencia;
+  criterio?: Criterio;
 }
 
 export interface Decision {
@@ -158,15 +160,14 @@ function tokensTexto(m: Medido): string {
 const sinDatosDe = (c: Candidato): Descartado => ({ candidato: c, motivo: 'sin datos medidos' });
 
 /**
- * Elige el candidato más barato cuya calidad (cuantil del 5 %) alcanza el umbral del riesgo. Un candidato sin datos
- * nunca supera el umbral. Si ningún medido lo alcanza: con candidatos sin medir se usa el primero de ellos (el orden de
- * la tabla manual), y si todos están medidos, el de mayor calidad; ambos casos lo avisan y dejan `alcanzaUmbral` en
- * `false`. Es pura y determinista: los candidatos repetidos se cuentan una vez y el orden de entrada solo importa para
- * elegir el primero cuando no hay evidencia (o ningún medido basta) y la tabla manual manda.
+ * Entre quienes alcanzan el umbral del riesgo, «barato» prioriza el coste y «calidad» el cuantil del 5 %.
+ * Si ningún medido lo alcanza, gana el de mayor calidad, salvo con «barato» y candidatos sin medir,
+ * donde manda la tabla manual. Sin evidencia se usa el primer candidato. Los repetidos se cuentan una vez.
  * Lanza `ErrorFabrica` si no hay candidatos o si una fila trae parámetros de Beta no válidos.
  */
 export function elegir(entrada: EntradaElegir): Decision {
-  const { estacion, riesgo, evidencia } = entrada;
+  const { estacion, riesgo, evidencia, criterio = CRITERIO_PREDETERMINADO } = entrada;
+  const notaCriterio = ` (criterio ${criterio})`;
   const candidatos = entrada.candidatos.filter((c, i, todos) => todos.findIndex((otro) => mismoCandidato(otro, c)) === i);
   const primero = candidatos[0];
   if (primero === undefined) throw new ErrorFabrica(`No hay candidatos para elegir modelo en la estación ${estacion}`);
@@ -194,22 +195,23 @@ export function elegir(entrada: EntradaElegir): Decision {
       eleccion: primero,
       calidad: null,
       tokensEsperados: null,
-      explicacion: `${nombreDe(primero)}: sin datos medidos, se usa la tabla manual (conviene medir con el banco)`,
+      explicacion: `${nombreDe(primero)}: sin datos medidos, se usa la tabla manual (conviene medir con el banco)${notaCriterio}`,
       descartados: sinMedirOrdenados(primero),
       sinDatos: true,
       alcanzaUmbral: false,
     };
   }
 
-  const superan = ordenarPorCoste(medidos.filter((m) => m.calidad >= umbral));
-  if (superan.length === 0 && sinMedir.length > 0) {
+  const superan = medidos.filter((m) => m.calidad >= umbral);
+  const alcanzaUmbral = superan.length > 0;
+  if (criterio === 'barato' && !alcanzaUmbral && sinMedir.length > 0) {
     // Ningún medido basta: la calidad de los que faltan es desconocida y la tabla manual manda.
     const tabla = sinMedir[0] as Candidato;
     return {
       eleccion: tabla,
       calidad: null,
       tokensEsperados: null,
-      explicacion: `ningún modelo medido alcanza el umbral; se usa ${nombreDe(tabla)} de la tabla, sin datos medidos`,
+      explicacion: `ningún modelo medido alcanza el umbral; se usa ${nombreDe(tabla)} de la tabla, sin datos medidos${notaCriterio}`,
       descartados: [
         ...ordenarPorCoste(medidos).map((m) => ({ candidato: m.candidato, motivo: motivoCalidad(m) })),
         ...sinMedirOrdenados(tabla),
@@ -219,19 +221,25 @@ export function elegir(entrada: EntradaElegir): Decision {
     };
   }
 
-  const alcanzaUmbral = superan.length > 0;
-  const porCoste = ordenarPorCoste(medidos);
-  const elegido: Medido = alcanzaUmbral
-    ? (superan[0] as Medido)
-    : ([...medidos].sort((a, b) => b.calidad - a.calidad || porCoste.indexOf(a) - porCoste.indexOf(b))[0] as Medido);
+  const elegibles = alcanzaUmbral ? superan : medidos;
+  const tokens = (m: Medido): number => m.costeConocido ? m.fila.tokensMedios : Infinity;
+  const ordenados = criterio === 'calidad'
+    ? [...elegibles].sort((a, b) => b.calidad - a.calidad || comparar(tokens(a), tokens(b)) || ordenSinDatos(a.candidato, b.candidato))
+    : ordenarPorCoste(elegibles);
+  if (criterio === 'barato' && !alcanzaUmbral) ordenados.sort((a, b) => b.calidad - a.calidad);
+  const elegido = ordenados[0] as Medido;
 
   const resto = ordenarPorCoste(medidos.filter((m) => m !== elegido));
+  const motivoDescarte = (m: Medido): string => {
+    if (m.calidad < umbral) return motivoCalidad(m);
+    const nombre = nombreDe(elegido.candidato);
+    if (criterio === 'barato') return `cuesta más (${tokensTexto(m)}) que ${nombre}`;
+    if (m.calidad < elegido.calidad) return `menor cuantil del 5 % que ${nombre}`;
+    return `mismo cuantil del 5 % que ${nombre} (${tokensTexto(m)} en esta alternativa)`;
+  };
   const descartadosMedidos: Descartado[] = resto.map((m) => ({
     candidato: m.candidato,
-    motivo:
-      m.calidad >= umbral
-        ? `cuesta más (${tokensTexto(m)}) que ${nombreDe(elegido.candidato)}`
-        : motivoCalidad(m),
+    motivo: motivoDescarte(m),
   }));
 
   // La alternativa más barata que se descartó por calidad: la primera por coste que habría ganado si hubiera bastado.
@@ -249,7 +257,7 @@ export function elegir(entrada: EntradaElegir): Decision {
     eleccion: elegido.candidato,
     calidad: elegido.calidad,
     tokensEsperados: elegido.costeConocido ? elegido.fila.tokensMedios : null,
-    explicacion,
+    explicacion: explicacion + notaCriterio,
     descartados: [...descartadosMedidos, ...sinMedirOrdenados(undefined)],
     sinDatos: false,
     alcanzaUmbral,

@@ -6,6 +6,7 @@ import { clasificar, leerDiff, type Categoria } from './diff.js';
 import { ErrorFabrica } from './errores.js';
 import { caducada, cargar, type Evidencia } from './evidencia.js';
 import { ESTACIONES, TABLA_MODELOS_INICIAL } from './estaciones.js';
+import { leerCriterio } from './preferencias.js';
 import { NOMBRES_ESTACION, type ConfigFabrica, type IA, type NombreEstacion } from './esquemas.js';
 
 /** Catálogo vivo de una IA: modelos y esfuerzos que admite cada uno. */
@@ -229,8 +230,8 @@ function candidatosConEvidencia(
 
 /**
  * Propone el recorrido: qué estaciones se activan con este diff, y qué IA, modelo y esfuerzo usa cada una.
- * Las estaciones externas se deciden con la evidencia medida (`~/.nexakit/fabrica/evidencia.json` bajo `home`): el modelo más
- * barato que alcanza la calidad que pide el riesgo. Sin datos manda la tabla manual, y la configuración del repo
+ * Las estaciones externas se deciden con la evidencia medida y el criterio global bajo `home`.
+ * Sin datos manda la tabla manual, y la configuración del repo
  * (`ia` o `modelo` fijados) manda siempre. Las estaciones de Claude siguen la tabla.
  */
 export async function proponer(entrada: {
@@ -247,7 +248,7 @@ export async function proponer(entrada: {
   const config = await cargarConfig(raiz);
   const diff = await leerDiff(raiz, base);
   const categorias = clasificar(diff.archivos, config);
-  const { evidencia, aviso: avisoEvidencia } = await cargar(home, ahora);
+  const [{ evidencia, aviso: avisoEvidencia }, criterio] = await Promise.all([cargar(home, ahora), leerCriterio(home)]);
 
   const avisosEstaciones: string[] = [];
   let usoEvidencia = false;
@@ -320,7 +321,7 @@ export async function proponer(entrada: {
 
     usoEvidencia = true;
     const riesgo = riesgoDe(categorias, estacion);
-    const decision = elegir({ estacion, riesgo, candidatos: disponibles, evidencia });
+    const decision = elegir({ estacion, riesgo, candidatos: disponibles, evidencia, criterio });
     if (decision.sinDatos) {
       avisosEstaciones.push(`${estacion}: sin datos medidos: ejecuta el banco con \`nexakit fabrica banco planificar\`; mientras, se usa la tabla manual`);
     } else if (!decision.alcanzaUmbral) {
