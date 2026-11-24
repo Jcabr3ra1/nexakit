@@ -1200,6 +1200,16 @@ test('la poda de encargos caducados quita su worktree con git solo si el repo de
 
 test('sin conectores inyectados, el conector real de Codex (con NEXAKIT_FABRICA_CODEX) recibe la copia como raíz escribible', async () => {
   const e = entorno();
+  // Un secreto en la carpeta personal de pruebas (que el perfil de macOS debe vetar) y un node_modules ignorado del repo
+  // real (que el worktree enlaza y el perfil deja leer).
+  mkdirSync(path.join(e.home, '.ssh'));
+  writeFileSync(path.join(e.home, '.ssh', 'id_test'), 'secreto');
+  // Sin barra final: un patrón `node_modules/` no ignora el enlace y el worktree lo quitaría.
+  writeFileSync(path.join(e.raiz, '.gitignore'), 'node_modules\n');
+  git(e.raiz, 'add', '-A');
+  git(e.raiz, 'commit', '-q', '-m', 'ignorar node_modules');
+  mkdirSync(path.join(e.raiz, 'node_modules', 'dep'), { recursive: true });
+  writeFileSync(path.join(e.raiz, 'node_modules', 'dep', 'index.js'), 'x');
   const guiones = fileURLToPath(new URL('../test-support/fabrica/', import.meta.url));
   const servidor = path.join(guiones, 'servidor-falso.mjs');
   const catalogo = JSON.parse(readFileSync(path.join(guiones, 'codex-catalogo.json'), 'utf8'));
@@ -1259,6 +1269,15 @@ test('sin conectores inyectados, el conector real de Codex (con NEXAKIT_FABRICA_
     assert.deepEqual(escribibles, [copia, path.join(carpeta, 'tmp')]);
     assert.ok(!escribibles.some((r) => r.startsWith(realpathSync(e.raiz))), 'el repo real nunca es escribible');
     assert.match(env.config, /^\[permissions\.nexakit-encargo\.network\]\nenabled = false$/mu);
+    // El home del encargo (el de pruebas, no `os.homedir()`) llega al conector: su `.ssh` queda vetado, y el repo real solo
+    // se lee en su `node_modules` enlazado y su `.git`.
+    const entradas = (acceso) => [...env.config.matchAll(new RegExp(`^(".*") = "${acceso}"$`, 'gmu'))].map((m) => JSON.parse(m[1]));
+    assert.ok(entradas('none').includes(path.join(realpathSync(e.home), '.ssh')), 'el .ssh del home del encargo queda vetado');
+    const raizReal = realpathSync(e.raiz);
+    const leidas = entradas('read');
+    assert.ok(leidas.includes(path.join(raizReal, 'node_modules')), 'node_modules enlazado legible');
+    assert.ok(leidas.includes(path.join(raizReal, '.git')), '.git del repo real legible');
+    assert.ok(!leidas.includes(raizReal), 'el repo real entero no es legible');
   } else {
     assert.equal(hilo.sandbox, 'workspace-write');
     // La copia es la única raíz escribible del repo; la otra es la carpeta temporal del encargo, fuera del repo real.
