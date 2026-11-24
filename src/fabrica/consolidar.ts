@@ -2,13 +2,15 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { ResultadoEstacion } from './conectores/tipos.js';
 import type { EstadoRecorrido } from './ejecutor.js';
-import { Hallazgo, InformeEstacion, NOMBRES_ESTACION, type NombreEstacion } from './esquemas.js';
+import { claveEstacion, Hallazgo, InformeEstacion, NOMBRES_ESTACION, type IA, type IAExterna, type NombreEstacion } from './esquemas.js';
 import * as rastro from './rastro.js';
 
 /** De dónde sale un hallazgo unificado: el hallazgo de una estación y su clave propia (ver `claveDe`). */
 export interface OrigenHallazgo {
   estacion: NombreEstacion;
   clave: string;
+  ia?: IA;
+  revisionDe?: IAExterna;
 }
 
 /**
@@ -16,10 +18,16 @@ export interface OrigenHallazgo {
  * grupo (la lleva el que lo encabeza); `origenes` son los hallazgos de cada estación que lo forman, con claves que no
  * dependen del resto del grupo: sirven para no contar dos veces un veredicto.
  */
-export type HallazgoConsolidado = Hallazgo & { estaciones: NombreEstacion[]; clave: string; origenes: OrigenHallazgo[] };
+export type HallazgoConsolidado = Hallazgo & {
+  estaciones: NombreEstacion[];
+  clave: string;
+  origenes: OrigenHallazgo[];
+  coincidencias?: number;
+};
 
 export interface ModeloEstacion {
   estacion: NombreEstacion;
+  revisionDe?: IAExterna;
   modelo: string | null;
   modeloInformado: string | null;
 }
@@ -52,23 +60,65 @@ function ordenar(a: Hallazgo, b: Hallazgo): number {
   );
 }
 
+interface InformeConOrigen {
+  estacion: NombreEstacion;
+  ia?: IA;
+  revisionDe?: IAExterna;
+  informe?: InformeEstacion;
+}
+
+interface HallazgoConOrigen {
+  hallazgo: Hallazgo;
+  origen: OrigenHallazgo;
+}
+
+function conOrigen(hallazgo: Hallazgo, ia?: IA, revisionDe?: IAExterna): HallazgoConOrigen {
+  const clave = claveDe(hallazgo);
+  return {
+    hallazgo,
+    origen: {
+      estacion: hallazgo.estacion,
+      clave: revisionDe === undefined ? clave : `${clave}-${revisionDe}`,
+      ...(ia === undefined ? {} : { ia }),
+      ...(revisionDe === undefined ? {} : { revisionDe }),
+    },
+  };
+}
+
+/** Cuenta IA distintas que coinciden dentro de una misma estación y vecindad de líneas. */
+function contarCoincidencias(miembros: HallazgoConOrigen[]): number {
+  const porEstacion = new Map<NombreEstacion, { ultimo: Hallazgo; ias: Set<IA> }>();
+  let maximo = 0;
+  for (const { hallazgo, origen } of miembros) {
+    let grupo = porEstacion.get(origen.estacion);
+    if (grupo === undefined || !cercanos(grupo.ultimo, hallazgo)) {
+      grupo = { ultimo: hallazgo, ias: new Set() };
+      porEstacion.set(origen.estacion, grupo);
+    }
+    grupo.ultimo = hallazgo;
+    if (origen.ia !== undefined) grupo.ias.add(origen.ia);
+    maximo = Math.max(maximo, grupo.ias.size);
+  }
+  return maximo;
+}
+
 /**
  * Unifica los hallazgos de todas las estaciones. Dos hallazgos del mismo archivo y categoría con
  * líneas a no más de 3 de distancia se funden: conservan todas las estaciones y la gravedad mayor.
  * Orden: gravedad (alta a baja), archivo y línea.
  */
 export function consolidar(
-  resultados: Array<{ estacion: NombreEstacion; informe?: InformeEstacion }>,
+  resultados: InformeConOrigen[],
   hallazgosClaude: Hallazgo[] = [],
 ): HallazgoConsolidado[] {
-  const todos: Hallazgo[] = [...hallazgosClaude];
+  const todos = hallazgosClaude.map((h) => conOrigen(h, 'claude'));
   for (const r of resultados) {
     // La estación sale del rastro, nunca del texto del revisor: así no puede fingir corroboración.
-    for (const h of r.informe?.hallazgos ?? []) todos.push({ ...h, estacion: r.estacion });
+    for (const h of r.informe?.hallazgos ?? []) todos.push(conOrigen({ ...h, estacion: r.estacion }, r.ia ?? r.revisionDe, r.revisionDe));
   }
   // Por archivo, categoría y línea: así los hallazgos cercanos quedan contiguos.
   todos.sort(
-    (a, b) =>
+    ({ hallazgo: a }, { hallazgo: b }) =>
       (a.archivo < b.archivo ? -1 : a.archivo > b.archivo ? 1 : 0) ||
       (a.categoria < b.categoria ? -1 : a.categoria > b.categoria ? 1 : 0) ||
       (a.linea ?? -1) - (b.linea ?? -1),
@@ -76,31 +126,32 @@ export function consolidar(
   // El grupo se forma por vecindad sucesiva: cada hallazgo se compara con el último que entró,
   // así que una cadena de hallazgos a ≤ 3 líneas entre sí acaba en un solo grupo aunque los
   // extremos estén más lejos.
-  const grupos: Array<{ base: Hallazgo; ultimo: Hallazgo; estaciones: NombreEstacion[]; miembros: Hallazgo[] }> = [];
-  for (const h of todos) {
+  const grupos: Array<{ base: Hallazgo; ultimo: Hallazgo; estaciones: NombreEstacion[]; miembros: HallazgoConOrigen[] }> = [];
+  for (const miembro of todos) {
+    const h = miembro.hallazgo;
     const grupo = grupos.at(-1);
     if (grupo !== undefined && cercanos(grupo.ultimo, h)) {
       if (PESO[h.gravedad] < PESO[grupo.base.gravedad]) grupo.base = h;
       grupo.ultimo = h;
-      grupo.miembros.push(h);
+      grupo.miembros.push(miembro);
       if (!grupo.estaciones.includes(h.estacion)) grupo.estaciones.push(h.estacion);
     } else {
-      grupos.push({ base: h, ultimo: h, estaciones: [h.estacion], miembros: [h] });
+      grupos.push({ base: h, ultimo: h, estaciones: [h.estacion], miembros: [miembro] });
     }
   }
   const orden = (e: NombreEstacion): number => NOMBRES_ESTACION.indexOf(e);
-  const origenesDe = (miembros: Hallazgo[]): OrigenHallazgo[] => {
-    const vistos = new Map<string, OrigenHallazgo>();
-    for (const m of miembros) vistos.set(claveDe(m), { estacion: m.estacion, clave: claveDe(m) });
-    return [...vistos.values()];
-  };
   return grupos
-    .map((g) => ({
-      ...g.base,
-      estaciones: [...g.estaciones].sort((a, b) => orden(a) - orden(b)),
-      clave: claveDe(g.base),
-      origenes: origenesDe(g.miembros),
-    }))
+    .map((g): HallazgoConsolidado => {
+      const coincidencias = contarCoincidencias(g.miembros);
+      const origenes = new Map(g.miembros.map(({ origen }) => [origen.clave, origen]));
+      return {
+        ...g.base,
+        estaciones: [...g.estaciones].sort((a, b) => orden(a) - orden(b)),
+        clave: claveDe(g.base),
+        origenes: [...origenes.values()],
+        ...(coincidencias >= 2 ? { coincidencias, confianza: 'alta' } : {}),
+      };
+    })
     .sort(ordenar);
 }
 
@@ -121,7 +172,7 @@ export function consolidadoMarkdown(
   lista: HallazgoConsolidado[],
   estado: EstadoRecorrido,
   modelos: ModeloEstacion[] = [],
-  invalidas: NombreEstacion[] = [],
+  invalidas: string[] = [],
 ): string {
   const e = escaparMarkdown;
   const out: string[] = [`# Consolidado del recorrido ${e(id)}`, '', `Fase: ${e(estado.fase)}`, ''];
@@ -132,14 +183,15 @@ export function consolidadoMarkdown(
     out.push('| Gravedad | Estaciones | Archivo:línea | Hallazgo | Propuesta | Verificado | Clave |', '| --- | --- | --- | --- | --- | --- | --- |');
     for (const h of lista) {
       const sitio = h.linea === null ? h.archivo : `${h.archivo}:${h.linea}`;
-      out.push(`| ${e(h.gravedad)} | ${e(h.estaciones.join(', '))} | ${e(sitio)} | ${e(h.hallazgo)} | ${e(h.propuesta)} |  | ${e(h.clave)} |`);
+      const estaciones = h.estaciones.join(', ') + (h.coincidencias === undefined ? '' : ` (coinciden ${h.coincidencias} IA)`);
+      out.push(`| ${e(h.gravedad)} | ${e(estaciones)} | ${e(sitio)} | ${e(h.hallazgo)} | ${e(h.propuesta)} |  | ${e(h.clave)} |`);
     }
     out.push('');
   }
   const noRevisadas = estado.estaciones.filter((x) => NO_REVISADAS.has(x.estado));
   if (noRevisadas.length > 0 || invalidas.length > 0 || estado.motivo !== undefined) {
     out.push('## No revisado', '');
-    for (const x of noRevisadas) out.push(`- ${e(x.estacion)} (${e(x.estado)}): ${e(x.motivo ?? 'sin motivo registrado')}`);
+    for (const x of noRevisadas) out.push(`- ${e(claveEstacion(x.estacion, x.revisionDe))} (${e(x.estado)}): ${e(x.motivo ?? 'sin motivo registrado')}`);
     for (const i of invalidas) out.push(`- ${e(i)}: informe inválido en el rastro`);
     if (estado.motivo !== undefined) out.push(`- Recorrido: ${e(estado.motivo)}`);
     out.push('');
@@ -152,7 +204,7 @@ export function consolidadoMarkdown(
   if (modelos.length > 0) {
     out.push('## Modelos', '');
     for (const m of modelos) {
-      out.push(`- ${e(m.estacion)}: pedido ${e(m.modelo ?? 'ninguno')}, informado ${e(m.modeloInformado ?? 'ninguno')}`);
+      out.push(`- ${e(claveEstacion(m.estacion, m.revisionDe))}: pedido ${e(m.modelo ?? 'ninguno')}, informado ${e(m.modeloInformado ?? 'ninguno')}`);
     }
     out.push('');
   }
@@ -160,22 +212,23 @@ export function consolidadoMarkdown(
 }
 
 interface Rastro {
-  resultados: Array<{ estacion: NombreEstacion; informe?: InformeEstacion }>;
+  resultados: InformeConOrigen[];
   modelos: ModeloEstacion[];
-  invalidas: NombreEstacion[];
+  invalidas: string[];
 }
 
 /** Lee del rastro el informe y los modelos de cada estación; lo ilegible o inválido va a `invalidas`. */
 function leerRastro(estado: EstadoRecorrido): Rastro {
   const resultados: Rastro['resultados'] = [];
   const modelos: ModeloEstacion[] = [];
-  const invalidas: NombreEstacion[] = [];
-  for (const { estacion } of estado.estaciones) {
+  const invalidas: string[] = [];
+  for (const { estacion, ia, revisionDe } of estado.estaciones) {
+    const nombre = claveEstacion(estacion, revisionDe);
     let dato: ReturnType<typeof rastro.leerEstacion>;
     try {
-      dato = rastro.leerEstacion(estado.dir, estacion);
+      dato = rastro.leerEstacion(estado.dir, estacion, revisionDe);
     } catch {
-      invalidas.push(estacion);
+      invalidas.push(nombre);
       continue;
     }
     if (dato === null) continue;
@@ -183,11 +236,17 @@ function leerRastro(estado: EstadoRecorrido): Rastro {
     if (resultado?.estado === 'ok') {
       // El rastro es texto en disco: se revalida antes de fiarse.
       const informe = InformeEstacion.safeParse(resultado.informe);
-      if (informe.success) resultados.push({ estacion, informe: informe.data });
-      else invalidas.push(estacion);
+      if (informe.success) resultados.push({
+        estacion,
+        ...(ia === undefined ? {} : { ia }),
+        ...(revisionDe === undefined ? {} : { revisionDe }),
+        informe: informe.data,
+      });
+      else invalidas.push(nombre);
     }
     modelos.push({
       estacion,
+      ...(revisionDe === undefined ? {} : { revisionDe }),
       modelo: typeof dato.encargo?.modelo === 'string' ? dato.encargo.modelo : null,
       modeloInformado: typeof resultado?.modeloInformado === 'string' ? resultado.modeloInformado : null,
     });

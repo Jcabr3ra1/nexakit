@@ -193,12 +193,32 @@ test('el modelo y el esfuerzo de la configuración tienen prioridad', async () =
   assert.equal(pruebas.esfuerzo, 'medium');
 });
 
-test('las estaciones de Claude cuentan como subagentes y no como llamadas externas', async () => {
+test('la revisión de código propone tres IA y suma dos llamadas externas al coste y a la huella', async () => {
   const dir = crearRepo();
   escribir(dir, 'hooks/pre-tool.js', 'export {};\n');
   const r = await proponer({ raiz: dir, base: 'main', catalogos: CATALOGOS });
-  // seguridad y pruebas (codex) externas; código (claude) subagente.
-  assert.deepEqual(r.coste, { llamadasExternas: 2, subagentesClaude: 1 });
+  const codigo = r.estaciones.filter((e) => e.estacion === 'codigo');
+  assert.deepEqual(codigo.map((e) => e.ia), ['claude', 'codex', 'antigravity']);
+  assert.deepEqual(codigo.map((e) => e.modelo), ['revisor-de-calidad', 'gpt-6.1-sol', 'gemini-4-hydrogen-high']);
+  // Seguridad y pruebas también cuestan una llamada externa cada una.
+  assert.deepEqual(r.coste, { llamadasExternas: 4, subagentesClaude: 1 });
+  const cambiado = aplicarCambios(r, [{ estacion: 'codigo-codex', esfuerzo: 'medium' }]);
+  assert.notEqual(cambiado.huella, r.huella);
+  const quitada = aplicarCambios(r, [{ estacion: 'codigo-antigravity', quitar: true }]);
+  assert.notEqual(quitada.huella, r.huella);
+  assert.deepEqual(quitada.coste, { llamadasExternas: 3, subagentesClaude: 1 });
+  await comprobarHuella(cambiado, dir);
+  await assert.rejects(comprobarHuella({ ...cambiado, huella: r.huella }, dir), ErrorFabrica);
+});
+
+test('la revisión de código conserva las IA disponibles y avisa si falta un catálogo', async () => {
+  // Con pruebas desactivada, la única estación externa del recorrido es la revisión cruzada de código.
+  const raiz = crearRepo({ config: { estaciones: { pruebas: { activa: false } } } });
+  escribir(raiz, 'notas.txt', 'cambio\n');
+  const r = await proponer({ raiz, base: 'main', catalogos: { codex: CATALOGOS.codex } });
+  assert.deepEqual(r.estaciones.filter((e) => e.estacion === 'codigo').map((e) => e.ia), ['claude', 'codex']);
+  assert.deepEqual(r.coste, { llamadasExternas: 1, subagentesClaude: 1 });
+  assert.ok(r.avisos.some((a) => /Se omite la revisión cruzada de código con antigravity/u.test(a)));
 });
 
 test('el foco se guarda pero no activa estaciones', async () => {
@@ -469,13 +489,13 @@ test('preferencias guarda y muestra el criterio global que usa el enrutador', as
   ]);
   const proponerSeguridad = async () => porNombre(await proponerReal({ raiz, base: 'main', catalogos: CATALOGOS, home }), 'seguridad');
   const archivo = path.join(home, '.nexakit', 'fabrica', 'preferencias.json');
-  assert.deepEqual(await preferencias(home), { codigo: 0, salida: 'Criterio de la fábrica: barato\n', error: '' });
+  assert.deepEqual(await preferencias(home), { codigo: 0, salida: 'Criterio de la fábrica: barato\nRevisión cruzada: sí\n', error: '' });
   assert.equal(existsSync(archivo), false);
   assert.equal((await proponerSeguridad()).modelo, 'gpt-6-sol');
 
   assert.equal((await preferencias(home, '--criterio', 'calidad')).codigo, 0);
   for (const texto of [readFileSync(archivo, 'utf8'), (await preferencias(home, '--json')).salida]) {
-    assert.deepEqual(JSON.parse(texto), { criterio: 'calidad' });
+    assert.deepEqual(JSON.parse(texto), { criterio: 'calidad', revisionCruzada: true });
   }
   if (process.platform !== 'win32') {
     assert.equal(statSync(archivo).mode & 0o777, 0o600);
@@ -490,7 +510,39 @@ test('preferencias guarda y muestra el criterio global que usa el enrutador', as
   writeFileSync(archivo, '{"criterio":"inválido"}');
   assert.equal((await proponerSeguridad()).modelo, 'gpt-6-sol');
   assert.equal((await preferencias(home, '--criterio', 'barato')).codigo, 0);
-  assert.deepEqual(JSON.parse(readFileSync(archivo, 'utf8')), { criterio: 'barato' });
+  assert.deepEqual(JSON.parse(readFileSync(archivo, 'utf8')), { criterio: 'barato', revisionCruzada: true });
+});
+
+test('la CLI desactiva la revisión cruzada sin alterar el criterio y puede volver a activarla', async () => {
+  // Con pruebas desactivada, sin revisión cruzada no queda ninguna llamada externa.
+  const raiz = crearRepo({ config: { estaciones: { pruebas: { activa: false } } } });
+  escribir(raiz, 'notas.txt', 'cambio\n');
+  const home = await homeConEvidencia([
+    ['codex', 'gpt-6.1-sol', 'high', 'codigo', 200, 2, 9000],
+    ['codex', 'gpt-6-sol', 'high', 'codigo', 200, 12, 3000],
+    ['antigravity', 'gemini-4-hydrogen-high', null, 'codigo', 200, 2, 9000],
+    ['antigravity', 'gemini-3.8-flash-medium', null, 'codigo', 200, 12, 3000],
+  ]);
+  const archivo = path.join(home, '.nexakit', 'fabrica', 'preferencias.json');
+  writeFileSync(archivo, '{"criterio":"calidad"}');
+  const propuesta = () => proponer({ raiz, base: 'main', catalogos: CATALOGOS, home });
+  const antes = await propuesta();
+  const modelosExternos = (r) => r.estaciones.filter((e) => e.revisionDe !== undefined).map((e) => e.modelo);
+  assert.deepEqual(modelosExternos(antes), ['gpt-6.1-sol', 'gemini-4-hydrogen-high']);
+  assert.equal((await preferencias(home, '--revision-cruzada', 'no')).codigo, 0);
+  assert.deepEqual(JSON.parse(readFileSync(archivo, 'utf8')), { criterio: 'calidad', revisionCruzada: false });
+  const despues = await propuesta();
+  assert.deepEqual(despues.estaciones.filter((e) => e.estacion === 'codigo').map((e) => e.ia), ['claude']);
+  assert.deepEqual(despues.coste, { llamadasExternas: 0, subagentesClaude: 1 });
+  assert.notEqual(antes.huella, despues.huella);
+  assert.equal((await preferencias(home, '--revision-cruzada', 'quizá')).codigo, 2);
+  assert.equal((await preferencias(home, '--criterio', 'barato')).codigo, 0);
+  assert.deepEqual(JSON.parse(readFileSync(archivo, 'utf8')), { criterio: 'barato', revisionCruzada: false });
+  assert.equal((await preferencias(home, '--revision-cruzada', 'si')).codigo, 0);
+  assert.deepEqual(modelosExternos(await propuesta()), ['gpt-6-sol', 'gemini-3.8-flash-medium']);
+  assert.equal((await preferencias(home, '--revision-cruzada', 'no')).codigo, 0);
+  assert.equal((await preferencias(home, '--criterio', 'calidad', '--revision-cruzada', 'si')).codigo, 0);
+  assert.equal((await propuesta()).huella, antes.huella);
 });
 
 test('preferencias ignora enlaces al leer y rechaza las carpetas enlazadas al guardar', { skip: process.platform === 'win32' }, async () => {
@@ -502,7 +554,7 @@ test('preferencias ignora enlaces al leer y rechaza las carpetas enlazadas al gu
   const archivo = path.join(destino, 'fabrica', 'preferencias.json');
   writeFileSync(archivo, original);
   symlinkSync(destino, path.join(home, '.nexakit'), 'dir');
-  assert.deepEqual(JSON.parse((await preferencias(home, '--json')).salida), { criterio: 'barato' });
+  assert.deepEqual(JSON.parse((await preferencias(home, '--json')).salida), { criterio: 'barato', revisionCruzada: true });
   assert.equal((await preferencias(home, '--criterio', 'barato')).codigo, 1);
   assert.equal(readFileSync(archivo, 'utf8'), original);
 
@@ -510,10 +562,10 @@ test('preferencias ignora enlaces al leer y rechaza las carpetas enlazadas al gu
   const fabrica = path.join(home, '.nexakit', 'fabrica');
   mkdirSync(fabrica, { recursive: true });
   symlinkSync(archivo, path.join(fabrica, 'preferencias.json'));
-  assert.deepEqual(JSON.parse((await preferencias(home, '--json')).salida), { criterio: 'barato' });
+  assert.deepEqual(JSON.parse((await preferencias(home, '--json')).salida), { criterio: 'barato', revisionCruzada: true });
   assert.equal((await preferencias(home, '--criterio', 'barato')).codigo, 0);
   assert.equal(readFileSync(archivo, 'utf8'), original);
-  assert.deepEqual(JSON.parse(readFileSync(path.join(fabrica, 'preferencias.json'), 'utf8')), { criterio: 'barato' });
+  assert.deepEqual(JSON.parse(readFileSync(path.join(fabrica, 'preferencias.json'), 'utf8')), { criterio: 'barato', revisionCruzada: true });
 });
 
 test('la explicación y la calidad entran en la huella', async () => {

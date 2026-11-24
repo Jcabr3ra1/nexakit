@@ -38,6 +38,18 @@ test('no funde a más de 3 líneas ni con otra categoría', () => {
   assert.equal(lista.length, 3);
 });
 
+test('solo corroboran IA distintas en la misma estación', () => {
+  const hallazgo = h('codigo', 'media', 'a.ts', 10);
+  const lista = consolidar([
+    { estacion: 'codigo', revisionDe: 'codex', informe: informe(hallazgo, hallazgo) },
+    { estacion: 'pruebas', ia: 'antigravity', informe: informe(hallazgo) },
+  ]);
+  assert.equal(lista.length, 1);
+  assert.equal(lista[0].origenes.length, 2);
+  assert.equal(lista[0].confianza, 'media');
+  assert.doesNotMatch(consolidadoMarkdown('fab-1', lista, estadoBase()), /coinciden/u);
+});
+
 test('ordena por gravedad y luego por archivo; admite hallazgos de Claude', () => {
   const lista = consolidar(
     [{ estacion: 'codigo', informe: informe(h('codigo', 'baja', 'a.ts', 1), h('codigo', 'alta', 'z.ts', 1), h('codigo', 'alta', 'b.ts', 1)) }],

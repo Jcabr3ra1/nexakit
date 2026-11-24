@@ -116,9 +116,16 @@ function guionAgyOk() {
 }
 
 /** Escenario: HOME temporal, repo y conectores que apuntan a servidores falsos. */
-function escenario({ codex = guionCodexOk(), agy = guionAgyOk() } = {}) {
+function escenario({ codex = guionCodexOk(), agy = guionAgyOk(), soloCodigo = false } = {}) {
   const dir = crearRepo();
   const home = temporal('fabrica-mcp-home-');
+  if (soloCodigo) {
+    writeFileSync(path.join(dir, '.nexakit', 'fabrica.json'), '{"estaciones":{"pruebas":{"activa":false}}}');
+  } else {
+    // Los guiones de las otras pruebas representan turnos de pruebas y arquitectura.
+    mkdirSync(path.join(home, '.nexakit', 'fabrica'), { recursive: true });
+    writeFileSync(path.join(home, '.nexakit', 'fabrica', 'preferencias.json'), '{"revisionCruzada":false}');
+  }
   const guiones = temporal('fabrica-mcp-guiones-');
   const invocacion = (nombre, guion) => {
     const ruta = path.join(guiones, `${nombre}.json`);
@@ -255,6 +262,44 @@ test('proponer, lanzar, estado hasta terminado y resultado devuelve la lista con
   assert.ok(existsSync(cuerpo.consolidado));
   assert.equal(path.basename(cuerpo.consolidado), 'consolidado.md');
   assert.match(readFileSync(cuerpo.consolidado, 'utf8'), /Falta una prueba/u);
+});
+
+test('fabrica_resultado acepta codigo de Claude y lo consolida con la revisión de Codex', async () => {
+  const e = escenario({ soloCodigo: true });
+  const { cliente } = await conectar(e);
+  const propuesta = await proponer(cliente);
+  assert.deepEqual(propuesta.estaciones.filter((x) => x.estacion === 'codigo').map((x) => x.ia), ['claude', 'codex', 'antigravity']);
+  assert.deepEqual(propuesta.coste, { llamadasExternas: 2, subagentesClaude: 1 });
+  const lanzado = await llamar(cliente, 'fabrica_lanzar', { huella: propuesta.huella });
+  assert.equal(lanzado.isError, undefined, lanzado.texto);
+  const { id } = datos(lanzado);
+  const final = await hasta(async () => {
+    const estado = datos(await llamar(cliente, 'fabrica_estado', { id }));
+    return estado.fase === 'en-curso' ? null : estado;
+  }, 'el recorrido termina');
+  assert.equal(final.fase, 'terminado');
+  assert.deepEqual(final.estaciones.filter((x) => x.estacion === 'codigo').map((x) => x.estado), ['claude', 'ok', 'ok']);
+  assert.ok(existsSync(path.join(final.dir, 'codigo-codex.json')));
+  assert.ok(existsSync(path.join(final.dir, 'codigo-antigravity.json')));
+
+  const hallazgoClaude = {
+    estacion: 'codigo', gravedad: 'alta', archivo: 'src/a.js', linea: 1, categoria: 'cobertura',
+    hallazgo: 'Falta cubrir el comportamiento nuevo', evidencia: 'src/a.js:1', propuesta: 'Añadir una prueba', confianza: 'media',
+  };
+  const resultado = await llamar(cliente, 'fabrica_resultado', { id, hallazgosClaude: [hallazgoClaude] });
+  assert.equal(resultado.isError, undefined, resultado.texto);
+  const cuerpo = datos(resultado);
+  assert.equal(cuerpo.hallazgos.length, 1);
+  const [hallazgo] = cuerpo.hallazgos;
+  assert.equal(hallazgo.hallazgo, hallazgoClaude.hallazgo);
+  assert.equal(hallazgo.confianza, 'alta');
+  assert.deepEqual(hallazgo.origenes.map((o) => o.ia), ['claude', 'codex']);
+  assert.match(readFileSync(cuerpo.consolidado, 'utf8'), /coinciden 2 IA/u);
+
+  const veredicto = await llamar(cliente, 'fabrica_resultado', { id, veredictos: [{ clave: hallazgo.clave, verificado: 'real' }] });
+  assert.equal(veredicto.isError, undefined, veredicto.texto);
+  const evidencia = JSON.parse(readFileSync(path.join(e.home, '.nexakit', 'fabrica', 'evidencia.json'), 'utf8'));
+  assert.deepEqual(evidencia.filas.map((f) => f.ia).sort(), ['claude', 'codex']);
 });
 
 test('fabrica_resultado regenera el consolidado con los hallazgos de Claude y valida su esquema', async () => {

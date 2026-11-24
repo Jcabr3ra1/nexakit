@@ -10,7 +10,7 @@ import { cargarConfig } from './config.js';
 import * as ejecutor from './ejecutor.js';
 import { aplicarCambios, calcularHuella, proponer, type CambioRecorrido, type Catalogos, type Recorrido } from './enrutador.js';
 import { ErrorEntorno, ErrorFabrica } from './errores.js';
-import { IA, NombreEstacion } from './esquemas.js';
+import { IA, IAExterna, NombreEstacion } from './esquemas.js';
 import { exigirSinEncargo } from './encargo/candado.js';
 import * as rastro from './rastro.js';
 
@@ -154,6 +154,7 @@ const RecorridoGuardado = z.object({
   estaciones: z.array(
     z.object({
       estacion: NombreEstacion,
+      revisionDe: IAExterna.optional(),
       ia: IA.nullable(),
       modelo: z.string().nullable(),
       esfuerzo: z.string().nullable(),

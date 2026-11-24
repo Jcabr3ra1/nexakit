@@ -5,7 +5,7 @@ import path from 'node:path';
 import type { Encargo, ResultadoEstacion } from './conectores/tipos.js';
 import type { Recorrido } from './enrutador.js';
 import { ErrorFabrica } from './errores.js';
-import { NOMBRES_ESTACION, type EstadoEstacionEjecucion, type IA, type NombreEstacion } from './esquemas.js';
+import { claveEstacion, IAExterna, NOMBRES_ESTACION, type EstadoEstacionEjecucion, type IA, type NombreEstacion } from './esquemas.js';
 
 /** Días que se conserva un rastro antes de que `podar` lo borre. */
 export const DIAS_RASTRO = 90;
@@ -269,17 +269,23 @@ export async function guardarActivo(home: string, activo: Activo | null): Promis
   }
 }
 
-/** Guarda `<estacion>.json` con el encargo (sin el diff) y el resultado. */
+/** Guarda el encargo (sin el diff) y el resultado en el archivo de esa ejecución. */
 export async function guardarEstacion(
   dir: string,
   estacion: NombreEstacion,
   encargo: EncargoRastro,
   resultado: ResultadoEstacion,
+  revisionDe?: IAExterna,
 ): Promise<void> {
-  if (!(NOMBRES_ESTACION as readonly string[]).includes(estacion)) {
+  if (!estacionValida(estacion, revisionDe)) {
     throw new ErrorFabrica(`Estación desconocida en el rastro: ${estacion}`);
   }
-  await escribirNuevo(path.join(dir, `${estacion}.json`), json({ estacion, encargo, resultado }));
+  await escribirNuevo(path.join(dir, `${claveEstacion(estacion, revisionDe)}.json`), json({ estacion, encargo, resultado }));
+}
+
+function estacionValida(estacion: NombreEstacion, revisionDe?: IAExterna): boolean {
+  return (NOMBRES_ESTACION as readonly string[]).includes(estacion)
+    && (revisionDe === undefined || (estacion === 'codigo' && IAExterna.safeParse(revisionDe).success));
 }
 
 /** Reescribe `estado.json` con el estado actual del recorrido. */
@@ -287,10 +293,10 @@ export async function guardarEstado(dir: string, estado: unknown): Promise<void>
   await escribirReemplazando(path.join(dir, 'estado.json'), json(estado));
 }
 
-/** Lee `<estacion>.json` de un recorrido, sin seguir enlaces. `null` si no existe o no es un archivo normal. */
-export function leerEstacion(dir: string, estacion: NombreEstacion): { encargo?: EncargoRastro; resultado?: ResultadoEstacion } | null {
-  if (!(NOMBRES_ESTACION as readonly string[]).includes(estacion)) return null;
-  const archivo = path.join(dir, `${estacion}.json`);
+/** Lee el informe de una ejecución sin seguir enlaces. `null` si no existe o no es un archivo normal. */
+export function leerEstacion(dir: string, estacion: NombreEstacion, revisionDe?: IAExterna): { encargo?: EncargoRastro; resultado?: ResultadoEstacion } | null {
+  if (!estacionValida(estacion, revisionDe)) return null;
+  const archivo = path.join(dir, `${claveEstacion(estacion, revisionDe)}.json`);
   const info = lstatSync(archivo, { throwIfNoEntry: false });
   if (info === undefined || !info.isFile()) return null;
   const fd = openSync(archivo, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));

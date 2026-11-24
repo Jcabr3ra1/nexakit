@@ -6,7 +6,7 @@ import { comparar, instantanea, type Instantanea } from './disco.js';
 import { calcularCoste, comprobarHuella, descarte, type EstacionRecorrido, type Recorrido } from './enrutador.js';
 import { ErrorFabrica } from './errores.js';
 import { ESTACIONES } from './estaciones.js';
-import type { EstadoEstacionEjecucion, IA, NombreEstacion } from './esquemas.js';
+import type { EstadoEstacionEjecucion, IA, IAExterna, NombreEstacion } from './esquemas.js';
 import { cortarEnPalabra, type Leccion, limpiarTexto, MAX_LECCIONES_ENCARGO, MAX_REGLA, paraEncargo } from './lecciones.js';
 import * as rastro from './rastro.js';
 
@@ -39,7 +39,7 @@ export interface EstadoRecorrido {
   /** Carpeta del rastro de este recorrido. */
   dir: string;
   fase: FaseRecorrido;
-  estaciones: Array<{ estacion: NombreEstacion; estado: EstadoEstacionEjecucion; motivo?: string }>;
+  estaciones: Array<{ estacion: NombreEstacion; revisionDe?: IAExterna; ia?: IA; estado: EstadoEstacionEjecucion; motivo?: string }>;
   escriturasDetectadas: string[];
   /** Por qué el recorrido falló sin que fallara una estación (por ejemplo, el rastro). */
   motivo?: string;
@@ -83,7 +83,7 @@ interface Ejecucion {
   /** Datos de cada estación para `activo.json`, en el mismo orden que `estado.estaciones`. */
   detalle: Array<Pick<rastro.EstacionActiva, 'ia' | 'modelo' | 'esfuerzo'>>;
   /** Últimos tokens conocidos de cada estación. */
-  tokens: Map<NombreEstacion, number>;
+  tokens: Map<FilaEstado, number>;
   /** Ya salió de `activo.json`: nada más se publica. */
   activoCerrado: boolean;
 }
@@ -279,7 +279,7 @@ function contenidoActivo(ej: Ejecucion): rastro.Activo {
       modelo: ej.detalle[i]?.modelo ?? null,
       esfuerzo: ej.detalle[i]?.esfuerzo ?? null,
       estado: fila.estado,
-      tokens: ej.tokens.get(fila.estacion) ?? 0,
+      tokens: ej.tokens.get(fila) ?? 0,
     })),
   };
 }
@@ -366,7 +366,7 @@ async function correrEstacion(
       // `then` convierte también una excepción síncrona del conector en un rechazo.
       const alProgreso: AlProgreso = ({ tokens }) => {
         if (trabajo.fila.estado !== 'en-curso' || !Number.isFinite(tokens)) return;
-        ej.tokens.set(trabajo.fila.estacion, tokens);
+        ej.tokens.set(trabajo.fila, tokens);
         publicarActivo(ej);
       };
       const llamada = Promise.resolve().then(() => trabajo.conector.ejecutar(trabajo.encargo, control.signal, alProgreso));
@@ -400,9 +400,9 @@ async function correrEstacion(
     else final = resultado;
     // Primero el archivo de la estación, para que un estado terminado siempre tenga su resultado.
     try {
-      await rastro.guardarEstacion(ej.estado.dir, trabajo.fila.estacion, trabajo.encargoRastro, final);
+      await rastro.guardarEstacion(ej.estado.dir, trabajo.fila.estacion, trabajo.encargoRastro, final, trabajo.fila.revisionDe);
     } finally {
-      if (final.tokens !== null) ej.tokens.set(trabajo.fila.estacion, final.tokens.total);
+      if (final.tokens !== null) ej.tokens.set(trabajo.fila, final.tokens.total);
       marcar(trabajo.fila, final.estado, final.motivo);
       void persistir(ej);
       publicarActivo(ej);
@@ -508,6 +508,9 @@ export async function lanzar(r: Recorrido, opciones: OpcionesLanzar): Promise<{ 
   while (diff.texto.includes(nonce)) nonce = randomBytes(6).toString('hex');
   for (const e of r.estaciones) {
     const fila: FilaEstado = { estacion: e.estacion, estado: 'pendiente' };
+    if (e.revisionDe !== undefined) fila.revisionDe = e.revisionDe;
+    // La IA solo viaja en las filas de código: el consolidado cuenta con ella las coincidencias de la revisión cruzada.
+    if (e.estacion === 'codigo' && e.ia !== null) fila.ia = e.ia;
     filas.push(fila);
     if (e.estado === 'omitida') {
       marcar(fila, 'omitida', e.motivo);

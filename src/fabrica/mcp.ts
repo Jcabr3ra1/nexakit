@@ -233,7 +233,7 @@ export function crearServidorFabrica(opciones: OpcionesServidorFabrica = {}): Se
       description: `Lanza el recorrido de la última propuesta si su huella coincide y el diff sigue siendo el mismo. Hazlo con la huella de la propuesta, sin encadenar recorridos para el mismo diff, y pide aprobación a la persona solo si el recorrido trae órdenes de .nexakit/fabrica.json del repo revisado. Devuelve { id } sin esperar: el recorrido corre dentro de este servidor. Solo hay un recorrido a la vez: si ya hay uno en curso, da error hasta que termine o lo canceles. Con cambios puedes quitar estaciones o cambiar IA, modelo y esfuerzo antes de lanzar. ${AVISO_RAIZ}`,
       inputSchema: z.object({
         huella: z.string().min(1).describe('Huella del recorrido que la persona aprobó'),
-        cambios: EsquemaCambios.optional().describe('Lista de { estacion, quitar?, ia?, modelo?, esfuerzo? } que la persona pidió'),
+        cambios: EsquemaCambios.optional().describe('Lista de { estacion, quitar?, ia?, modelo?, esfuerzo? }. Usa codigo-codex o codigo-antigravity en estacion para ajustar una revisión adicional.'),
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     },

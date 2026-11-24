@@ -110,6 +110,9 @@ function guionAgyOk() {
 function escenario({ config, codex = guionCodexOk(), agy = guionAgyOk() } = {}) {
   const dir = crearRepo({ config });
   const home = temporal('fabrica-cli-home-');
+  // Los guiones de esta suite representan turnos de estaciones concretas.
+  mkdirSync(path.join(home, '.nexakit', 'fabrica'), { recursive: true });
+  writeFileSync(path.join(home, '.nexakit', 'fabrica', 'preferencias.json'), '{"revisionCruzada":false}');
   const guiones = temporal('fabrica-cli-guiones-');
   const invocacion = (nombre, guion) => {
     const ruta = path.join(guiones, `${nombre}.json`);
@@ -263,6 +266,25 @@ test('una propuesta guardada con el formato anterior se rechaza y pide volver a 
   assert.equal(codigo, 1);
   assert.match(err, /No hay una propuesta con esa huella; vuelve a proponer/u);
   assert.equal(out, '');
+});
+
+test('lanzar con revisión cruzada muestra una sola vez el estado de cada ejecución de código', async () => {
+  // Con pruebas desactivada, la única estación con IA externa es código y cada IA la revisa una vez.
+  const e = escenario({ config: { estaciones: { pruebas: { activa: false } } } });
+  rmSync(path.join(e.dir, 'src'), { recursive: true });
+  writeFileSync(path.join(e.dir, 'notas.txt'), 'cambio\n');
+  writeFileSync(path.join(e.home, '.nexakit', 'fabrica', 'preferencias.json'), '{"revisionCruzada":true}');
+  const propuesta = JSON.parse((await cli(['proponer', '--base', 'main', '--json'], e)).out);
+  const iasCodigo = propuesta.estaciones.filter((x) => x.estacion === 'codigo').map((x) => x.ia);
+  assert.deepEqual(iasCodigo, ['claude', 'codex', 'antigravity']);
+  const { codigo, out, err } = await cli(['lanzar', '--huella', propuesta.huella], e);
+  assert.equal(codigo, 0, err);
+  const lineas = out.split('\n');
+  assert.equal(lineas.filter((l) => /^\[codigo\] claude:/u.test(l)).length, 1);
+  for (const extra of ['codigo-codex', 'codigo-antigravity']) {
+    assert.equal(lineas.filter((l) => l.startsWith(`[${extra}] en-curso`)).length, 1, extra);
+    assert.equal(lineas.filter((l) => /^\[codigo-(codex|antigravity)\] (ok|fallida)/u.test(l) && l.startsWith(`[${extra}]`)).length, 1, extra);
+  }
 });
 
 test('proponer no aborta si una IA no está instalada: avisa y pasa al siguiente candidato', async () => {

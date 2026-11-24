@@ -6,8 +6,8 @@ import { clasificar, leerDiff, type Categoria } from './diff.js';
 import { ErrorFabrica } from './errores.js';
 import { caducada, cargar, type Evidencia } from './evidencia.js';
 import { ESTACIONES, TABLA_MODELOS_INICIAL } from './estaciones.js';
-import { leerCriterio } from './preferencias.js';
-import { NOMBRES_ESTACION, type ConfigFabrica, type IA, type NombreEstacion } from './esquemas.js';
+import { leerPreferencias } from './preferencias.js';
+import { claveEstacion, IAExterna, NOMBRES_ESTACION, type ConfigFabrica, type IA, type NombreEstacion } from './esquemas.js';
 
 /** Catálogo vivo de una IA: modelos y esfuerzos que admite cada uno. */
 export type Catalogos = Partial<Record<IA, Array<{ modelo: string; esfuerzos: string[] }>>>;
@@ -16,6 +16,8 @@ export type EstadoEstacion = 'propuesta' | 'sin-modelo' | 'omitida';
 
 export interface EstacionRecorrido {
   estacion: NombreEstacion;
+  /** Identifica una ejecución adicional de código, incluso si se quita del recorrido. */
+  revisionDe?: IAExterna;
   ia: IA | null;
   modelo: string | null;
   esfuerzo: string | null;
@@ -117,8 +119,10 @@ function clave(c: Candidato): string {
 }
 
 /** Lista ordenada de candidatos: la tabla inicial, adaptada a lo que pide la configuración. */
-function candidatosDe(estacion: NombreEstacion, cfg: ConfigEstacion | undefined, descartes: string[]): Candidato[] {
-  const tabla: Candidato[] = (TABLA_MODELOS_INICIAL[estacion] ?? []).map((c) => ({ ...c }));
+function candidatosDe(estacion: NombreEstacion, cfg: ConfigEstacion | undefined, descartes: string[], revisionDe?: IAExterna): Candidato[] {
+  const tabla: Candidato[] = (TABLA_MODELOS_INICIAL[estacion] ?? [])
+    .filter((c) => estacion !== 'codigo' || c.ia === (revisionDe ?? 'claude'))
+    .map((c) => ({ ...c }));
   let lista = tabla;
   if (cfg?.modelo !== undefined) {
     const enTabla = tabla.find((c) => c.modelo === cfg.modelo && (cfg.ia === undefined || c.ia === cfg.ia));
@@ -248,13 +252,17 @@ export async function proponer(entrada: {
   const config = await cargarConfig(raiz);
   const diff = await leerDiff(raiz, base);
   const categorias = clasificar(diff.archivos, config);
-  const [{ evidencia, aviso: avisoEvidencia }, criterio] = await Promise.all([cargar(home, ahora), leerCriterio(home)]);
+  const [{ evidencia, aviso: avisoEvidencia }, { criterio, revisionCruzada }] = await Promise.all([
+    cargar(home, ahora),
+    leerPreferencias(home),
+  ]);
 
   const avisosEstaciones: string[] = [];
   let usoEvidencia = false;
 
-  const estaciones: EstacionRecorrido[] = NOMBRES_ESTACION.map((estacion): EstacionRecorrido => {
+  function proponerEstacion(estacion: NombreEstacion, revisionDe?: IAExterna): EstacionRecorrido {
     const cfg = config.estaciones?.[estacion];
+    const nombre = claveEstacion(estacion, revisionDe);
     const regla = ACTIVACION[estacion];
     const omitida = (motivo: string): EstacionRecorrido => ({
       estacion,
@@ -271,12 +279,13 @@ export async function proponer(entrada: {
     if (cfg?.activa === false) return omitida('desactivada en la configuración');
     const porDiff = regla.categoria === null || categorias.has(regla.categoria);
     if (!porDiff && cfg?.activa !== true) return omitida(regla.sinActivar);
-    const motivo = porDiff ? regla.motivo : 'activada en la configuración';
+    const motivo = revisionDe !== undefined ? 'revisión cruzada de código' : porDiff ? regla.motivo : 'activada en la configuración';
 
     const descartes: string[] = [];
-    const manual = candidatosDe(estacion, cfg, descartes);
+    const manual = candidatosDe(estacion, revisionDe === undefined ? cfg : undefined, descartes, revisionDe);
     const propuesta = (c: Candidato, explicacion: string, calidad: number | null): EstacionRecorrido => ({
       estacion,
+      ...(revisionDe === undefined ? {} : { revisionDe }),
       ia: c.ia,
       modelo: c.modelo,
       // Antigravity lleva el esfuerzo dentro del id del modelo.
@@ -296,7 +305,7 @@ export async function proponer(entrada: {
     });
 
     const fijada = cfg?.ia !== undefined || cfg?.modelo !== undefined;
-    if (fijada || manual[0]?.ia === 'claude') {
+    if (revisionDe === undefined && (fijada || manual[0]?.ia === 'claude')) {
       // Lo fijado en la configuración y las estaciones de Claude no se deciden por evidencia: manda la tabla.
       for (const c of manual) {
         const razon = descarte(c, catalogos);
@@ -312,10 +321,19 @@ export async function proponer(entrada: {
     }
 
     const disponibles: Candidato[] = [];
-    for (const c of candidatosConEvidencia(estacion, manual, cfg, catalogos, evidencia)) {
+    for (const c of candidatosConEvidencia(estacion, manual, revisionDe === undefined ? cfg : undefined, catalogos, evidencia)) {
+      if (revisionDe !== undefined && c.ia !== revisionDe) continue;
       const razon = descarte(c, catalogos);
       if (razon === null) disponibles.push(c);
       else descartes.push(razon);
+    }
+    // Si la tabla y la evidencia no ofrecen ningún par vivo, usa el orden del catálogo.
+    const porCatalogo = revisionDe !== undefined && disponibles.length === 0;
+    if (porCatalogo) {
+      for (const { modelo, esfuerzos } of catalogos[revisionDe] ?? []) {
+        if (revisionDe === 'antigravity') disponibles.push({ ia: revisionDe, modelo, esfuerzo: null });
+        else for (const esfuerzo of esfuerzos) disponibles.push({ ia: revisionDe, modelo, esfuerzo });
+      }
     }
     if (disponibles.length === 0) return sinModelo();
 
@@ -323,14 +341,29 @@ export async function proponer(entrada: {
     const riesgo = riesgoDe(categorias, estacion);
     const decision = elegir({ estacion, riesgo, candidatos: disponibles, evidencia, criterio });
     if (decision.sinDatos) {
-      avisosEstaciones.push(`${estacion}: sin datos medidos: ejecuta el banco con \`nexakit fabrica banco planificar\`; mientras, se usa la tabla manual`);
+      const fuente = porCatalogo ? 'el orden del catálogo' : 'la tabla manual';
+      avisosEstaciones.push(`${nombre}: sin datos medidos: ejecuta el banco con \`nexakit fabrica banco planificar\`; mientras, se usa ${fuente}`);
     } else if (!decision.alcanzaUmbral) {
       avisosEstaciones.push(
-        `${estacion}: ningún modelo alcanza la calidad que pide el riesgo ${riesgo} (${String(UMBRALES[riesgo]).replace('.', ',')}): ${ORDEN_BANCO} para medir más`,
+        `${nombre}: ningún modelo alcanza la calidad que pide el riesgo ${riesgo} (${String(UMBRALES[riesgo]).replace('.', ',')}): ${ORDEN_BANCO} para medir más`,
       );
     }
-    return propuesta(decision.eleccion, decision.explicacion, decision.calidad);
-  });
+    const explicacion = porCatalogo ? decision.explicacion.replace('la tabla manual', 'el orden del catálogo') : decision.explicacion;
+    return propuesta(decision.eleccion, explicacion, decision.calidad);
+  }
+
+  const estaciones: EstacionRecorrido[] = [];
+  for (const estacion of NOMBRES_ESTACION) {
+    const principal = proponerEstacion(estacion);
+    estaciones.push(principal);
+    if (estacion !== 'codigo' || principal.estado === 'omitida' || !revisionCruzada) continue;
+    for (const ia of IAExterna.options) {
+      if (principal.ia === ia) continue;
+      const revision = proponerEstacion(estacion, ia);
+      if (revision.estado === 'propuesta') estaciones.push(revision);
+      else avisosEstaciones.push(`Se omite la revisión cruzada de código con ${ia}: no hay modelos disponibles`);
+    }
+  }
 
   const avisos: string[] = [];
   if (usoEvidencia) {
@@ -389,20 +422,23 @@ function validarEleccion(estacion: string, ia: IA, modelo: string, esfuerzo: str
 export function aplicarCambios(recorrido: Recorrido, cambios: CambioRecorrido[]): Recorrido {
   const estaciones = structuredClone(recorrido.estaciones);
   for (const cambio of cambios) {
-    const actual = estaciones.find((e) => e.estacion === cambio.estacion);
+    const actual = estaciones.find((e) => claveEstacion(e.estacion, e.revisionDe) === cambio.estacion);
     if (actual === undefined) throw new ErrorFabrica(`La estación ${cambio.estacion} no existe en el recorrido`);
 
     if (cambio.quitar === true) {
-      Object.assign(actual, {
-        ia: null,
-        modelo: null,
-        esfuerzo: null,
-        ordenesPermitidas: [],
-        explicacion: '',
-        calidad: null,
-        motivo: 'quitada por la persona',
-        estado: 'omitida',
-      } satisfies Partial<EstacionRecorrido>);
+      const quitar = actual.revisionDe === undefined ? estaciones.filter((e) => e.estacion === actual.estacion) : [actual];
+      for (const e of quitar) {
+        Object.assign(e, {
+          ia: null,
+          modelo: null,
+          esfuerzo: null,
+          ordenesPermitidas: [],
+          explicacion: '',
+          calidad: null,
+          motivo: 'quitada por la persona',
+          estado: 'omitida',
+        } satisfies Partial<EstacionRecorrido>);
+      }
       continue;
     }
     if (cambio.ia === undefined && cambio.modelo === undefined && cambio.esfuerzo === undefined) continue;
@@ -411,6 +447,9 @@ export function aplicarCambios(recorrido: Recorrido, cambios: CambioRecorrido[])
     const modelo = cambio.modelo ?? actual.modelo;
     if (ia === null || modelo === null) {
       throw new ErrorFabrica(`Para activar la estación ${cambio.estacion} indica la IA y el modelo`);
+    }
+    if (actual.revisionDe !== undefined && ia !== actual.revisionDe) {
+      throw new ErrorFabrica(`La revisión ${cambio.estacion} usa ${actual.revisionDe}`);
     }
     const mismaIa = ia === actual.ia;
     const mismoModelo = modelo === actual.modelo;
@@ -429,6 +468,10 @@ export function aplicarCambios(recorrido: Recorrido, cambios: CambioRecorrido[])
       calidad: null,
       estado: 'propuesta',
     } satisfies Partial<EstacionRecorrido>);
+  }
+  const iasCodigo = estaciones.filter((e) => e.estacion === 'codigo' && e.estado === 'propuesta').map((e) => e.ia);
+  if (new Set(iasCodigo).size !== iasCodigo.length) {
+    throw new ErrorFabrica('La estación codigo solo admite una ejecución por IA');
   }
   return {
     ...recorrido,
