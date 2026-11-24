@@ -7,6 +7,7 @@ import path from 'node:path';
 import { gitConfigGlobalVacio } from '../test-support/git-aislado.js';
 import { ejecutarEncargo, TIEMPO_ENCARGO_MS } from '../dist/fabrica/encargo/ejecutar.js';
 import { barrerHuerfanos, crearWorktree } from '../dist/fabrica/encargo/worktree.js';
+import { leerCandado } from '../dist/fabrica/encargo/candado.js';
 import { ErrorFabrica } from '../dist/fabrica/errores.js';
 import { aceptar, registrar } from '../dist/fabrica/lecciones.js';
 import * as rastro from '../dist/fabrica/rastro.js';
@@ -697,6 +698,124 @@ test('el barrido de huérfanos no sigue enlaces ni toca nada fuera de ~/.nexakit
   mkdirSync(path.join(home2, '.nexakit'), { recursive: true });
   symlinkSync(encargos, path.join(home2, '.nexakit', 'encargos'));
   assert.deepEqual(await barrerHuerfanos(home2, Date.now() + 10 * 60_000), []);
+});
+
+test('un enlace a la raíz del repo o a .github también invalida el encargo', { skip: SIN_ENLACES }, async () => {
+  for (const [destino, ruta] of [['.', 'x'], ['.github', 'y'], ['./', 'z'], ['sub/..', 'w']]) {
+    const e = entorno();
+    const codex = fabrica('codex', async (encargo) => {
+      symlinkSync(destino, path.join(encargo.raiz, ruta));
+      return okDe();
+    });
+    const informe = await ejecutarEncargo(opciones(e, { conectores: { codex: codex.crear } }));
+    assert.equal(informe.estado, 'invalido', destino);
+    assert.match(informe.rutasVetadas.join('|'), /enlace simbólico hacia una ruta protegida/u, destino);
+    comprobarLimpio(e, informe);
+  }
+});
+
+const vivoAjeno = process.ppid;
+
+test('el candado global de encargos: se toma con pid, id y fecha, se libera siempre y bloquea a otro encargo vivo', async () => {
+  const e = entorno();
+  const archivo = path.join(e.home, '.nexakit', 'encargos', '.candado');
+  let visto;
+  const codex = fabrica('codex', async () => {
+    visto = { datos: leerCandado(e.home), modo: modo(archivo) };
+    return okDe();
+  });
+  const informe = await ejecutarEncargo(opciones(e, { conectores: { codex: codex.crear } }));
+  assert.equal(visto.datos.pid, process.pid);
+  assert.equal(visto.datos.id, informe.id);
+  assert.ok(Number.isFinite(Date.parse(visto.datos.fecha)));
+  assert.equal(visto.modo, 0o600);
+  assert.equal(existsSync(archivo), false, 'se libera al terminar');
+
+  // Con un proceso vivo que lo tiene, no arranca nada (ni siquiera el conector) y el candado ajeno no se toca.
+  writeFileSync(archivo, JSON.stringify({ pid: vivoAjeno, id: 'otro-abcdef', fecha: new Date().toISOString() }));
+  const otro = fabrica('codex', async () => okDe());
+  await assert.rejects(ejecutarEncargo(opciones(e, { conectores: { codex: otro.crear } })), /Ya hay un encargo en curso \(otro-abcdef/u);
+  assert.equal(otro.registro.creaciones.length, 0);
+  assert.equal(JSON.parse(readFileSync(archivo, 'utf8')).pid, vivoAjeno, 'el candado de otro no se libera');
+
+  // Un candado de un proceso muerto, o ilegible, se sustituye.
+  for (const viejo of [JSON.stringify({ pid: pidMuerto(), id: null, fecha: '' }), 'basura']) {
+    writeFileSync(archivo, viejo);
+    const nuevo = fabrica('codex', async () => okDe());
+    const r = await ejecutarEncargo(opciones(e, { conectores: { codex: nuevo.crear } }));
+    assert.equal(r.estado, 'sin-cambios');
+    assert.equal(existsSync(archivo), false);
+  }
+});
+
+test('dos encargos simultáneos en el mismo proceso: solo uno toma el candado', async () => {
+  const e = entorno();
+  let soltar;
+  const espera = new Promise((resolver) => { soltar = resolver; });
+  const lento = fabrica('codex', async () => { await espera; return okDe(); });
+  const primero = ejecutarEncargo(opciones(e, { conectores: { codex: lento.crear } }));
+  await esperarHasta(() => lento.registro.encargos.length === 1, 'el primero arranca');
+  const rapido = fabrica('codex', async () => okDe());
+  await assert.rejects(ejecutarEncargo(opciones(e, { conectores: { codex: rapido.crear } })), /Ya hay un encargo en curso/u);
+  soltar();
+  assert.equal((await primero).estado, 'sin-cambios');
+  assert.equal(existsSync(path.join(e.home, '.nexakit', 'encargos', '.candado')), false);
+});
+
+test('un recorrido vivo de otro proceso en activo.json impide el encargo y libera el candado; el propio pid no', async () => {
+  const e = entorno();
+  const activo = (pid) => ({ pid, id: 'fab-20260101-0000-abcd', repo: 'demo', actualizado: new Date().toISOString(), estaciones: [] });
+  mkdirSync(path.join(e.home, '.nexakit', 'fabrica'), { recursive: true, mode: 0o700 });
+  const archivoActivo = path.join(e.home, '.nexakit', 'fabrica', 'activo.json');
+  writeFileSync(archivoActivo, JSON.stringify(activo(vivoAjeno)));
+  const codex = fabrica('codex', async () => okDe());
+  await assert.rejects(ejecutarEncargo(opciones(e, { conectores: { codex: codex.crear } })), /Ya hay un recorrido o encargo en curso/u);
+  assert.equal(codex.registro.creaciones.length, 0);
+  assert.equal(existsSync(path.join(e.home, '.nexakit', 'encargos', '.candado')), false, 'el candado se libera tras el rechazo');
+  writeFileSync(archivoActivo, JSON.stringify(activo(pidMuerto())));
+  assert.equal((await ejecutarEncargo(opciones(e, { conectores: { codex: codex.crear } }))).estado, 'sin-cambios');
+});
+
+test('el informe separa las órdenes por defecto del repo de las extra', async () => {
+  const e = entorno();
+  const codex = fabrica('codex', async () => okDe());
+  const informe = await ejecutarEncargo(opciones(e, { conectores: { codex: codex.crear }, ordenesPermitidas: ['npm run lint', ' npm run lint '] }));
+  assert.deepEqual(informe.ordenesPorDefecto, ['npm test', 'npm run typecheck']);
+  assert.deepEqual(informe.ordenesExtra, ['npm run lint']);
+  assert.deepEqual(codex.registro.encargos[0].ordenesPermitidas, ['npm test', 'npm run typecheck', 'npm run lint']);
+});
+
+test('con ~/.nexakit como enlace no se toma el candado, no se barre y no se escribe fuera', { skip: SIN_ENLACES }, async () => {
+  const e = entorno();
+  const real = mkdtempSync(path.join(tmpdir(), 'enc-nexakit-real-'));
+  temporales.push(real);
+  const cuelga = path.join(real, 'encargos', 'a');
+  mkdirSync(path.join(cuelga, 'repo'), { recursive: true });
+  writeFileSync(path.join(cuelga, 'repo', 'valioso.txt'), 'no me borres');
+  writeFileSync(path.join(cuelga, 'candado.json'), JSON.stringify({ pid: pidMuerto(), raiz: e.raiz }));
+  symlinkSync(real, path.join(e.home, '.nexakit'));
+  assert.deepEqual(await barrerHuerfanos(e.home, Date.now() + 10 * 60_000), []);
+  const codex = fabrica('codex', async () => okDe());
+  await assert.rejects(ejecutarEncargo(opciones(e, { conectores: { codex: codex.crear } })), /no sigue enlaces/u);
+  assert.equal(codex.registro.creaciones.length, 0);
+  assert.equal(readFileSync(path.join(cuelga, 'repo', 'valioso.txt'), 'utf8'), 'no me borres');
+  assert.equal(existsSync(path.join(real, 'encargos', '.candado')), false);
+});
+
+test('el barrido solo ejecuta git en la raíz del candado si ese repo tiene registrado el worktree', async () => {
+  const a = entorno();
+  const b = entorno();
+  const huerfano = await crearWorktree(a.raiz, a.home);
+  // En el repo ajeno hay una entrada de worktree ya rota que un `prune` limpiaría.
+  const ajeno = await crearWorktree(b.raiz, b.home);
+  rmSync(ajeno.dir, { recursive: true, force: true });
+  const antes = git(b.raiz, 'worktree', 'list', '--porcelain');
+  assert.match(antes, /prunable/u);
+  writeFileSync(path.join(path.dirname(huerfano.dir), 'candado.json'), JSON.stringify({ pid: pidMuerto(), raiz: b.raiz }));
+  const avisos = await barrerHuerfanos(a.home);
+  assert.equal(existsSync(huerfano.dir), false, 'la carpeta bajo encargos se borra');
+  assert.equal(avisos.length, 1);
+  assert.equal(git(b.raiz, 'worktree', 'list', '--porcelain'), antes, 'el repo ajeno no se toca (ni remove ni prune)');
 });
 
 test('un cambio en rutas sensibles (.claude, .husky, .github/workflows...) invalida el encargo con la lista', async () => {

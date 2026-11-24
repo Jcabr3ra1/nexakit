@@ -931,6 +931,7 @@ test('encargar respeta el candado de un recorrido a la vez: otro proceso vivo en
   const ocupado = await cli(['encargar', '--ia', 'codex', '--encargo', f.md], e, datosEnc(codex));
   assert.equal(ocupado.codigo, 1);
   assert.match(ocupado.err, /Ya hay un recorrido o encargo en curso/u);
+  assert.equal(existsSync(path.join(e.home, '.nexakit', 'encargos', '.candado')), false, 'el candado se libera tras el rechazo');
   assert.equal(codex.registro.creaciones.length, 0);
   assert.equal(worktreesEnc(e), 1);
   // Un proceso que ya no existe no ocupa nada.
@@ -962,4 +963,35 @@ test('nexakit encargar es una orden de primer nivel y la ayuda la documenta', as
   const ayudaFabrica = await cli(['--help'], e);
   assert.match(ayudaFabrica.out, /nexakit encargar --ia codex\|antigravity\|auto --encargo/u);
   assert.match(ayudaFabrica.out, /Ctrl\+C cancela y borra la copia/u);
+});
+
+test('fabrica lanzar y encargar respetan el candado global de encargos: con un encargo vivo no lanzan nada', async () => {
+  const e = escenario();
+  const f = archivosEnc();
+  mkdirSync(path.join(e.home, '.nexakit', 'encargos'), { recursive: true, mode: 0o700 });
+  const archivo = path.join(e.home, '.nexakit', 'encargos', '.candado');
+  writeFileSync(archivo, JSON.stringify({ pid: process.ppid, id: 'otro-abcdef', fecha: new Date().toISOString() }));
+  const propuesta = JSON.parse((await cli(['proponer', '--base', 'main', '--json'], e)).out);
+  const lanzar = await cli(['lanzar', '--huella', propuesta.huella], e);
+  assert.equal(lanzar.codigo, 1);
+  assert.match(lanzar.err, /Ya hay un encargo en curso \(otro-abcdef/u);
+  assert.equal(existsSync(path.join(e.home, '.nexakit', 'fabrica', 'activo.json')), false, 'no se lanzó ningún recorrido');
+  const codex = codexFalso(async () => okEnc());
+  const encargar = await cli(['encargar', '--ia', 'codex', '--encargo', f.md], e, datosEnc(codex));
+  assert.equal(encargar.codigo, 1);
+  assert.match(encargar.err, /Ya hay un encargo en curso/u);
+  assert.equal(codex.registro.creaciones.length, 0);
+  assert.equal(JSON.parse(readFileSync(archivo, 'utf8')).id, 'otro-abcdef', 'el candado ajeno sigue');
+});
+
+test('encargar muestra las órdenes por defecto y las extra por separado', async () => {
+  const e = escenario();
+  writeFileSync(path.join(e.dir, 'package.json'), JSON.stringify({ scripts: { test: 'x' } }));
+  git(e.dir, 'add', '-A');
+  git(e.dir, 'commit', '-q', '-m', 'paquete');
+  const f = archivosEnc({ ordenes: ['npm run lint'] });
+  const codex = codexFalso(async () => okEnc());
+  const { out, err } = await cli(['encargar', '--ia', 'codex', '--encargo', f.md, '--ordenes', f.json], e, datosEnc(codex));
+  assert.match(out, /Órdenes por defecto: «npm test»\n/u, err);
+  assert.match(out, /Órdenes extra \(aprobadas por quien encargó\): «npm run lint»\n/u);
 });

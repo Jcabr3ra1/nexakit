@@ -726,3 +726,103 @@ test('fabrica_encargar valida su entrada: IA, tiempo, texto y órdenes', async (
   assert.equal(codex.registro.creaciones, 0);
   await servidor.detener();
 });
+
+test('fabrica_encargar y fabrica_lanzar no arrancan con el candado de un encargo de otro proceso', async () => {
+  const e = escenario();
+  const { codex } = iaDetenida();
+  const { cliente, servidor } = await conectarEncargos(e, codex);
+  const propuesta = await proponer(cliente);
+  mkdirSync(path.join(e.home, '.nexakit', 'encargos'), { recursive: true, mode: 0o700 });
+  const archivo = path.join(e.home, '.nexakit', 'encargos', '.candado');
+  writeFileSync(archivo, JSON.stringify({ pid: process.ppid, id: 'otro-abcdef', fecha: new Date().toISOString() }));
+  const encargar = await llamar(cliente, 'fabrica_encargar', ENCARGO);
+  assert.equal(encargar.isError, true);
+  assert.match(encargar.texto, /Ya hay un encargo en curso \(otro-abcdef/u);
+  const lanzar = await llamar(cliente, 'fabrica_lanzar', { huella: propuesta.huella });
+  assert.equal(lanzar.isError, true);
+  assert.match(lanzar.texto, /Ya hay un encargo en curso \(otro-abcdef/u);
+  assert.equal(codex.registro.creaciones, 0);
+  // Los dos rechazos liberaron la reserva interna: al morir el otro proceso, se puede encargar.
+  rmSync(archivo);
+  const ok = await llamar(cliente, 'fabrica_encargar', ENCARGO);
+  assert.equal(ok.isError, undefined, ok.texto);
+  await servidor.detener();
+});
+
+test('las instrucciones y la descripción de fabrica_encargar piden aprobar las órdenes extra', async () => {
+  const e = escenario();
+  const { codex } = iaDetenida();
+  const { cliente, servidor } = await conectarEncargos(e, codex);
+  assert.match(cliente.getInstructions(), /ordenes extra, enséñalas a la persona y pide su aprobación antes de pasarlas/u);
+  const { tools } = await cliente.listTools();
+  assert.match(tools.find((t) => t.name === 'fabrica_encargar').description, /enséñalas a la persona y pide su aprobación antes de pasarlas/u);
+  await servidor.detener();
+});
+
+test('fabrica_encargar rechaza un texto de 200 001 caracteres y 101 órdenes, y acepta los topes', async () => {
+  const e = escenario();
+  const { codex } = iaDetenida();
+  const { cliente, servidor } = await conectarEncargos(e, codex);
+  for (const args of [
+    { ...ENCARGO, texto: 'x'.repeat(200_001) },
+    { ...ENCARGO, ordenes: Array.from({ length: 101 }, (_, i) => `npm run t${i}`) },
+  ]) {
+    let r;
+    try {
+      r = await llamar(cliente, 'fabrica_encargar', args);
+    } catch {
+      r = { isError: true };
+    }
+    assert.equal(r.isError, true);
+  }
+  assert.equal(codex.registro.creaciones, 0);
+  const justo = await llamar(cliente, 'fabrica_encargar', { ...ENCARGO, texto: 'x'.repeat(200_000), ordenes: Array.from({ length: 100 }, (_, i) => `npm run t${i}`) });
+  assert.equal(justo.isError, undefined, justo.texto);
+  await servidor.detener();
+});
+
+test('fabrica_encargar no acepta una raíz: el encargo sale siempre del repo del servidor', async () => {
+  const e = escenario();
+  const ajeno = crearRepo();
+  const { codex, soltar } = iaDetenida();
+  const { cliente, servidor } = await conectarEncargos(e, codex);
+  const r = await llamar(cliente, 'fabrica_encargar', { ...ENCARGO, raiz: ajeno });
+  if (!r.isError) {
+    const { id } = datos(r);
+    await hasta(() => codex.registro.encargos.length === 1, 'la IA arranca');
+    assert.equal(worktreesMcp(ajeno), 1, 'el repo ajeno no se toca');
+    assert.equal(worktreesMcp(e.dir), 2);
+    soltar();
+    await hasta(async () => datos(await llamar(cliente, 'fabrica_estado', { id })).fase === 'terminado', 'termina');
+    assert.equal(datos(await llamar(cliente, 'fabrica_resultado', { id })).informe.base, git(e.dir, 'rev-parse', 'HEAD'));
+  }
+  assert.equal(worktreesMcp(ajeno), 1);
+  await servidor.detener();
+});
+
+test('tras reiniciar el servidor, estado y resultado leen el informe del disco; un id sin informe da un mensaje claro', async () => {
+  const e = escenario();
+  const { codex, soltar } = iaDetenida();
+  const uno = await conectarEncargos(e, codex);
+  const { id } = datos(await llamar(uno.cliente, 'fabrica_encargar', ENCARGO));
+  await hasta(() => codex.registro.encargos.length === 1, 'la IA arranca');
+  soltar();
+  await hasta(async () => datos(await llamar(uno.cliente, 'fabrica_estado', { id })).fase === 'terminado', 'termina');
+  await uno.servidor.detener();
+
+  const dos = await conectarEncargos(e, iaDetenida().codex);
+  const estado = datos(await llamar(dos.cliente, 'fabrica_estado', { id }));
+  assert.equal(estado.fase, 'terminado');
+  assert.equal(estado.informe.estado, 'ok');
+  const resultado = datos(await llamar(dos.cliente, 'fabrica_resultado', { id }));
+  assert.equal(resultado.informe.id, id);
+  assert.ok(existsSync(resultado.informe.rutaDiff));
+
+  const desconocido = await llamar(dos.cliente, 'fabrica_resultado', { id: 'api-pedidos-abcdef' });
+  assert.equal(desconocido.isError, true);
+  assert.match(desconocido.texto, /ni un informe guardado en ~\/\.nexakit\/encargos\/api-pedidos-abcdef\/informe\.json/u);
+  // Un id con forma de ruta no se lee del disco.
+  const ruta = await llamar(dos.cliente, 'fabrica_resultado', { id: '../../x' });
+  assert.equal(ruta.isError, true);
+  await dos.servidor.detener();
+});

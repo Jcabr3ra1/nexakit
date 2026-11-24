@@ -8,10 +8,9 @@ import * as ejecutor from './ejecutor.js';
 import type { CambioRecorrido, Recorrido } from './enrutador.js';
 import { describirPlan, ejecutarBanco, planificarBanco, verificarPlanAprobado, type EjecucionMedida, type ResultadoBanco } from './banco/ejecutar.js';
 import { type FabricasConectores, type InformeEncargo, type OpcionesEncargo, ejecutarEncargo } from './encargo/ejecutar.js';
-import { procesoVivo } from './encargo/worktree.js';
 import { ErrorEntorno, ErrorFabrica } from './errores.js';
 import { cargar } from './evidencia.js';
-import { consumirPlanBanco, guardarPlanBanco, leerActivo, nombreRepo } from './rastro.js';
+import { consumirPlanBanco, guardarPlanBanco, nombreRepo } from './rastro.js';
 import {
   cerrarConectores,
   consultarCatalogos,
@@ -393,6 +392,8 @@ export function lineasInforme(i: InformeEncargo): string[] {
   }
   lineas.push(`Duración: ${i.segundos} s${i.tokens === null ? ' · tokens: sin cifra' : ` · tokens: ${i.tokens.total}`}`);
   if (i.motivo !== undefined) lineas.push(`Motivo: ${enUnaLinea(i.motivo)}`);
+  if (i.ordenesPorDefecto.length > 0) lineas.push(`Órdenes por defecto: ${i.ordenesPorDefecto.map((o) => `«${enUnaLinea(o)}»`).join(', ')}`);
+  if (i.ordenesExtra.length > 0) lineas.push(`Órdenes extra (aprobadas por quien encargó): ${i.ordenesExtra.map((o) => `«${enUnaLinea(o)}»`).join(', ')}`);
   if (i.rutaDiff !== null) {
     lineas.push(`Diff: ${i.rutaDiff}`, `Para aplicarlo tras revisarlo: git apply ${i.rutaDiff}`);
     if (i.archivos.length > 0) lineas.push('Archivos:', ...i.archivos.map((a) => `  - ${enUnaLinea(a)}`));
@@ -420,12 +421,6 @@ async function ordenEncargar(ctx: Contexto, valores: Record<string, unknown>, js
   const archivoOrdenes = valorTexto(valores, 'ordenes');
   const ordenes = archivoOrdenes === undefined ? undefined : await leerJsonValidado(archivoOrdenes, 'órdenes', EsquemaOrdenes);
   const raiz = await raizDelRepo(ctx.cwd);
-
-  // Un recorrido o encargo a la vez: `activo.json` con un proceso vivo que no es este lo ocupa.
-  const activo = leerActivo(ctx.home);
-  if (activo !== null && activo.pid !== process.pid && procesoVivo(activo.pid)) {
-    throw new ErrorFabrica(`Ya hay un recorrido o encargo en curso (${limpiar(activo.id)}, proceso ${activo.pid}); espera a que termine o cancélalo`);
-  }
 
   const control = new AbortController();
   const alInterrumpir = (): void => {

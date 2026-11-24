@@ -1,3 +1,4 @@
+import { closeSync, constants, lstatSync, openSync, readFileSync } from 'node:fs';
 import { lstat, readFile, readlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,6 +15,7 @@ import type { Leccion } from '../lecciones.js';
 import { paraEncargo } from '../lecciones.js';
 import * as rastro from '../rastro.js';
 import { cerrarConectores, limpiar, mensajeDe, opcionesDeEntorno, type Conectores } from '../sesion.js';
+import { procesoVivo, tomarCandadoEncargos } from './candado.js';
 import { barrerHuerfanos, borrarWorktree, cambiosDelWorktree, crearWorktree, diffDelWorktree, raizDelRepoGit, type CambioWorktree, type Worktree } from './worktree.js';
 
 /** Tiempo máximo de un encargo: 20 minutos. */
@@ -88,6 +90,10 @@ export interface InformeEncargo {
   resumen: string;
   denegaciones: Denegacion[];
   aprobaciones: Denegacion[];
+  /** Órdenes que el repo declara (`npm test`, `npm run typecheck`): no necesitan aprobación. */
+  ordenesPorDefecto: string[];
+  /** Órdenes extra que pidió quien encargó: necesitan la aprobación de la persona. */
+  ordenesExtra: string[];
   /** Rutas del diff, para revisarlo de un vistazo. */
   archivos: string[];
   /** Rutas del repo real que cambiaron mientras corría el encargo (lo invalida). */
@@ -246,6 +252,8 @@ interface Borrador {
   resumen: string;
   denegaciones: Denegacion[];
   aprobaciones: Denegacion[];
+  ordenesPorDefecto: string[];
+  ordenesExtra: string[];
   archivos: string[];
   escriturasFuera: string[];
   rutasVetadas: string[];
@@ -292,9 +300,24 @@ export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<Inform
   const fabricas = opciones.conectores ?? fabricasDeEntorno(entorno);
   // La raíz del repo, no una subcarpeta: la instantánea del disco, las lecciones y el rastro hablan del repo entero.
   const raiz = await raizDelRepoGit(raizPedida);
-  // Antes de crear el propio: los worktrees de encargos cuyo proceso murió se borran para no acumular carpetas.
-  const avisosBarrido = await barrerHuerfanos(home);
-  const w = await crearWorktree(raiz, home);
+  // Un encargo a la vez en toda la máquina: el candado va antes del barrido y de crear nada, y se libera en el `finally`.
+  const candado = await tomarCandadoEncargos(home);
+  let avisosBarrido: string[];
+  let w: Worktree;
+  try {
+    // Y un recorrido de la fábrica vivo en otro proceso también lo impide (el propio lo controla el servidor).
+    const activo = rastro.leerActivo(home);
+    if (activo !== null && activo.pid !== process.pid && procesoVivo(activo.pid)) {
+      throw new ErrorFabrica(`Ya hay un recorrido o encargo en curso (${limpiar(activo.id)}, proceso ${activo.pid}); espera a que termine o cancélalo`);
+    }
+    // Antes de crear el propio: los worktrees de encargos cuyo proceso murió se borran para no acumular carpetas.
+    avisosBarrido = await barrerHuerfanos(home);
+    w = await crearWorktree(raiz, home);
+    await candado.asignarId(w.id).catch(() => {});
+  } catch (error) {
+    await candado.liberar();
+    throw error;
+  }
   try {
     opciones.alCrear?.(w.id);
   } catch {
@@ -312,6 +335,8 @@ export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<Inform
     resumen: '',
     denegaciones: [],
     aprobaciones: [],
+    ordenesPorDefecto: [],
+    ordenesExtra: [...new Set(extras.map((o) => o.trim()))],
     archivos: [],
     escriturasFuera: [],
     rutasVetadas: [],
@@ -351,6 +376,7 @@ export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<Inform
     if (aviso !== null) b.avisos.push(aviso);
     await publicador?.cerrar();
     await poda;
+    await candado.liberar();
   }
 
   let rutaDiff: string | null = null;
@@ -367,6 +393,8 @@ export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<Inform
       resumen: b.resumen,
       denegaciones: b.denegaciones,
       aprobaciones: b.aprobaciones,
+      ordenesPorDefecto: b.ordenesPorDefecto,
+      ordenesExtra: b.ordenesExtra,
       archivos: b.archivos,
       escriturasFuera: b.escriturasFuera,
       rutasVetadas: b.rutasVetadas,
@@ -415,7 +443,8 @@ export async function ejecutarEncargo(opciones: OpcionesEncargo): Promise<Inform
       return;
     }
     const repo = await rastro.nombreRepo(raiz);
-    const ordenes = [...new Set([...(await ordenesDelRepo(w.dir)), ...extras.map((o) => o.trim())])];
+    b.ordenesPorDefecto = await ordenesDelRepo(w.dir);
+    const ordenes = [...new Set([...b.ordenesPorDefecto, ...b.ordenesExtra])];
 
     // La IA: la pedida o, con `auto`, Codex si responde y, si no, Antigravity.
     const motivos: string[] = [];
@@ -692,11 +721,36 @@ async function rutasVetadas(w: Worktree, cambios: readonly CambioWorktree[]): Pr
       continue;
     }
     // Un enlace que apunta dentro del repo pero a un componente protegido (`x -> .git/hooks`) abriría la misma puerta.
-    const interno = path.posix.normalize(path.posix.join(path.posix.dirname(ruta), destino.replace(/\\/gu, '/')));
-    const motivo = motivoRutaSensible(interno);
+    const interno = path.posix.normalize(path.posix.join(path.posix.dirname(ruta), destino.replace(/\\/gu, '/'))).replace(/\/+$/u, '') || '.';
+    // Un enlace a la raíz del repo o a `.github` (ancestro de `.github/workflows`) da acceso a lo protegido.
+    const motivo = interno === '.' || interno === '' ? 'apunta a la raíz del repo' : interno === '.github' ? 'apunta a .github, que contiene .github/workflows' : motivoRutaSensible(interno);
     if (motivo !== null) vetadas.push(`${limpiar(ruta)} (enlace simbólico hacia una ruta protegida: ${limpiar(interno).slice(0, 200)}; ${motivo})`);
   }
   return vetadas;
+}
+
+/** Formato de un id de encargo: nombre neutro, guion y 6 hex (nunca `fab-...`, que es el de un recorrido). */
+export const RE_ID_ENCARGO = /^[a-z0-9]+(?:-[a-z0-9]+)*-[0-9a-f]{6}$/u;
+
+/** Lee `informe.json` de un encargo ya terminado, sin seguir enlaces y con tope de tamaño. `null` si no hay uno válido. */
+export function leerInformeEncargo(home: string, id: string): InformeEncargo | null {
+  if (!RE_ID_ENCARGO.test(id)) return null;
+  try {
+    const archivo = path.join(home, '.nexakit', 'encargos', id, 'informe.json');
+    const info = lstatSync(archivo, { throwIfNoEntry: false });
+    if (info === undefined || !info.isFile() || info.size > 2 * 1024 * 1024) return null;
+    const fd = openSync(archivo, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    try {
+      const dato: unknown = JSON.parse(readFileSync(fd, 'utf8'));
+      return typeof dato === 'object' && dato !== null && (dato as { id?: unknown }).id === id && typeof (dato as { estado?: unknown }).estado === 'string'
+        ? (dato as InformeEncargo)
+        : null;
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
 }
 
 export type { Worktree };

@@ -5,7 +5,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { z } from 'zod';
 import { escribirConsolidado, hallazgosDe, hallazgosGuardados } from './consolidar.js';
 import * as ejecutor from './ejecutor.js';
-import { type FabricasConectores, type InformeEncargo, type OpcionesEncargo, ejecutarEncargo } from './encargo/ejecutar.js';
+import { type FabricasConectores, type InformeEncargo, type OpcionesEncargo, ejecutarEncargo, leerInformeEncargo, RE_ID_ENCARGO } from './encargo/ejecutar.js';
 import { ErrorEntorno, ErrorFabrica } from './errores.js';
 import { Hallazgo } from './esquemas.js';
 import * as rastro from './rastro.js';
@@ -22,7 +22,7 @@ export const INSTRUCCIONES = [
   'Lánzala tú por tu cuenta al cerrar una tarea con cambios de código y antes de un PR, con la huella de la propuesta; solo hay un recorrido a la vez y no encadenes recorridos para el mismo diff. Pide aprobación a la persona solo si el recorrido trae órdenes de .nexakit/fabrica.json del repo revisado.',
   'Flujo: fabrica_proponer calcula el recorrido y su huella; revisa el recorrido entero (estaciones, IA, modelo, esfuerzo y órdenes permitidas); fabrica_lanzar con esa huella devuelve un id sin esperar; fabrica_estado consulta el avance; fabrica_resultado devuelve los hallazgos consolidados y la ruta de consolidado.md; fabrica_cancelar interrumpe.',
   'Las estaciones de Claude las lanzas tú como subagentes; pasa sus hallazgos a fabrica_resultado.',
-  'Para delegar una tarea de programación con diseño claro en Codex o Antigravity usa fabrica_encargar: devuelve un id sin esperar, la IA escribe solo en una copia aislada del repo, fabrica_estado, fabrica_resultado (informe y ruta de cambios.diff, que revisas y aplicas tú con git apply) y fabrica_cancelar aceptan ese id, y comparte el candado de un solo recorrido o encargo a la vez.',
+  'Para delegar una tarea de programación con diseño claro en Codex o Antigravity usa fabrica_encargar: devuelve un id sin esperar, la IA escribe solo en una copia aislada del repo, fabrica_estado, fabrica_resultado (informe y ruta de cambios.diff, que revisas y aplicas tú con git apply) y fabrica_cancelar aceptan ese id, y comparte el candado de un solo recorrido o encargo a la vez. Sin ordenes solo corren las órdenes por defecto del repo (npm test y npm run typecheck); si pasas ordenes extra, enséñalas a la persona y pide su aprobación antes de pasarlas.',
   'Tras verificar los hallazgos contra el código, vuelve a llamar a fabrica_resultado con los veredictos ({ clave, verificado: real | falso | dudoso }) para que la fábrica aprenda qué modelos aciertan.',
   'No sondees en bucle: consulta el estado cuando la persona lo pida o cuando termines tus propias estaciones.',
   'Todas las herramientas trabajan sobre el repo del directorio de trabajo del servidor; ninguna acepta una ruta.',
@@ -252,13 +252,13 @@ export function crearServidorFabrica(opciones: OpcionesServidorFabrica = {}): Se
   server.registerTool(
     'fabrica_encargar',
     {
-      description: `Delega una tarea de programación con diseño claro en Codex o Antigravity. La IA escribe solo en una copia aislada del repo (un git worktree de HEAD, sin los cambios sin commit) y el resultado es un diff que revisas y aplicas tú con git apply: nunca se escribe en el repo de la persona. Devuelve { id } sin esperar; el encargo corre dentro de este servidor. fabrica_estado consulta el avance, fabrica_resultado devuelve el informe (estado ok, sin-cambios, tiempo-agotado, cancelado, invalido o fallido, resumen de la IA y ruta de cambios.diff) y fabrica_cancelar lo interrumpe, todos con ese id. Un encargo invalido (escritura fuera de la copia, enlaces hacia fuera o cambios en rutas sensibles como .git o .claude) no trae diff. Comparte el candado de un solo recorrido o encargo a la vez con fabrica_lanzar. Pon en texto el objetivo, los archivos, el criterio de hecho y las pruebas. ${AVISO_RAIZ}`,
+      description: `Delega una tarea de programación con diseño claro en Codex o Antigravity. La IA escribe solo en una copia aislada del repo (un git worktree de HEAD, sin los cambios sin commit) y el resultado es un diff que revisas y aplicas tú con git apply: nunca se escribe en el repo de la persona. Devuelve { id } sin esperar; el encargo corre dentro de este servidor. fabrica_estado consulta el avance, fabrica_resultado devuelve el informe (estado ok, sin-cambios, tiempo-agotado, cancelado, invalido o fallido, resumen de la IA y ruta de cambios.diff) y fabrica_cancelar lo interrumpe, todos con ese id. Un encargo invalido (escritura fuera de la copia, enlaces hacia fuera o cambios en rutas sensibles como .git o .claude) no trae diff. Comparte el candado de un solo recorrido o encargo a la vez con fabrica_lanzar. Pon en texto el objetivo, los archivos, el criterio de hecho y las pruebas. Las órdenes por defecto (npm test y npm run typecheck, si el repo las declara) no necesitan aprobación; cualquier orden extra en ordenes, enséñalas a la persona y pide su aprobación antes de pasarlas. ${AVISO_RAIZ}`,
       inputSchema: z.object({
         ia: z.enum(['codex', 'antigravity', 'auto']).describe('IA que programa; auto prueba Codex y, si no responde, Antigravity'),
         modelo: z.string().min(1).optional().describe('Modelo; sin él se usa la recomendación de nivel normal de la IA'),
         esfuerzo: z.string().min(1).optional().describe('Esfuerzo del modelo (en Antigravity va dentro del id del modelo y se ignora)'),
         texto: z.string().min(1).max(MAX_TEXTO_ENCARGO).describe('Texto del encargo: objetivo, archivos, criterio de hecho y pruebas'),
-        ordenes: z.array(z.string().min(1)).max(100).optional().describe('Órdenes exactas permitidas además de npm test y npm run typecheck'),
+        ordenes: z.array(z.string().min(1)).max(100).optional().describe('Órdenes exactas extra, además de npm test y npm run typecheck: solo con la aprobación de la persona'),
         tiempoMin: z.number().int().min(1).max(TIEMPO_ENCARGO_MAX_MIN).optional().describe('Minutos máximos; por defecto 20'),
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
@@ -288,7 +288,10 @@ export function crearServidorFabrica(opciones: OpcionesServidorFabrica = {}): Se
     ({ id }) =>
       invocar(async () => {
         const vivo = encargoDe(id);
-        return vivo === undefined ? ejecutor.estado(id, home) : estadoEncargo(id, vivo);
+        if (vivo !== undefined) return estadoEncargo(id, vivo);
+        const guardado = leerInformeEncargo(home, id);
+        if (guardado !== null) return { id, tipo: 'encargo', fase: 'terminado', informe: guardado };
+        return ejecutor.estado(id, home);
       }),
   );
 
@@ -316,6 +319,17 @@ export function crearServidorFabrica(opciones: OpcionesServidorFabrica = {}): Se
             throw new ErrorFabrica(`El encargo sigue en curso (${id}); consulta fabrica_estado y vuelve a pedir el resultado cuando termine`);
           }
           return { id, tipo: 'encargo', informe: vivo.informe };
+        }
+        if (RE_ID_ENCARGO.test(id)) {
+          // Un encargo de un servidor anterior: su informe sigue en disco.
+          if (hallazgosClaude !== undefined || veredictos !== undefined) {
+            throw new ErrorFabrica('Un encargo no tiene hallazgos ni veredictos: pide solo su informe con el id');
+          }
+          const guardado = leerInformeEncargo(home, id);
+          if (guardado === null) {
+            throw new ErrorFabrica(`No hay un encargo con el id ${id} en este servidor ni un informe guardado en ~/.nexakit/encargos/${id}/informe.json`);
+          }
+          return { id, tipo: 'encargo', informe: guardado };
         }
         const e = ejecutor.estado(id, home);
         if (e.fase === 'en-curso') {
