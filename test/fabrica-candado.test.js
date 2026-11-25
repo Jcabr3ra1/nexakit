@@ -201,7 +201,7 @@ test('publicarCandado recurre a wx ante cualquier error de link distinto de EEXI
     const enlazar = async () => { throw Object.assign(new Error('sin enlaces'), { code: codigo }); };
     await publicarCandado(archivo, 'hola\n', enlazar);
     assert.equal(readFileSync(archivo, 'utf8'), 'hola\n', codigo);
-    assert.equal(statSync(archivo).mode & 0o777, 0o600, codigo);
+    if (process.platform !== 'win32') assert.equal(statSync(archivo).mode & 0o777, 0o600, codigo);
     assert.deepEqual(readdirSync(carpeta), ['.candado'], codigo);
   }
 });
