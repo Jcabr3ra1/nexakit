@@ -570,7 +570,8 @@ const edicion = (ruta, extra = {}) => ({ toolCallId: 't', title: `Editar ${ruta}
 const orden = (comando) => ({ toolCallId: 't', title: `Ejecutar ${comando}`, kind: 'execute', status: 'pending', rawInput: { command: comando, BypassSandbox: false } });
 
 /** Ejecuta un encargo en modo escritura con las llamadas dadas; devuelve las decisiones y las denegaciones. */
-async function conPermisos(llamadas, prepararRaiz = () => {}, ordenes = ['npm test', 'npm run typecheck'], ordenesActivas = ORDENES_ACTIVAS) {
+async function conPermisos(llamadas, prepararRaiz = () => {}, ordenes = ['npm test', 'npm run typecheck'], ordenesActivas = true) {
+  // `'omitir'` no pasa la opción al conector: así se ejerce el valor por defecto de verdad.
   const dir = mkdtempSync(join(tmpdir(), 'nexakit-agy-esc-'));
   const raiz = join(dir, 'repo');
   mkdirSync(join(raiz, 'src'), { recursive: true });
@@ -583,7 +584,7 @@ async function conPermisos(llamadas, prepararRaiz = () => {}, ordenes = ['npm te
     orden: process.execPath,
     argsPrefijo: [SERVIDOR, join(p.dir, 'guion.json')],
     escritura: { raiz, ordenesPermitidas: ordenes },
-    ordenesActivas,
+    ...(ordenesActivas === 'omitir' ? {} : { ordenesActivas }),
   });
   try {
     const resultado = await conector.ejecutar(encargo(raiz), AbortSignal.timeout(10_000));
@@ -673,11 +674,77 @@ test('modo escritura con órdenes activas: aprueba solo las órdenes exactas de 
   assert.match(resultado.denegaciones[1].detalle, /fuera del sandbox/);
 });
 
-test('modo escritura con órdenes desactivadas (otra plataforma o versión de agy): ninguna orden, con su motivo', async () => {
+test('modo escritura con órdenes desactivadas (por defecto): ninguna orden, con su motivo', async () => {
   const { decisiones, resultado } = await conPermisos(() => [orden('npm test'), ordenAgy('npm test')], () => {}, undefined, false);
   assert.deepEqual(decisiones, [RECHAZADO, RECHAZADO]);
-  assert.ok(resultado.denegaciones.every((d) => /órdenes desactivadas en Antigravity fuera de macOS/.test(d.detalle)));
-  assert.equal(ORDENES_ACTIVAS, process.platform === 'darwin');
+  assert.ok(resultado.denegaciones.every((d) => /órdenes desactivadas en Antigravity: su sandbox deja la copia en solo lectura y no aporta; las pruebas las ejecuta el orquestador/.test(d.detalle)));
+  assert.equal(ORDENES_ACTIVAS, false);
+});
+
+test('modo escritura de extremo a extremo sin pasar ordenesActivas: la orden se rechaza con su motivo y la edición sigue permitida', async () => {
+  const { decisiones, resultado, mensajes } = await conPermisos(
+    () => [orden('npm test'), ordenAgy('npm run typecheck'), edicion('src/nuevo.js')],
+    () => {},
+    undefined,
+    'omitir',
+  );
+  assert.deepEqual(decisiones, [RECHAZADO, RECHAZADO, PERMITIDO]);
+  assert.equal(resultado.denegaciones.length, 2);
+  for (const d of resultado.denegaciones) {
+    assert.match(d.detalle, /órdenes desactivadas en Antigravity: su sandbox deja la copia en solo lectura y no aporta; las pruebas las ejecuta el orquestador/u);
+  }
+  assert.equal(mensajes.filter((m) => m.method === 'session/prompt').length, 1);
+});
+
+test('por defecto no se invoca agy --version (ni con macOS): un testigo no se ejecuta y una orden inexistente no estorba', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'nexakit-agy-testigo-'));
+  try {
+    const raiz = join(dir, 'repo');
+    mkdirSync(raiz);
+    const testigo = join(dir, 'testigo');
+    const guion = join(dir, 'agy-testigo.mjs');
+    writeFileSync(guion, `import { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(testigo)}, process.argv.slice(2).join(' '));\nconsole.log('1.5.16');\n`);
+    const base = { orden: process.execPath, argsPrefijo: [guion], plataforma: 'darwin' };
+    const estado = await comprobarOrdenes(base);
+    assert.equal(estado.activas, false);
+    assert.match(estado.motivo, /órdenes desactivadas en Antigravity: su sandbox deja la copia en solo lectura/u);
+    assert.doesNotMatch(estado.motivo, /versión/u);
+    const conector = await crearConectorAntigravity({ ...base, escritura: { raiz, ordenesPermitidas: ['npm test'] } });
+    assert.equal(conector.ordenesActivas, false);
+    assert.equal(existsSync(testigo), false, 'agy --version no se lanzó por defecto');
+    // Control: el testigo sí se ejecuta cuando se pide verificar.
+    assert.equal((await comprobarOrdenes({ ...base, ordenesActivas: 'verificar' })).activas, true);
+    assert.equal(readFileSync(testigo, 'utf8'), '--version');
+    // Una orden que no existe tampoco estorba por defecto: ni siquiera se intenta ejecutar.
+    const inexistente = { orden: join(dir, 'no-existe'), plataforma: 'darwin' };
+    const sin = await comprobarOrdenes(inexistente);
+    assert.equal(sin.activas, false);
+    assert.doesNotMatch(sin.motivo, /no se pudo obtener la versión/u);
+    assert.equal((await crearConectorAntigravity({ ...inexistente, escritura: { raiz, ordenesPermitidas: [] } })).ordenesActivas, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('órdenes de Antigravity: por defecto se rechazan en cualquier plataforma (macOS incluido) con ese motivo', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'nexakit-agy-def-'));
+  try {
+    const raiz = join(dir, 'repo');
+    mkdirSync(raiz);
+    const motivoDefecto = /órdenes desactivadas en Antigravity: su sandbox deja la copia en solo lectura y no aporta; las pruebas las ejecuta el orquestador/;
+    for (const plataforma of ['darwin', 'linux', 'win32', undefined]) {
+      const estado = await comprobarOrdenes({ orden: process.execPath, argsPrefijo: [agyFalso(dir, '1.5.16')], ...(plataforma === undefined ? {} : { plataforma }) });
+      assert.equal(estado.activas, false, String(plataforma));
+      assert.match(estado.motivo, motivoDefecto);
+      const conector = await crearConectorAntigravity({ orden: process.execPath, argsPrefijo: [agyFalso(dir, '1.5.16')], ...(plataforma === undefined ? {} : { plataforma }), escritura: { raiz, ordenesPermitidas: ['npm test'] } });
+      assert.equal(conector.ordenesActivas, false);
+    }
+    conRaiz((r, e) => {
+      assert.match(motivoPermisoRechazado(e, orden('npm test')), motivoDefecto);
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('órdenes con la forma real de agy: BypassSandbox solo vale false, args debe coincidir con rawInput y una sola orden', () => {
@@ -776,7 +843,7 @@ function agyFalso(dir, version, salir = 0) {
 test('comprobarOrdenes: solo en macOS y con la versión de agy verificada; si falla o no coincide, desactivadas con su motivo', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'nexakit-agy-ver-'));
   try {
-    const con = (version, extra = {}, salir = 0) => comprobarOrdenes({ orden: process.execPath, argsPrefijo: [agyFalso(dir, version, salir)], plataforma: 'darwin', ...extra });
+    const con = (version, extra = {}, salir = 0) => comprobarOrdenes({ orden: process.execPath, argsPrefijo: [agyFalso(dir, version, salir)], plataforma: 'darwin', ordenesActivas: 'verificar', ...extra });
     assert.deepEqual(await con('1.5.14'), { activas: true, motivo: null });
     assert.deepEqual(await con('1.5.16'), { activas: true, motivo: null });
     const vieja = await con('1.5.13');
@@ -785,7 +852,7 @@ test('comprobarOrdenes: solo en macOS y con la versión de agy verificada; si fa
     assert.match((await con('1.6.0')).motivo, /versión instalada: 1\.6\.0/);
     assert.match((await con('basura')).motivo, /versión instalada: basura/);
     assert.match((await con('1.5.14', {}, 1)).motivo, /no se pudo obtener la versión de agy/);
-    const ausente = await comprobarOrdenes({ orden: join(dir, 'no-existe'), plataforma: 'darwin' });
+    const ausente = await comprobarOrdenes({ orden: join(dir, 'no-existe'), plataforma: 'darwin', ordenesActivas: 'verificar' });
     assert.equal(ausente.activas, false);
     assert.match(ausente.motivo, /no se pudo obtener la versión de agy/);
     // Otra plataforma: ni se mira la versión.
@@ -811,13 +878,14 @@ test('el conector en modo escritura lee la versión de agy una vez al crearse y 
       orden: process.execPath,
       argsPrefijo: [agyFalso(dir, version)],
       plataforma: 'darwin',
+      ordenesActivas: 'verificar',
       escritura: { raiz, ordenesPermitidas: ['npm test'] },
     });
     assert.equal((await crear('1.5.14')).ordenesActivas, true);
     assert.equal((await crear('1.5.13')).ordenesActivas, false);
-    assert.equal((await crearConectorAntigravity({ orden: process.execPath, argsPrefijo: [agyFalso(dir, '1.5.14')], plataforma: 'linux', escritura: { raiz, ordenesPermitidas: [] } })).ordenesActivas, false);
+    assert.equal((await crearConectorAntigravity({ orden: process.execPath, argsPrefijo: [agyFalso(dir, '1.5.14')], plataforma: 'linux', ordenesActivas: 'verificar', escritura: { raiz, ordenesPermitidas: [] } })).ordenesActivas, false);
     // Sin modo escritura no hay órdenes ni se ejecuta `agy --version`.
-    const sinEscritura = await crearConectorAntigravity({ orden: join(dir, 'no-existe'), plataforma: 'darwin' });
+    const sinEscritura = await crearConectorAntigravity({ orden: join(dir, 'no-existe'), plataforma: 'darwin', ordenesActivas: 'verificar' });
     assert.equal(sinEscritura.ordenesActivas, false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -851,10 +919,10 @@ test('órdenes: solo la coincidencia exacta de rawInput.command, sin prefijos ni
     assert.equal(motivo(e, orden('  npm run typecheck  ')), null);
     assert.equal(motivo(e, { ...orden('npm test'), rawInput: { command: 'npm test', cwd: raiz, BypassSandbox: false } }), null);
     for (const c of ['npm test --watch', 'npm', 'rm -rf /', 'npm test *']) assert.match(motivo(e, orden(c)), /orden no permitida/, c);
-    // Con el interruptor apagado (el valor por defecto fuera de macOS) se rechaza incluso la exacta.
+    // Con el interruptor apagado (el valor por defecto) se rechaza incluso la exacta.
     assert.match(motivo(e, orden('npm test'), false), /órdenes desactivadas/);
-    if (ORDENES_ACTIVAS) assert.equal(motivoPermisoRechazado(e, orden('npm test')), null);
-    else assert.match(motivoPermisoRechazado(e, orden('npm test')), /órdenes desactivadas/);
+    assert.equal(ORDENES_ACTIVAS, false);
+    assert.match(motivoPermisoRechazado(e, orden('npm test')), /órdenes desactivadas/);
   });
 });
 

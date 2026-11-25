@@ -503,26 +503,76 @@ test('estado, resultado y cancelar consultan un recorrido por su id', async () =
   assert.match(inexistente.err, /No hay ningún recorrido/u);
 });
 
-test('sin argumentos o con argumentos inválidos, la ayuda en español sale por stderr con código 2', async () => {
+test('sin argumentos sale la ayuda completa por stderr con código 2', async () => {
   const e = escenario();
-  for (const argv of [[], ['otra'], ['proponer'], ['proponer', '--base'], ['proponer', '--base', 'main', '--raro'], ['lanzar'], ['estado'], ['cancelar', '--id', 'x', 'y']]) {
-    const { codigo, out, err } = await cli(argv, e);
-    assert.equal(codigo, 2, JSON.stringify(argv));
-    assert.equal(out, '');
-    assert.match(err, /Uso: nexakit fabrica proponer --base <rama>/u, JSON.stringify(argv));
-    assert.match(err, /Códigos de salida: 0 bien, 1 fallo de estación/u);
-  }
+  const { codigo, out, err } = await cli([], e);
+  assert.equal(codigo, 2);
+  assert.equal(out, '');
+  assert.match(err, /Uso: nexakit fabrica proponer --base <rama>/u);
+  assert.match(err, /Códigos de salida: 0 bien, 1 fallo de estación/u);
   const ayuda = await cli(['--help'], e);
   assert.equal(ayuda.codigo, 0);
   assert.match(ayuda.out, /Uso: nexakit fabrica/u);
+  assert.match(ayuda.out, /Códigos de salida/u);
 });
 
-test('una variable NEXAKIT_FABRICA_* mal formada es un argumento inválido', async () => {
+test('un error de uso imprime el mensaje, la línea de uso de la orden y cómo ver la ayuda, no toda la ayuda', async () => {
+  const e = escenario();
+  const casos = [
+    [['otra'], /Orden desconocida: otra/u, /Uso: nexakit fabrica proponer\|lanzar/u],
+    [['proponer'], /--base/u, /^Uso: nexakit fabrica proponer --base <rama>/mu],
+    [['proponer', '--base'], /./u, /^Uso: nexakit fabrica proponer --base <rama>/mu],
+    [['proponer', '--base', 'main', '--raro'], /proponer/u, /^Uso: nexakit fabrica proponer --base <rama>/mu],
+    [['lanzar'], /--huella/u, /^Uso: nexakit fabrica lanzar --huella/mu],
+    [['estado'], /--id/u, /^Uso: nexakit fabrica estado --id/mu],
+    [['cancelar', '--id', 'x', 'y'], /./u, /^Uso: nexakit fabrica cancelar --id/mu],
+    [['encargar', '--raro'], /encargar/u, /^Uso: nexakit encargar --ia/mu],
+    [['resultado'], /--id/u, /^Uso: nexakit fabrica resultado --id/mu],
+    [['preferencias', '--criterio', 'raro'], /./u, /^Uso: nexakit fabrica preferencias/mu],
+    [['banco', 'planificar', '--fase', '3'], /./u, /^Uso: nexakit fabrica banco planificar/mu],
+    [['banco', 'ejecutar'], /--huella/u, /^Uso: nexakit fabrica banco ejecutar --huella/mu],
+    [['banco', 'raro'], /Orden desconocida: banco raro/u, /^Uso: nexakit fabrica proponer\|lanzar/mu],
+    [['banco'], /./u, /^Uso: nexakit fabrica banco planificar/mu],
+  ];
+  for (const [argv, mensaje, uso] of casos) {
+    const { codigo, out, err } = await cli(argv, e);
+    assert.equal(codigo, 2, JSON.stringify(argv));
+    assert.equal(out, '');
+    assert.match(err, mensaje, JSON.stringify(argv));
+    assert.match(err, uso, JSON.stringify(argv));
+    assert.match(err, /Usa --help para ver la ayuda completa\./u);
+    assert.doesNotMatch(err, /Códigos de salida/u);
+    assert.ok(err.trimEnd().split('\n').length <= 4, `corto: ${JSON.stringify(argv)}`);
+  }
+});
+
+test('una variable NEXAKIT_FABRICA_* mal formada es un argumento inválido y sale la ayuda corta', async () => {
   const e = escenario();
   e.env.NEXAKIT_FABRICA_CODEX = '[1, 2';
-  const { codigo, err } = await cli(['proponer', '--base', 'main'], e);
+  const { codigo, out, err } = await cli(['proponer', '--base', 'main'], e);
   assert.equal(codigo, 2);
+  assert.equal(out, '');
   assert.match(err, /NEXAKIT_FABRICA_CODEX no es un JSON válido/u);
+  assert.match(err, /^Uso: nexakit fabrica proponer --base <rama>/mu);
+  assert.match(err, /Usa --help para ver la ayuda completa\./u);
+  assert.doesNotMatch(err, /Códigos de salida/u);
+  assert.ok(err.trimEnd().split('\n').length <= 4);
+});
+
+test('--help y -h muestran la ayuda completa con código 0 en todas las órdenes y en banco <sub>', async () => {
+  const e = escenario();
+  const ordenes = [['proponer'], ['lanzar'], ['estado'], ['resultado'], ['cancelar'], ['preferencias'], ['encargar'], ['banco', 'planificar'], ['banco', 'ejecutar'], ['banco']];
+  for (const orden of ordenes) {
+    for (const bandera of ['--help', '-h']) {
+      for (const argv of [[...orden, bandera], [...orden, '--raro', bandera]]) {
+        const r = await cli(argv, e);
+        assert.equal(r.codigo, 0, JSON.stringify(argv));
+        assert.equal(r.err, '', JSON.stringify(argv));
+        assert.match(r.out, /Uso: nexakit fabrica proponer --base <rama>/u, JSON.stringify(argv));
+        assert.match(r.out, /Códigos de salida/u, JSON.stringify(argv));
+      }
+    }
+  }
 });
 
 test('las órdenes de la configuración con secuencias de escape no pueden esconderse en la tabla', async () => {
@@ -582,6 +632,10 @@ test('banco planificar --json imprime solo JSON y la fase 2 sin evidencia pide a
   assert.equal(sinOrden.codigo, 2);
   assert.doesNotMatch(sinOrden.err, /Orden desconocida/u);
   assert.match(sinOrden.err, /nexakit fabrica banco planificar/u);
+  assert.match(sinOrden.err, /nexakit fabrica banco ejecutar/u);
+  assert.match(sinOrden.err, /Usa --help para ver la ayuda completa\./u);
+  assert.equal(sinOrden.out, '');
+  assert.doesNotMatch(sinOrden.err, /Códigos de salida/u);
   for (const bandera of ['--help', '-h']) {
     const ayuda = await cli(['banco', bandera], e);
     assert.equal(ayuda.codigo, 0, bandera);
@@ -1049,5 +1103,5 @@ test('encargar muestra las órdenes por defecto y las extra por separado', async
   const codex = codexFalso(async () => okEnc());
   const { out, err } = await cli(['encargar', '--ia', 'codex', '--encargo', f.md, '--ordenes', f.json], e, datosEnc(codex));
   assert.match(out, /Órdenes por defecto: «npm test»\n/u, err);
-  assert.match(out, /Órdenes extra \(en Codex son una guía, su frontera es el sandbox; en Antigravity solo se aprueban esas, en su sandbox y solo en macOS\): «npm run lint»\n/u);
+  assert.match(out, /Órdenes extra \(en Codex son una guía, su frontera es el sandbox; Antigravity no ejecuta órdenes\): «npm run lint»\n/u);
 });

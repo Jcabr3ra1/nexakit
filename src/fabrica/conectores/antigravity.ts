@@ -25,17 +25,26 @@
 // y, si es una orden, coincide exactamente con `ordenesPermitidas` y no está encadenada. El resto se rechaza y se
 // anota. Las reglas persistentes de la persona (`permissions.allow`) no se aplican gracias a `--gemini-dir`; las del
 // repo (`.gemini/`) se rechazan por la lista blanca de personalizaciones, que sigue vigente en este modo.
-// Órdenes en modo escritura, comprobado con una sesión real contra agy 1.5.14 en macOS (`gemini-3.8-flash-low`, unos
-// 11 000 tokens; no hay subcomando para ejecutar una orden en el sandbox sin el modelo): con `--sandbox`, la orden
-// `npm test` aprobada corre en el sandbox (el binario usa `/usr/bin/sandbox-exec`) y su script no pudo escribir fuera del `cwd` (carpeta personal, carpeta
-// hermana, el `node_modules` enlazado, `.git/hooks` y `.git/config` del repo real; también desde un `sh` hijo), ni leer
-// fuera de él, ni usar la red (DNS y HTTPS: ENOTFOUND). Sí pudo escribir en `/tmp` y en el `TMPDIR` del sistema, que
-// no son el repo. Tampoco pudo escribir dentro del `cwd` cuando este cuelga de una carpeta oculta (`~/.nexakit/...`):
-// las órdenes que generan archivos fallan, pero no escapan. La petición llega como `kind: execute`, `name: run_command`
-// y `rawInput` = { CommandLine, BypassSandbox, WaitMsBeforeAsync, toolSummary } (repetido en `args`); salir del sandbox
-// (`BypassSandbox` distinto de `false`, o ausente) se rechaza siempre. Solo en macOS y con agy 1.5.14 o superior de la
-// serie 1.5 (`agy --version`, una vez al crear el conector): en Linux y Windows, o con otra versión, no se verificó y no
-// se aprueba ninguna orden (`ORDENES_ACTIVAS`, `comprobarOrdenes`).
+// Órdenes en modo escritura: DESACTIVADAS por defecto en todas las plataformas (`ORDENES_ACTIVAS`, `comprobarOrdenes`).
+// Antigravity escribe solo dentro de la copia y no ejecuta órdenes; las pruebas las ejecuta el orquestador. Motivos,
+// comprobados con sesiones reales contra agy 1.5.14 y 1.5.16 en macOS (`gemini-3.8-flash-low`, unos 11 000 tokens cada
+// una; no hay subcomando para ejecutar una orden en el sandbox sin el modelo):
+// - Con `--sandbox`, una orden aprobada corre en el sandbox (`/usr/bin/sandbox-exec`) y no pudo escribir fuera del `cwd`
+//   ni leer fuera de él ni usar la red, pero tampoco puede escribir dentro del `cwd`: `agy acp --sandbox` monta la
+//   carpeta de la sesión en solo lectura para las órdenes (el kernel anota `deny(1) file-write-create <cwd>/...`), esté
+//   donde esté: bajo `~/.nexakit`, en la carpeta personal, bajo el `TMPDIR`, en un worktree o un repo normal, en modo
+//   `default` y `accept-edits`, y con `--add-dir`, `additionalDirectories` o un `default-cli-project.json`. Las órdenes
+//   que generan archivos (`npm test` con compilación) fallan.
+// - En esas 11 sesiones el modelo omitió `BypassSandbox` (la petición llega como `kind: execute`, `name: run_command` y
+//   `rawInput` = { CommandLine, BypassSandbox, WaitMsBeforeAsync, toolSummary }, repetido en `args`), así que el conector
+//   rechazaba todas las órdenes igualmente.
+// - Las órdenes con sandbox sí pueden escribir en `/tmp` y en el `TMPDIR`, donde vive la carpeta aislada de
+//   `--gemini-dir` (la configuración de agy): un riesgo sin contrapartida.
+// Riesgo conocido menor: agy 1.5.16 carga las skills de `~/.agents/skills` aunque se use `--gemini-dir` (son skills de
+// la propia persona).
+// La lógica de lista exacta de órdenes, `BypassSandbox: false` explícito, `args` iguales a `rawInput`, sin encadenados,
+// solo en macOS y con agy 1.5.14 o superior de la serie 1.5 se conserva, detrás de la opción inyectable `ordenesActivas`
+// (`true` fuerza órdenes aprobables; `'verificar'` aplica la plataforma y la versión), para pruebas y para reactivarla.
 import { execFile, spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { lstatSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync } from 'node:fs';
@@ -106,8 +115,12 @@ export interface OpcionesConectorAntigravity {
   escritura?: { raiz: string; ordenesPermitidas: string[] };
   /** Solo para pruebas: plataforma con la que se decide si se aprueban órdenes (por defecto, la del proceso). */
   plataforma?: NodeJS.Platform;
-  /** Solo para pruebas: fuerza órdenes aprobables o no, sin mirar la plataforma ni la versión de `agy`. */
-  ordenesActivas?: boolean;
+  /**
+   * Por defecto (y con `false`) las órdenes están desactivadas. `true` las fuerza aprobables sin mirar la plataforma
+   * ni la versión de `agy`; `'verificar'` aplica la comprobación de plataforma (macOS) y versión. Solo para pruebas y
+   * para reactivarlas en el futuro.
+   */
+  ordenesActivas?: boolean | 'verificar';
 }
 
 /** Modo escritura ya validado: raíz canónica y órdenes recortadas. */
@@ -123,13 +136,12 @@ const HERRAMIENTA_ORDENES = 'run_command';
 /** Tipos de petición de permiso que el modo escritura puede llegar a aprobar. */
 const TIPOS_APROBABLES = new Set(['read', 'edit', 'delete', 'move', 'search', 'execute']);
 /**
- * El modo escritura aprueba órdenes de `ordenesPermitidas` (coincidencia exacta) solo donde se verificó el `--sandbox`
- * de `agy`: en macOS (ver la cabecera). En Linux y Windows no se verificó, así que allí no se aprueba ninguna orden
- * (una orden permitida, como `npm test`, ejecuta código del worktree). Es solo la condición de plataforma: el conector
- * además comprueba la versión de `agy` (`comprobarOrdenes`).
+ * Las órdenes de Antigravity están desactivadas por defecto en todas las plataformas (ver la cabecera): su sandbox deja
+ * la copia en solo lectura. Solo la opción inyectable `ordenesActivas` las reactiva.
  */
-export const ORDENES_ACTIVAS = process.platform === 'darwin';
-const MOTIVO_ORDENES_DESACTIVADAS = 'órdenes desactivadas en Antigravity fuera de macOS: su sandbox solo se verificó en macOS';
+export const ORDENES_ACTIVAS = false;
+const MOTIVO_ORDENES_DESACTIVADAS = 'órdenes desactivadas en Antigravity: su sandbox deja la copia en solo lectura y no aporta; las pruebas las ejecuta el orquestador';
+const MOTIVO_FUERA_DE_MACOS = 'órdenes desactivadas en Antigravity fuera de macOS: su sandbox solo se verificó en macOS';
 /** Versión de `agy` con la que se verificó el sandbox: esa o una superior de la misma serie 1.5.x. */
 const VERSION_AGY_VERIFICADA = { mayor: 1, menor: 5, parche: 14 };
 const TIEMPO_VERSION_MS = 10_000;
@@ -1026,15 +1038,15 @@ export function versionAgyVerificada(salida: string): boolean {
 }
 
 /**
- * Decide, una vez al crear el conector en modo escritura, si se aprueban órdenes: solo en macOS y solo si `agy
- * --version` (con tope de tiempo) dice una versión verificada. Si falla o no coincide, quedan desactivadas con el motivo.
- * `plataforma` y `ordenesActivas` existen para probar ambas ramas en cualquier sistema.
+ * Decide, una vez al crear el conector en modo escritura, si se aprueban órdenes. Por defecto quedan desactivadas con
+ * `MOTIVO_ORDENES_DESACTIVADAS`. Con `ordenesActivas: 'verificar'`: solo en macOS y solo si `agy --version` (con tope
+ * de tiempo) dice una versión verificada; si falla o no coincide, desactivadas con el motivo. `plataforma` y
+ * `ordenesActivas` existen para probar cada rama en cualquier sistema.
  */
 export async function comprobarOrdenes(opciones: OpcionesConectorAntigravity = {}): Promise<EstadoOrdenes> {
-  if (opciones.ordenesActivas !== undefined) {
-    return opciones.ordenesActivas ? { activas: true, motivo: null } : { activas: false, motivo: MOTIVO_ORDENES_DESACTIVADAS };
-  }
-  if ((opciones.plataforma ?? process.platform) !== 'darwin') return { activas: false, motivo: MOTIVO_ORDENES_DESACTIVADAS };
+  if (opciones.ordenesActivas === true) return { activas: true, motivo: null };
+  if (opciones.ordenesActivas !== 'verificar') return { activas: false, motivo: MOTIVO_ORDENES_DESACTIVADAS };
+  if ((opciones.plataforma ?? process.platform) !== 'darwin') return { activas: false, motivo: MOTIVO_FUERA_DE_MACOS };
   const verificada = `${VERSION_AGY_VERIFICADA.mayor}.${VERSION_AGY_VERIFICADA.menor}.${VERSION_AGY_VERIFICADA.parche}`;
   let salida: string;
   try {

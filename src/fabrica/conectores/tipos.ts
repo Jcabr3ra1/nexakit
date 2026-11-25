@@ -36,7 +36,7 @@ export type AlProgreso = (progreso: { tokens: number }) => void;
 
 export interface Conector {
   ia: IA;
-  /** Solo Antigravity en modo escritura: si aprueba las órdenes de la lista (plataforma y versión de `agy` verificadas). */
+  /** Solo Antigravity en modo escritura: si aprueba las órdenes de la lista (por defecto no: están desactivadas). */
   readonly ordenesActivas?: boolean;
   catalogo(): Promise<Array<{ modelo: string; esfuerzos: string[] }>>;
   ejecutar(encargo: Encargo, señal: AbortSignal, alProgreso?: AlProgreso): Promise<ResultadoEstacion>;

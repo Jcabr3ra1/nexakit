@@ -83,10 +83,30 @@ el encargo «invalido» sin diff. Hay un encargo o recorrido a la vez.
   --ia auto prueba Codex y, si no responde, Antigravity; sin --modelo usa la recomendación de nivel normal de esa IA.
   --encargo es el archivo con el texto (objetivo, archivos, criterio de hecho y pruebas); admite hasta 1 MiB.
   --ordenes es un JSON con una lista de órdenes exactas que se añaden a «npm test» y «npm run typecheck» del repo.
+  Antigravity escribe solo en la copia y no ejecuta órdenes (su sandbox deja la copia en solo lectura): las pruebas las ejecutas tú. Codex ejecuta dentro de su sandbox.
   --tiempo son los minutos máximos (entero de 1 a 120; por defecto 20). Ctrl+C cancela y borra la copia.
 Códigos de salida: 0 bien, 1 fallo de estación o escritura detectada, 2 argumentos inválidos. Con encargar, 0 solo si el
 estado es «ok» o «sin-cambios».
 `;
+
+/** Línea de uso de cada orden, para mostrarla tras un error en vez de toda la ayuda. */
+const USOS: Record<string, string> = {
+  proponer: 'Uso: nexakit fabrica proponer --base <rama> [--foco <texto>] [--json]',
+  lanzar: 'Uso: nexakit fabrica lanzar --huella <huella> [--cambios <archivo.json>] [--json]',
+  estado: 'Uso: nexakit fabrica estado --id <id> [--json]',
+  resultado: 'Uso: nexakit fabrica resultado --id <id> [--veredictos <archivo.json>] [--json]',
+  cancelar: 'Uso: nexakit fabrica cancelar --id <id>',
+  preferencias: 'Uso: nexakit fabrica preferencias [--criterio calidad|barato] [--revision-cruzada sí|no] [--json]',
+  encargar: 'Uso: nexakit encargar --ia codex|antigravity|auto --encargo <archivo.md> [--modelo <modelo>] [--esfuerzo <esfuerzo>] [--ordenes <archivo.json>] [--tiempo <min>] [--json]',
+  'banco planificar': 'Uso: nexakit fabrica banco planificar [--fase 1|2] [--estacion <estacion>] [--json]',
+  'banco ejecutar': 'Uso: nexakit fabrica banco ejecutar --huella <huella> [--json]',
+};
+const USO_GENERAL = 'Uso: nexakit fabrica proponer|lanzar|estado|resultado|cancelar|preferencias|banco, o nexakit encargar';
+const PIE_AYUDA = 'Usa --help para ver la ayuda completa.';
+
+/** Mensaje de un error de uso: el mensaje, el uso de la orden afectada (si se conoce) y cómo ver la ayuda. */
+const errorDeUso = (mensaje: string, orden?: string): string =>
+  `${mensaje}\n${orden !== undefined && Object.hasOwn(USOS, orden) ? (USOS[orden] as string) : USO_GENERAL}\n${PIE_AYUDA}\n`;
 
 const NOTA_CLAUDE = 'la ejecuta la sesión de Claude';
 const SONDEO_MS = 1000;
@@ -414,7 +434,7 @@ export function lineasInforme(i: InformeEncargo): string[] {
   if (i.motivo !== undefined) lineas.push(`Motivo: ${enUnaLinea(i.motivo)}`);
   if (i.ordenesPorDefecto.length > 0) lineas.push(`Órdenes por defecto: ${i.ordenesPorDefecto.map((o) => `«${enUnaLinea(o)}»`).join(', ')}`);
   if (i.ordenesExtra.length > 0) {
-    lineas.push(`Órdenes extra (en Codex son una guía, su frontera es el sandbox; en Antigravity solo se aprueban esas, en su sandbox y solo en macOS): ${i.ordenesExtra.map((o) => `«${enUnaLinea(o)}»`).join(', ')}`);
+    lineas.push(`Órdenes extra (en Codex son una guía, su frontera es el sandbox; Antigravity no ejecuta órdenes): ${i.ordenesExtra.map((o) => `«${enUnaLinea(o)}»`).join(', ')}`);
   }
   if (i.rutaDiff !== null) {
     lineas.push(`Diff: ${i.rutaDiff}`, `Para aplicarlo tras revisarlo (desde la raíz de tu repo): git apply "${i.rutaDiff}"`);
@@ -671,23 +691,22 @@ export async function ejecutarCli(argv: string[], io: IoCli, opciones: OpcionesC
   const compuesta = primera === 'banco';
   const orden = compuesta ? `banco ${siguientes[0] ?? ''}`.trimEnd() : primera;
   const resto = compuesta ? siguientes.slice(1) : siguientes;
-  if (orden === '--help' || orden === '-h' || (compuesta && (siguientes[0] === '--help' || siguientes[0] === '-h'))) {
+  // `--help` y `-h` en cualquier orden (y en `banco <sub>`) muestran la ayuda completa antes de analizar opciones.
+  const pideAyuda = (args: readonly string[]): boolean => args.includes('--help') || args.includes('-h');
+  const esOrdenConocida = orden !== undefined && Object.hasOwn(OPCIONES, orden);
+  if (orden === '--help' || orden === '-h' || (compuesta && pideAyuda(siguientes)) || (esOrdenConocida && pideAyuda(resto))) {
     await io.out(AYUDA);
     return 0;
   }
   // `banco` solo, sin subcomando: la ayuda, sin «Orden desconocida».
   if (compuesta && siguientes[0] === undefined) {
-    await io.err(AYUDA);
+    await io.err(`${USOS['banco planificar']}\n${USOS['banco ejecutar']}\n${PIE_AYUDA}\n`);
     return 2;
-  }
-  if (orden === 'encargar' && (resto.includes('--help') || resto.includes('-h'))) {
-    await io.out(AYUDA);
-    return 0;
   }
   const especificacion = orden === undefined ? undefined : Object.hasOwn(OPCIONES, orden) ? OPCIONES[orden] : undefined;
   if (orden === undefined || especificacion === undefined) {
-    if (orden !== undefined) await io.err(`Orden desconocida: ${limpiar(orden)}\n`);
-    await io.err(AYUDA);
+    if (orden === undefined) await io.err(AYUDA);
+    else await io.err(errorDeUso(`Orden desconocida: ${limpiar(orden)}`));
     return 2;
   }
 
@@ -723,7 +742,7 @@ export async function ejecutarCli(argv: string[], io: IoCli, opciones: OpcionesC
     }
   } catch (error) {
     if (error instanceof ErrorUso || error instanceof ErrorEntorno) {
-      await io.err(`${error.message}\n\n${AYUDA}`);
+      await io.err(errorDeUso(error.message, orden));
       return 2;
     }
     await io.err(`${error instanceof ErrorFabrica ? limpiar(error.message) : `Error inesperado: ${limpiar(mensajeDe(error))}`}\n`);

@@ -500,6 +500,30 @@ test('reglaDeOrdenes: ambas ramas se prueban en cualquier sistema inyectando si 
   assert.equal(reglaDeOrdenes('antigravity', lista), reglaDeOrdenes('antigravity', lista, ORDENES_ACTIVAS));
 });
 
+const FRASE_SIN_ORDENES = 'Antigravity solo escribe archivos en esta carpeta y no ejecuta órdenes; las pruebas las ejecuta quien te encarga.';
+
+test('reglaDeOrdenes: la frase de que Antigravity no ejecuta órdenes solo sale si están desactivadas', () => {
+  const lista = ['npm test', 'npm run typecheck'];
+  assert.ok(reglaDeOrdenes('antigravity', lista).includes(FRASE_SIN_ORDENES), 'por defecto están desactivadas');
+  assert.ok(reglaDeOrdenes('antigravity', [], false).includes(FRASE_SIN_ORDENES));
+  assert.ok(reglaDeOrdenes('antigravity', lista, false).includes(FRASE_SIN_ORDENES));
+  assert.ok(!reglaDeOrdenes('antigravity', [], true).includes(FRASE_SIN_ORDENES));
+  assert.ok(!reglaDeOrdenes('antigravity', lista, true).includes(FRASE_SIN_ORDENES));
+  assert.ok(!reglaDeOrdenes('codex', [], false).includes(FRASE_SIN_ORDENES));
+  assert.ok(!reglaDeOrdenes('codex', lista, false).includes(FRASE_SIN_ORDENES));
+});
+
+test('ejecutarEncargo con Antigravity sin ordenesActivas inyectado usa el valor por defecto: no promete órdenes', async () => {
+  const e = entorno();
+  const agy = fabrica('antigravity', async () => okDe());
+  const informe = await ejecutarEncargo(opciones(e, { ia: 'antigravity', conectores: { antigravity: agy.crear } }));
+  assert.equal(informe.estado, 'sin-cambios', informe.motivo);
+  const instrucciones = agy.registro.encargos[0].instrucciones;
+  assert.ok(instrucciones.includes(FRASE_SIN_ORDENES), instrucciones);
+  assert.doesNotMatch(instrucciones, /solo se aprueban estas órdenes/u);
+  comprobarLimpio(e, informe);
+});
+
 test('auto sin ninguna IA disponible dice por qué falló cada una', async () => {
   const e = entorno();
   const informe = await ejecutarEncargo(opciones(e, { ia: 'auto', conectores: {} }));
@@ -819,6 +843,8 @@ test('el candado global de encargos: se toma con pid, id y fecha, se libera siem
   // Un candado de un proceso muerto, o ilegible, se sustituye.
   for (const viejo of [JSON.stringify({ pid: pidMuerto(), id: null, fecha: '' }), 'basura']) {
     writeFileSync(archivo, viejo);
+    const antiguo = new Date(Date.now() - 120_000);
+    utimesSync(archivo, antiguo, antiguo);
     const nuevo = fabrica('codex', async () => okDe());
     const r = await ejecutarEncargo(opciones(e, { conectores: { codex: nuevo.crear } }));
     assert.equal(r.estado, 'sin-cambios');
