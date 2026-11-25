@@ -39,7 +39,7 @@ function decidirCon(r, { model, effort, ctx, tokens, cacheFria = false, rutinaSe
   if (r.delegar === 'nivel-ligero') {
     return mismaFamilia && effort === r.effort
       ? { accion: 'mantener', texto: '✓' }
-      : { accion: 'delegar', texto: `delega: ${r.delegar}` };
+      : { accion: 'delegar', texto: `delega: ${r.delegar}`, nivel: r.delegar };
   }
   if (mismaFamilia) {
     return effort === r.effort ? { accion: 'mantener', texto: '✓' } : { accion: 'esfuerzo', texto: etiqueta(r) };
@@ -48,7 +48,7 @@ function decidirCon(r, { model, effort, ctx, tokens, cacheFria = false, rutinaSe
   const fria = cacheFria ? ' (caché fría: cambiar no cuesta)' : '';
   if (rango(r.model) > rango(model)) {
     if (barato) return { accion: 'cambiar', texto: `${etiqueta(r)}${fria}` };
-    if (r.delegar) return { accion: 'delegar', texto: `delega: ${r.delegar}` };
+    if (r.delegar) return { accion: 'delegar', texto: `delega: ${r.delegar}`, nivel: r.delegar };
     const coste = esNumero(tokens) && tokens > 0 ? ` · relee ~${Math.round(tokens / 1000)}k` : '';
     return { accion: 'cambiar', texto: `${etiqueta(r)}${coste}` };
   }

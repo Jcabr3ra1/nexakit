@@ -1,4 +1,4 @@
-import { activoDeTexto, columnaDeAgentes, columnaDeFabrica, familia, filasDeAgentes, filasDeFabrica, segmentosDeBarra, sumarTokens, tokensVacios } from './barra.js';
+import { activoDeTexto, columnaDeAgentes, columnaDeFabrica, familia, filasDeAgentes, filasDeFabrica, instruccionDeDelegar, segmentosDeBarra, sumarTokens, tokensVacios } from './barra.js';
 import { ajustarPorLimite } from './decidir.js';
 import { recomendarPorTexto } from './recomendar.js';
 
@@ -87,7 +87,7 @@ async function activoDeLaFabrica($) {
 // Una sola barra sobre el prompt con modelo, esfuerzo, recomendación y uso. Solo muestra:
 // nunca cambia el modelo ni el esfuerzo de la sesión.
 export function register(on) {
-  const estado = { model: null, effort: null, modeloDelEsfuerzo: null, recommendation: null, enviada: null, usage: null, cache: cacheVacia(), ultimaActividad: null, cacheFria: false, rutinaSeguidas: 0 };
+  const estado = { model: null, effort: null, modeloDelEsfuerzo: null, recommendation: null, enviada: null, usage: null, cache: cacheVacia(), ultimaActividad: null, cacheFria: false, rutinaSeguidas: 0, turnoActivo: false, delegado: false };
   // Subagentes de esta petición, por id, con el modelo y el esfuerzo que de verdad usaron.
   const agentes = new Map();
 
@@ -131,6 +131,13 @@ export function register(on) {
   });
 
   on('prompt.submit', async ($, e, next) => {
+    estado.turnoActivo = true;
+    // Lo que envía el propio botón no es un mensaje de la persona: no cambia la recomendación ni «el último mensaje».
+    if (e.origin?.kind === 'plugin') {
+      $.ui.invalidate('ui.render');
+      return next(e);
+    }
+    estado.delegado = false;
     estado.recommendation = recomendarPorTexto(e.text, estado.enviada);
     estado.enviada = estado.recommendation;
     await medirCacheFria($, estado);
@@ -139,6 +146,21 @@ export function register(on) {
     const necesaria = ajustarPorLimite(estado.recommendation, limite < 0 ? undefined : limite);
     estado.rutinaSeguidas = estado.model && !necesaria.delegar && rango(necesaria.model) < rango(estado.model) ? estado.rutinaSeguidas + 1 : 0;
     for (const [id, a] of agentes) if (['completed', 'idle', 'failed', 'killed'].includes(a.status)) agentes.delete(id);
+    $.ui.invalidate('ui.render');
+    return next(e);
+  });
+
+  on('turn.start', async ($, e, next) => {
+    if (!e.agentId) {
+      estado.turnoActivo = true;
+      $.ui.invalidate('ui.render');
+    }
+    return next(e);
+  });
+
+  // El turno de la sesión principal terminó (o se interrumpió): el botón de delegar puede volver.
+  on('turn.abort', async ($, e, next) => {
+    estado.turnoActivo = false;
     $.ui.invalidate('ui.render');
     return next(e);
   });
@@ -177,6 +199,7 @@ export function register(on) {
   on('turn.complete', async ($, e, next) => {
     const r = await next(e);
     if (!e.agentId) {
+      estado.turnoActivo = false;
       // Solo la sesión principal: cada subagente tiene su propia caché y no toca la de la sesión.
       sumarCache(estado, r?.usage);
       await marcarActividad($, estado);
@@ -188,9 +211,33 @@ export function register(on) {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props?.hasSurvey || !estado.model) return next(e);
-    const { Box, Text } = $.ui.resolve(e);
-    const tramos = segmentosDeBarra(estado).map((s, i) =>
-      h(Text, { key: String(i), color: s.color, dimColor: s.dim, bold: s.bold }, s.text));
+    const { Box, Text, Button } = $.ui.resolve(e);
+    // El botón solo donde hay ventana (no en la terminal), sin turno en curso, ya pulsado o con un borrador
+    // distinto del último mensaje: se delega «el último mensaje», así que la recomendación debe ser la suya.
+    const hayBoton = Boolean(Button) && e.surface !== 'terminal' && !estado.turnoActivo && !estado.delegado
+      && Boolean(estado.enviada) && (estado.recommendation === estado.enviada || mismaRecomendacion(estado.recommendation, estado.enviada));
+    const tramos = segmentosDeBarra(estado).map((s, i) => {
+      if (hayBoton && s.accion === 'delegar') {
+        const nivel = s.nivel;
+        return h(Button, {
+          key: 'delegar',
+          label: s.etiqueta,
+          variant: 'primary',
+          onPress: async () => {
+            if (estado.delegado || estado.turnoActivo) return;
+            estado.delegado = true;
+            $.ui.invalidate('ui.render');
+            try {
+              await $.prompt.submit({ text: instruccionDeDelegar(nivel) });
+            } catch {
+              estado.delegado = false;
+              $.ui.invalidate('ui.render');
+            }
+          },
+        });
+      }
+      return h(Text, { key: String(i), color: s.color, dimColor: s.dim, bold: s.bold }, s.text);
+    });
     const linea = (partes, clave) => h(Box, { key: clave, flexDirection: 'row' },
       ...partes.map((s, i) => h(Text, { key: String(i), color: s.color, dimColor: s.dim, bold: s.bold }, s.text)));
     const subagentes = [...agentes.values()];
@@ -211,7 +258,7 @@ export function register(on) {
 
   on('session.end', async ($, e, next) => {
     agentes.clear();
-    Object.assign(estado, { model: null, effort: null, modeloDelEsfuerzo: null, recommendation: null, enviada: null, usage: null, cache: cacheVacia(), ultimaActividad: null, cacheFria: false, rutinaSeguidas: 0 });
+    Object.assign(estado, { model: null, effort: null, modeloDelEsfuerzo: null, recommendation: null, enviada: null, usage: null, cache: cacheVacia(), ultimaActividad: null, cacheFria: false, rutinaSeguidas: 0, turnoActivo: false, delegado: false });
     return next(e);
   });
 }

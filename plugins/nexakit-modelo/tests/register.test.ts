@@ -96,4 +96,110 @@ describe('nexakit-modelo API', () => {
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/test' });
     expect(await pintar($)).not.toContain('↳');
   });
+
+  // Botón para delegar: la sesión tiene 50 % de contexto, así que un mensaje difícil desde Sonnet recomienda delegar
+  // en nivel-alto y uno mecánico desde Opus en nivel-ligero (sin cambiar de modelo, que costaría releer el contexto).
+  const prepararBoton = ($: any, on: any, modelo = 'claude-opus-5-5') => {
+    const enviados: { text: string; plugin: boolean }[] = [];
+    on('session.start', ($: any, e: any) => ({ cwd: e.cwd }));
+    on('session.model', () => ({ value: modelo }));
+    on('session.usage', () => ({ value: { context: { percent: 50, tokens: 100000 }, rateLimits: [] } }));
+    on('turn.start', ($: any, e: any) => ({ text: e.text, turnId: e.turnId }));
+    on('turn.complete', ($: any, e: any) => ({ text: e.answer }));
+    on('clock.now', () => ({ value: Date.now() }));
+    on('tool.register', ($: any, e: any) => ({ value: { tool: e.name } }));
+    on('env.get', () => ({ value: undefined }));
+    on('prompt.submit', ($: any, e: any) => {
+      enviados.push({ text: e.text, plugin: e.origin?.kind === 'plugin' });
+      return { text: e.text, origin: e.origin };
+    });
+    return enviados;
+  };
+  const MENSAJES = {
+    'nivel-ligero': 'haz commit y push',
+    'nivel-alto': 'el login sigue fallando y no sé por qué',
+  } as const;
+  const BARRA = (surface: string) => ({ plugin: 'nexakit-modelo', surface, component: 'AbovePrompt', props: { hasSurvey: false } }) as any;
+  const turno = async ($: any, sufijo: string) => {
+    await $.turn.start({ text: 'x', turnId: `t${sufijo}` });
+    await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: `t${sufijo}`, reason: 'answer' });
+  };
+
+  test('en el escritorio la sugerencia de delegar es un botón y envía la instrucción de su nivel', async ($, on) => {
+    const enviados = prepararBoton($, on);
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/test' });
+    await $.prompt.submit({ text: MENSAJES['nivel-ligero'] });
+    await turno($, '1');
+    const ui = await $.ui.mount(BARRA('desktop'));
+    const boton = await ui.find({ type: 'Button' });
+    expect(boton?.props.label).toBe('→ delega: nivel-ligero');
+    await ui.press({ key: 'delegar' });
+    const enviado = enviados.at(-1)!;
+    expect(enviado.plugin).toBe(true);
+    expect(enviado.text).toContain('fabrica_encargar en Codex o Antigravity');
+    expect(enviado.text).toContain('niveles:nivel-ligero');
+    await ui.unmount();
+  });
+
+  test('para nivel-alto el botón delega directo en el subagente', async ($, on) => {
+    // Desde Sonnet con contexto lleno, subir a Opus releería todo: se delega.
+    const enviados = prepararBoton($, on, 'claude-sonnet-5-5');
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/test' });
+    await $.prompt.submit({ text: MENSAJES['nivel-alto'] });
+    await turno($, '1');
+    const ui = await $.ui.mount(BARRA('desktop'));
+    expect((await ui.find({ type: 'Button' }))?.props.label).toBe('→ delega: nivel-alto');
+    await ui.press({ key: 'delegar' });
+    expect(enviados.at(-1)!.text).toBe('Delega la tarea de mi último mensaje en el subagente niveles:nivel-alto y comprueba su informe.');
+    await ui.unmount();
+  });
+
+  test('en la terminal la sugerencia sigue siendo texto', async ($, on) => {
+    prepararBoton($, on);
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/test' });
+    await $.prompt.submit({ text: MENSAJES['nivel-ligero'] });
+    await turno($, '1');
+    const ui = await $.ui.mount(BARRA('terminal'));
+    expect(await ui.find({ type: 'Button' })).toBeUndefined();
+    expect(await pintar($)).toContain('→ delega: nivel-ligero');
+    await ui.unmount();
+  });
+
+  test('durante un turno en curso no hay botón', async ($, on) => {
+    prepararBoton($, on);
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/test' });
+    await $.prompt.submit({ text: MENSAJES['nivel-ligero'] });
+    const ui = await $.ui.mount(BARRA('desktop'));
+    expect(await ui.find({ type: 'Button' })).toBeUndefined();
+    await ui.unmount();
+    await turno($, '1');
+    const despues = await $.ui.mount(BARRA('desktop'));
+    expect(await despues.find({ type: 'Button' })).toBeDefined();
+    await despues.unmount();
+  });
+
+  test('sin mensaje previo de la persona no hay botón', async ($, on) => {
+    prepararBoton($, on);
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/test' });
+    const ui = await $.ui.mount(BARRA('desktop'));
+    expect(await ui.find({ type: 'Button' })).toBeUndefined();
+    await ui.unmount();
+  });
+
+  test('tras pulsar el botón no se puede enviar dos veces', async ($, on) => {
+    const enviados = prepararBoton($, on);
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/test' });
+    await $.prompt.submit({ text: MENSAJES['nivel-ligero'] });
+    await turno($, '1');
+    const ui = await $.ui.mount(BARRA('desktop'));
+    await ui.press({ key: 'delegar' });
+    await ui.unmount();
+    const antes = enviados.length;
+    // El turno de la delegación termina y el botón sigue sin volver para el mismo mensaje.
+    await turno($, '2');
+    const otra = await $.ui.mount(BARRA('desktop'));
+    expect(await otra.find({ type: 'Button' })).toBeUndefined();
+    expect(enviados).toHaveLength(antes);
+    await otra.unmount();
+  });
 });

@@ -13,6 +13,7 @@
 - La estación `codigo` se revisa con Claude, Codex y Antigravity; un hallazgo que señalan varias IA aparece como «coinciden N IA» y sube su confianza.
 - Regla de orquestación nueva en CLAUDE.md, AGENTS.md y GEMINI.md: las tareas ligeras o normales con diseño claro se delegan primero con `fabrica_encargar`; el orquestador revisa el diff, lo aplica, ejecuta las pruebas e integra, y si falla lo resuelve con Claude. La revisión del diff incluye al menos una IA distinta de la que lo escribió. Las instalaciones con el bloque anterior se actualizan solas al volver a ejecutar `npx nexakit`.
 - La skill `fabrica`, el README, la guía de comandos y la guía de la fábrica documentan los encargos, las preferencias y la revisión cruzada.
+- `nexakit-modelo` 0.5.7: en la app de escritorio, cuando la barra sugiere delegar, `→ delega: nivel-x` es un botón que envía a la sesión la instrucción de delegar el último mensaje (ligero y normal, con un encargo a Codex o Antigravity; exigente y alto, directo al subagente de nivel). Solo aparece sin turno en curso, tras un mensaje tuyo, y no se puede pulsar dos veces; en la terminal sigue siendo texto.
 
 ## 0.12.3
 

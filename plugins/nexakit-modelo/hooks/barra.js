@@ -98,7 +98,19 @@ function tramosDeTokens(tokens) {
 function sugerencia(estado) {
   const d = decidir(estado);
   if (!d) return null;
-  return d.accion === 'mantener' ? { text: '  ✓', color: 'success' } : { text: `  → ${d.texto}`, color: 'suggestion' };
+  if (d.accion === 'mantener') return { text: '  ✓', color: 'success' };
+  // Al delegar, el tramo lleva el nivel y el texto de la etiqueta para que el render pueda dibujar un botón.
+  if (d.accion === 'delegar' && d.nivel) return { text: `  → ${d.texto}`, color: 'suggestion', accion: 'delegar', nivel: d.nivel, etiqueta: `→ ${d.texto}` };
+  return { text: `  → ${d.texto}`, color: 'suggestion' };
+}
+
+// Lo que el botón de delegar envía a la sesión. Los niveles ligero y normal pasan primero por un encargo a
+// Codex o Antigravity; los exigentes y altos van directos al subagente de nivel.
+export function instruccionDeDelegar(nivel) {
+  if (nivel === 'nivel-ligero' || nivel === 'nivel-normal') {
+    return `Delega la tarea de mi último mensaje: encárgala con fabrica_encargar en Codex o Antigravity, revisa el diff con una IA distinta, aplícalo, ejecuta las pruebas y dime qué IA lo hizo. Si no encaja en un encargo, pásala al subagente niveles:${nivel}.`;
+  }
+  return `Delega la tarea de mi último mensaje en el subagente niveles:${nivel} y comprueba su informe.`;
 }
 
 // El límite de uso más alto de los que informa la API (5 horas o semanal).
