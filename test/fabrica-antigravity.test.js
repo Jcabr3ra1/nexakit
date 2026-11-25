@@ -571,6 +571,7 @@ const orden = (comando) => ({ toolCallId: 't', title: `Ejecutar ${comando}`, kin
 
 /** Ejecuta un encargo en modo escritura con las llamadas dadas; devuelve las decisiones y las denegaciones. */
 async function conPermisos(llamadas, prepararRaiz = () => {}, ordenes = ['npm test', 'npm run typecheck'], ordenesActivas = true) {
+  // `'omitir'` no pasa la opción al conector: así se ejerce el valor por defecto de verdad.
   const dir = mkdtempSync(join(tmpdir(), 'nexakit-agy-esc-'));
   const raiz = join(dir, 'repo');
   mkdirSync(join(raiz, 'src'), { recursive: true });
@@ -583,7 +584,7 @@ async function conPermisos(llamadas, prepararRaiz = () => {}, ordenes = ['npm te
     orden: process.execPath,
     argsPrefijo: [SERVIDOR, join(p.dir, 'guion.json')],
     escritura: { raiz, ordenesPermitidas: ordenes },
-    ordenesActivas,
+    ...(ordenesActivas === 'omitir' ? {} : { ordenesActivas }),
   });
   try {
     const resultado = await conector.ejecutar(encargo(raiz), AbortSignal.timeout(10_000));
@@ -678,6 +679,51 @@ test('modo escritura con órdenes desactivadas (por defecto): ninguna orden, con
   assert.deepEqual(decisiones, [RECHAZADO, RECHAZADO]);
   assert.ok(resultado.denegaciones.every((d) => /órdenes desactivadas en Antigravity: su sandbox deja la copia en solo lectura y no aporta; las pruebas las ejecuta el orquestador/.test(d.detalle)));
   assert.equal(ORDENES_ACTIVAS, false);
+});
+
+test('modo escritura de extremo a extremo sin pasar ordenesActivas: la orden se rechaza con su motivo y la edición sigue permitida', async () => {
+  const { decisiones, resultado, mensajes } = await conPermisos(
+    () => [orden('npm test'), ordenAgy('npm run typecheck'), edicion('src/nuevo.js')],
+    () => {},
+    undefined,
+    'omitir',
+  );
+  assert.deepEqual(decisiones, [RECHAZADO, RECHAZADO, PERMITIDO]);
+  assert.equal(resultado.denegaciones.length, 2);
+  for (const d of resultado.denegaciones) {
+    assert.match(d.detalle, /órdenes desactivadas en Antigravity: su sandbox deja la copia en solo lectura y no aporta; las pruebas las ejecuta el orquestador/u);
+  }
+  assert.equal(mensajes.filter((m) => m.method === 'session/prompt').length, 1);
+});
+
+test('por defecto no se invoca agy --version (ni con macOS): un testigo no se ejecuta y una orden inexistente no estorba', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'nexakit-agy-testigo-'));
+  try {
+    const raiz = join(dir, 'repo');
+    mkdirSync(raiz);
+    const testigo = join(dir, 'testigo');
+    const guion = join(dir, 'agy-testigo.mjs');
+    writeFileSync(guion, `import { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(testigo)}, process.argv.slice(2).join(' '));\nconsole.log('1.5.16');\n`);
+    const base = { orden: process.execPath, argsPrefijo: [guion], plataforma: 'darwin' };
+    const estado = await comprobarOrdenes(base);
+    assert.equal(estado.activas, false);
+    assert.match(estado.motivo, /órdenes desactivadas en Antigravity: su sandbox deja la copia en solo lectura/u);
+    assert.doesNotMatch(estado.motivo, /versión/u);
+    const conector = await crearConectorAntigravity({ ...base, escritura: { raiz, ordenesPermitidas: ['npm test'] } });
+    assert.equal(conector.ordenesActivas, false);
+    assert.equal(existsSync(testigo), false, 'agy --version no se lanzó por defecto');
+    // Control: el testigo sí se ejecuta cuando se pide verificar.
+    assert.equal((await comprobarOrdenes({ ...base, ordenesActivas: 'verificar' })).activas, true);
+    assert.equal(readFileSync(testigo, 'utf8'), '--version');
+    // Una orden que no existe tampoco estorba por defecto: ni siquiera se intenta ejecutar.
+    const inexistente = { orden: join(dir, 'no-existe'), plataforma: 'darwin' };
+    const sin = await comprobarOrdenes(inexistente);
+    assert.equal(sin.activas, false);
+    assert.doesNotMatch(sin.motivo, /no se pudo obtener la versión/u);
+    assert.equal((await crearConectorAntigravity({ ...inexistente, escritura: { raiz, ordenesPermitidas: [] } })).ordenesActivas, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('órdenes de Antigravity: por defecto se rechazan en cualquier plataforma (macOS incluido) con ese motivo', async () => {
