@@ -691,7 +691,10 @@ export async function ejecutarCli(argv: string[], io: IoCli, opciones: OpcionesC
   const compuesta = primera === 'banco';
   const orden = compuesta ? `banco ${siguientes[0] ?? ''}`.trimEnd() : primera;
   const resto = compuesta ? siguientes.slice(1) : siguientes;
-  if (orden === '--help' || orden === '-h' || (compuesta && (siguientes[0] === '--help' || siguientes[0] === '-h'))) {
+  // `--help` y `-h` en cualquier orden (y en `banco <sub>`) muestran la ayuda completa antes de analizar opciones.
+  const pideAyuda = (args: readonly string[]): boolean => args.includes('--help') || args.includes('-h');
+  const esOrdenConocida = orden !== undefined && Object.hasOwn(OPCIONES, orden);
+  if (orden === '--help' || orden === '-h' || (compuesta && pideAyuda(siguientes)) || (esOrdenConocida && pideAyuda(resto))) {
     await io.out(AYUDA);
     return 0;
   }
@@ -699,10 +702,6 @@ export async function ejecutarCli(argv: string[], io: IoCli, opciones: OpcionesC
   if (compuesta && siguientes[0] === undefined) {
     await io.err(`${USOS['banco planificar']}\n${USOS['banco ejecutar']}\n${PIE_AYUDA}\n`);
     return 2;
-  }
-  if (orden === 'encargar' && (resto.includes('--help') || resto.includes('-h'))) {
-    await io.out(AYUDA);
-    return 0;
   }
   const especificacion = orden === undefined ? undefined : Object.hasOwn(OPCIONES, orden) ? OPCIONES[orden] : undefined;
   if (orden === undefined || especificacion === undefined) {

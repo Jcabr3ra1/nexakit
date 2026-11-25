@@ -527,6 +527,12 @@ test('un error de uso imprime el mensaje, la línea de uso de la orden y cómo v
     [['estado'], /--id/u, /^Uso: nexakit fabrica estado --id/mu],
     [['cancelar', '--id', 'x', 'y'], /./u, /^Uso: nexakit fabrica cancelar --id/mu],
     [['encargar', '--raro'], /encargar/u, /^Uso: nexakit encargar --ia/mu],
+    [['resultado'], /--id/u, /^Uso: nexakit fabrica resultado --id/mu],
+    [['preferencias', '--criterio', 'raro'], /./u, /^Uso: nexakit fabrica preferencias/mu],
+    [['banco', 'planificar', '--fase', '3'], /./u, /^Uso: nexakit fabrica banco planificar/mu],
+    [['banco', 'ejecutar'], /--huella/u, /^Uso: nexakit fabrica banco ejecutar --huella/mu],
+    [['banco', 'raro'], /Orden desconocida: banco raro/u, /^Uso: nexakit fabrica proponer\|lanzar/mu],
+    [['banco'], /./u, /^Uso: nexakit fabrica banco planificar/mu],
   ];
   for (const [argv, mensaje, uso] of casos) {
     const { codigo, out, err } = await cli(argv, e);
@@ -540,12 +546,33 @@ test('un error de uso imprime el mensaje, la línea de uso de la orden y cómo v
   }
 });
 
-test('una variable NEXAKIT_FABRICA_* mal formada es un argumento inválido', async () => {
+test('una variable NEXAKIT_FABRICA_* mal formada es un argumento inválido y sale la ayuda corta', async () => {
   const e = escenario();
   e.env.NEXAKIT_FABRICA_CODEX = '[1, 2';
-  const { codigo, err } = await cli(['proponer', '--base', 'main'], e);
+  const { codigo, out, err } = await cli(['proponer', '--base', 'main'], e);
   assert.equal(codigo, 2);
+  assert.equal(out, '');
   assert.match(err, /NEXAKIT_FABRICA_CODEX no es un JSON válido/u);
+  assert.match(err, /^Uso: nexakit fabrica proponer --base <rama>/mu);
+  assert.match(err, /Usa --help para ver la ayuda completa\./u);
+  assert.doesNotMatch(err, /Códigos de salida/u);
+  assert.ok(err.trimEnd().split('\n').length <= 4);
+});
+
+test('--help y -h muestran la ayuda completa con código 0 en todas las órdenes y en banco <sub>', async () => {
+  const e = escenario();
+  const ordenes = [['proponer'], ['lanzar'], ['estado'], ['resultado'], ['cancelar'], ['preferencias'], ['encargar'], ['banco', 'planificar'], ['banco', 'ejecutar'], ['banco']];
+  for (const orden of ordenes) {
+    for (const bandera of ['--help', '-h']) {
+      for (const argv of [[...orden, bandera], [...orden, '--raro', bandera]]) {
+        const r = await cli(argv, e);
+        assert.equal(r.codigo, 0, JSON.stringify(argv));
+        assert.equal(r.err, '', JSON.stringify(argv));
+        assert.match(r.out, /Uso: nexakit fabrica proponer --base <rama>/u, JSON.stringify(argv));
+        assert.match(r.out, /Códigos de salida/u, JSON.stringify(argv));
+      }
+    }
+  }
 });
 
 test('las órdenes de la configuración con secuencias de escape no pueden esconderse en la tabla', async () => {
@@ -605,6 +632,10 @@ test('banco planificar --json imprime solo JSON y la fase 2 sin evidencia pide a
   assert.equal(sinOrden.codigo, 2);
   assert.doesNotMatch(sinOrden.err, /Orden desconocida/u);
   assert.match(sinOrden.err, /nexakit fabrica banco planificar/u);
+  assert.match(sinOrden.err, /nexakit fabrica banco ejecutar/u);
+  assert.match(sinOrden.err, /Usa --help para ver la ayuda completa\./u);
+  assert.equal(sinOrden.out, '');
+  assert.doesNotMatch(sinOrden.err, /Códigos de salida/u);
   for (const bandera of ['--help', '-h']) {
     const ayuda = await cli(['banco', bandera], e);
     assert.equal(ayuda.codigo, 0, bandera);
