@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { closeSync, constants, lstatSync, openSync, readFileSync } from 'node:fs';
-import { link, mkdir, open, rename, unlink } from 'node:fs/promises';
+import { link, mkdir, open, readdir, rmdir, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { ErrorFabrica } from '../errores.js';
 import { carpetaPropia, codigoError, escribirReemplazando } from '../rastro.js';
@@ -94,56 +94,139 @@ export const GRACIA_ILEGIBLE_MS = 30_000;
 
 const OTRO_EN_MARCHA = 'Hay otro encargo en marcha; vuelve a intentarlo en unos segundos';
 
-/**
- * Publica el candado de forma atómica: escribe un temporal completo y lo enlaza (`link` falla con `EEXIST` si ya hay
- * uno), de modo que nadie lee nunca un candado a medias. Sin enlaces duros, recurre a `wx`.
- */
-async function publicarCandado(archivo: string, texto: string): Promise<void> {
-  const temporal = `${archivo}.${randomBytes(6).toString('hex')}.tmp`;
-  const fd = await open(temporal, 'wx', 0o600);
+type OperacionLink = (existente: string, nuevo: string) => Promise<void>;
+
+/** Escribe `texto` en un archivo nuevo (`wx`, `0o600`); falla con `EEXIST` si ya existe. */
+async function crearExclusivo(archivo: string, texto: string): Promise<void> {
+  const fd = await open(archivo, 'wx', 0o600);
   try {
-    try {
-      await fd.chmod(0o600);
-      await fd.writeFile(texto);
-    } finally {
-      await fd.close();
-    }
-    try {
-      await link(temporal, archivo);
-    } catch (error) {
-      const codigo = codigoError(error);
-      if (codigo !== 'EPERM' && codigo !== 'ENOTSUP' && codigo !== 'EXDEV' && codigo !== 'ENOSYS') throw error;
-      const directo = await open(archivo, 'wx', 0o600);
-      try {
-        await directo.chmod(0o600);
-        await directo.writeFile(texto);
-      } finally {
-        await directo.close();
-      }
-    }
+    await fd.chmod(0o600);
+    await fd.writeFile(texto);
+  } finally {
+    await fd.close();
+  }
+}
+
+/**
+ * Enlaza el temporal ya escrito con el nombre del candado (`link` falla con `EEXIST` si ya hay uno). Ante cualquier otro
+ * error de `link` (sin enlaces duros: `EPERM`, `ENOTSUP`, `EXDEV`, `ENOSYS`, FAT, red, Windows...) recurre a `wx`.
+ */
+async function enlazarOCrear(temporal: string, archivo: string, texto: string, enlazar: OperacionLink): Promise<void> {
+  try {
+    await enlazar(temporal, archivo);
+  } catch (error) {
+    if (codigoError(error) === 'EEXIST') throw error;
+    await crearExclusivo(archivo, texto);
+  }
+}
+
+/**
+ * Publica el candado de forma atómica: escribe un temporal completo y lo enlaza, de modo que nadie lee nunca un candado
+ * a medias. `enlazar` solo se inyecta en pruebas.
+ */
+export async function publicarCandado(archivo: string, texto: string, enlazar: OperacionLink = link): Promise<void> {
+  const temporal = `${archivo}.${randomBytes(6).toString('hex')}.tmp`;
+  try {
+    await crearExclusivo(temporal, texto);
+    await enlazarOCrear(temporal, archivo, texto, enlazar);
   } finally {
     await unlink(temporal).catch(() => {});
   }
 }
 
-/** `true` si lo apartado es exactamente lo que se juzgó muerto. */
-const mismoCandado = (juzgado: Inspeccion, apartado: Inspeccion | null): boolean => {
-  if (apartado === null || apartado.crudo !== juzgado.crudo) return false;
-  if (juzgado.datos !== null) return apartado.datos?.pid === juzgado.datos.pid && apartado.datos.fecha === juzgado.datos.fecha;
-  return Date.now() - apartado.mtimeMs > GRACIA_ILEGIBLE_MS;
+/** `true` si lo inspeccionado ahora es exactamente lo que se juzgó muerto. */
+const mismoCandado = (juzgado: Inspeccion, actual: Inspeccion | null): boolean => {
+  if (actual === null || actual.crudo !== juzgado.crudo) return false;
+  if (juzgado.datos !== null) return actual.datos?.pid === juzgado.datos.pid && actual.datos.fecha === juzgado.datos.fecha;
+  return Date.now() - actual.mtimeMs > GRACIA_ILEGIBLE_MS;
 };
+
+/** Borra una entrada sin seguir enlaces: un enlace simbólico se quita a sí mismo, un directorio vacío se quita con `rmdir`. */
+async function quitarSinSeguir(ruta: string): Promise<void> {
+  const info = lstatSync(ruta, { throwIfNoEntry: false });
+  if (info === undefined) return;
+  if (info.isDirectory()) await rmdir(ruta);
+  else await unlink(ruta);
+}
+
+/** Borra los temporales (`.candado.*.tmp`, `.candado.*.muerto`) con más de 30 s: restos de un proceso que murió a medias. */
+async function limpiarTemporales(carpeta: string): Promise<void> {
+  let nombres: string[];
+  try {
+    nombres = await readdir(carpeta);
+  } catch {
+    return;
+  }
+  for (const nombre of nombres) {
+    if (!/^\.candado\..+\.(?:tmp|muerto)$/u.test(nombre)) continue;
+    const ruta = path.join(carpeta, nombre);
+    try {
+      const info = lstatSync(ruta, { throwIfNoEntry: false });
+      if (info === undefined || info.isDirectory() || Date.now() - info.mtimeMs <= GRACIA_ILEGIBLE_MS) continue;
+      await unlink(ruta);
+    } catch {
+      // Otro proceso lo borró antes o no se puede: se deja.
+    }
+  }
+}
+
+/** Opciones internas, solo para pruebas. */
+export interface OpcionesCandado {
+  /** Se ejecuta con el candado auxiliar de robo ya tomado y antes de volver a inspeccionar `.candado`. */
+  alAntesDeRobar?: () => void | Promise<void>;
+}
+
+/**
+ * Roba un candado juzgado muerto. Solo quien crea el directorio auxiliar `.candado.robo` (con `mkdir`, atómico) puede
+ * robar; dentro vuelve a inspeccionar `.candado` y, si sigue siendo exactamente el juzgado, lo borra y publica el suyo.
+ * Devuelve `true` si lo tomó y `false` si hay que volver a juzgar. Si no puede, lanza «Hay otro encargo en marcha».
+ */
+async function robarCandado(archivo: string, juzgado: Inspeccion, texto: string, opciones: OpcionesCandado): Promise<boolean> {
+  const robo = `${archivo}.robo`;
+  try {
+    await mkdir(robo, { mode: 0o700 });
+  } catch (error) {
+    const codigo = codigoError(error);
+    if (codigo === 'ENOENT') return false;
+    if (codigo !== 'EEXIST') throw error;
+    const info = lstatSync(robo, { throwIfNoEntry: false });
+    if (info === undefined) return false;
+    if (Date.now() - info.mtimeMs <= GRACIA_ILEGIBLE_MS) throw new ErrorFabrica(OTRO_EN_MARCHA);
+    // Auxiliar abandonado por un proceso que murió a medias: se borra y se vuelve a intentar.
+    await quitarSinSeguir(robo).catch(() => {});
+    return false;
+  }
+  try {
+    await opciones.alAntesDeRobar?.();
+    const actual = inspeccionar(archivo);
+    if (actual === null) return false;
+    if (!mismoCandado(juzgado, actual)) throw new ErrorFabrica(OTRO_EN_MARCHA);
+    await quitarSinSeguir(archivo);
+    try {
+      await publicarCandado(archivo, texto);
+    } catch (error) {
+      if (codigoError(error) === 'EEXIST') return false;
+      throw error;
+    }
+    return true;
+  } finally {
+    await rmdir(robo).catch(() => {});
+  }
+}
 
 /**
  * Toma el candado global de encargos, `~/.nexakit/encargos/.candado`, publicado de forma atómica con `0o600`. Si existe
- * con un proceso vivo, lanza. Si el proceso murió (o está vacío o ilegible desde hace más de 30 s), lo aparta con un
- * `rename`, comprueba que lo apartado es justo el candado juzgado (si no, lo devuelve y falla) y lo vuelve a crear.
+ * con un proceso vivo, lanza. Si el proceso murió (o está vacío o ilegible desde hace más de 30 s), lo roba con un
+ * candado auxiliar creado con `mkdir` (`.candado.robo`): dentro vuelve a comprobar que sigue siendo el candado juzgado
+ * (si no, se rinde) y lo sustituye por el suyo. Antes borra los temporales con más de 30 s.
  */
-export async function tomarCandadoEncargos(home: string): Promise<CandadoEncargos> {
+export async function tomarCandadoEncargos(home: string, opciones: OpcionesCandado = {}): Promise<CandadoEncargos> {
   const nexakit = path.join(home, '.nexakit');
   await mkdir(nexakit, { recursive: true, mode: 0o700 });
   await carpetaPropia(nexakit, 'Los encargos');
   await carpetaPropia(path.join(nexakit, 'encargos'), 'Los encargos');
   const archivo = rutaCandado(home);
+  await limpiarTemporales(path.dirname(archivo));
   const datos: DatosCandado = { pid: process.pid, id: null, fecha: new Date().toISOString() };
   let tomado = false;
   for (let intento = 0; intento < 5 && !tomado; intento += 1) {
@@ -158,21 +241,7 @@ export async function tomarCandadoEncargos(home: string): Promise<CandadoEncargo
         throw new ErrorFabrica(`Ya hay un encargo en curso (${juzgado.datos.id ?? 'preparándose'}, proceso ${juzgado.datos.pid}); espera a que termine o cancélalo`);
       }
       if (juzgado.datos === null && Date.now() - juzgado.mtimeMs <= GRACIA_ILEGIBLE_MS) throw new ErrorFabrica(OTRO_EN_MARCHA);
-      const aparte = `${archivo}.${randomBytes(4).toString('hex')}.muerto`;
-      try {
-        await rename(archivo, aparte);
-      } catch (e) {
-        if (codigoError(e) === 'ENOENT') continue;
-        throw e;
-      }
-      if (mismoCandado(juzgado, inspeccionar(aparte))) {
-        await unlink(aparte).catch(() => {});
-        continue;
-      }
-      // Otro proceso había cambiado el candado entre medias: se devuelve si el sitio sigue libre.
-      await link(aparte, archivo).catch(() => {});
-      await unlink(aparte).catch(() => {});
-      throw new ErrorFabrica(OTRO_EN_MARCHA);
+      tomado = await robarCandado(archivo, juzgado, contenido(datos), opciones);
     }
   }
   if (!tomado) throw new ErrorFabrica('No se pudo tomar el candado de encargos; vuelve a intentarlo');
