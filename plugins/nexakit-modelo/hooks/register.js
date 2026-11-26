@@ -84,6 +84,25 @@ async function activoDeLaFabrica($) {
   }
 }
 
+const HERRAMIENTA_ENCARGO = 'mcp__nexakit-fabrica__fabrica_encargar';
+const MARCA_SIN_ENCARGO = '[sin encargo]';
+const MENSAJE_ENCARGO = 'Primero encarga esta implementación con fabrica_encargar (Codex o Antigravity): ahorra tokens de Claude. Si el encargo no es posible (repo sin commits, otro encargo en marcha, sin conector) o ya falló, vuelve a lanzar el subagente con [sin encargo] en la descripción.';
+
+// Un subagente niveles:nivel-normal pedido por la sesión principal sin la marca [sin encargo].
+function vetaSubagenteNormal(e) {
+  if (e.agentId || e.subagent_type !== 'niveles:nivel-normal') return false;
+  return !`${e.description ?? ''}\n${e.prompt ?? ''}`.toLowerCase().includes(MARCA_SIN_ENCARGO);
+}
+
+// ¿Existe la herramienta de encargos? Si no se puede saber, se asume que sí.
+async function hayEncargos($) {
+  try {
+    return (await $.tool.list()).some((t) => t.name === HERRAMIENTA_ENCARGO);
+  } catch {
+    return true;
+  }
+}
+
 // Una sola barra sobre el prompt con modelo, esfuerzo, recomendación y uso. Solo muestra:
 // nunca cambia el modelo ni el esfuerzo de la sesión.
 export function register(on) {
@@ -111,6 +130,14 @@ export function register(on) {
     estado.enviada = estado.recommendation;
     await refrescar($, estado);
     return { result: 'Recomendación mostrada; no se cambió el modelo ni el esfuerzo.' };
+  });
+
+  // La implementación de nivel normal se encarga primero (fabrica_encargar en Codex o Antigravity, que ahorra tokens de
+  // Claude). Solo se veta el subagente niveles:nivel-normal lanzado por la sesión principal y sin la marca
+  // [sin encargo] (para cuando el encargo no es posible o ya falló); nada más se bloquea.
+  on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
+    if (!vetaSubagenteNormal(e) || !(await hayEncargos($))) return next(e);
+    return { deny: MENSAJE_ENCARGO };
   });
 
   // Mientras se escribe: la recomendación aparece antes de pulsar Enter, cuando todavía se puede cambiar

@@ -105,7 +105,8 @@ test('el mod recuerda el último esfuerzo entre turnos y dibuja la barra sobre e
 test('un esfuerzo visto en otro modelo no se atribuye al modelo nuevo', async () => {
   const { register } = await import('../plugins/nexakit-modelo/hooks/register.js?cambio');
   const hooks = new Map();
-  register((event, ...rest) => { hooks.set(event, rest.at(-1)); });
+  // tool.call lleva un filtro por herramienta (la recomendación y el veto de subagentes): se guarda por separado.
+  register((event, ...rest) => { hooks.set(rest.length > 1 && rest[0]?.tool ? `${event}:${rest[0].tool}` : event, rest.at(-1)); });
   let model = 'claude-haiku-5-5';
   const api = { session: { model: async () => model, usage: async () => null }, tool: { register: async () => {} }, ui: { status() {}, invalidate() {}, resolve: () => ({ Box: 'Box', Text: 'Text' }) } };
   globalThis.h = (tag, props, ...children) => ({ tag, props, children });
@@ -113,7 +114,7 @@ test('un esfuerzo visto en otro modelo no se atribuye al modelo nuevo', async ()
     await hooks.get('session.start')(api, {}, async (e) => e);
     for await (const _ of hooks.get('turn.step')(api, { model, effort: 'low' }, async function* () {})) { /* nada */ }
     model = 'claude-opus-5-5';
-    await hooks.get('tool.call')(api, { model: 'opus', effort: 'low', reason: 'prueba' });
+    await hooks.get('tool.call:mcp__nexakit-modelo__nexakit_recomendacion')(api, { model: 'opus', effort: 'low', reason: 'prueba' });
     const plano = JSON.stringify(await hooks.get('ui.render')(api, { props: { hasSurvey: false } }, async () => 'engine'));
     assert.match(plano, /Opus 5\.5/);
     assert.match(plano, /esfuerzo \?/);

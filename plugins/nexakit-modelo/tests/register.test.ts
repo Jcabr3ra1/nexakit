@@ -291,4 +291,62 @@ describe('nexakit-modelo API', () => {
     expect(await escritorio.find({ type: 'Button' })).toBeDefined();
     await escritorio.unmount();
   });
+
+  // Guarda de subagentes: la implementación de nivel normal se encarga primero con fabrica_encargar.
+  const prepararAgentes = ($: any, on: any, { conEncargos = true, listaFalla = false } = {}) => {
+    const lanzados: string[] = [];
+    on('session.start', ($: any, e: any) => ({ cwd: e.cwd }));
+    on('session.model', () => ({ value: 'claude-opus-5-5' }));
+    on('tool.register', ($: any, e: any) => ({ value: { tool: e.name } }));
+    on('tool.list', () => {
+      if (listaFalla) throw new Error('sin lista');
+      const base = [{ name: 'Agent', description: 'subagentes', mcp: false }];
+      return { value: conEncargos ? [...base, { name: 'mcp__nexakit-fabrica__fabrica_encargar', description: 'encargar', mcp: true }] : base };
+    });
+    on('tool.call', ($: any, e: any) => {
+      lanzados.push(`${e.agentId ?? 'main'}:${e.subagent_type}`);
+      return { result: 'lanzado' };
+    });
+    return lanzados;
+  };
+  const agente = (extra: object) => ({ tool: 'Agent', description: 'implementar exportación', prompt: 'Añade el botón de exportar.', subagent_type: 'niveles:nivel-normal', ...extra }) as any;
+
+  test('el subagente niveles:nivel-normal se veta con el mensaje de encargar primero', async ($, on) => {
+    const lanzados = prepararAgentes($, on);
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/test' });
+    const r: any = await $.tool.call(agente({}));
+    expect(r.deny).toContain('Primero encarga esta implementación con fabrica_encargar (Codex o Antigravity): ahorra tokens de Claude.');
+    expect(r.deny).toContain('[sin encargo]');
+    expect(lanzados).toHaveLength(0);
+  });
+
+  test('con la marca [sin encargo] en la descripción o en el prompt el subagente normal pasa', async ($, on) => {
+    const lanzados = prepararAgentes($, on);
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/test' });
+    expect((await $.tool.call(agente({ description: 'implementar [sin encargo]' }))).deny).toBeUndefined();
+    expect((await $.tool.call(agente({ prompt: 'Contexto. [Sin encargo] porque el encargo falló.' }))).deny).toBeUndefined();
+    expect(lanzados).toHaveLength(2);
+  });
+
+  test('no se veta nada más: ligero, exigente, alto, otros agentes, sin tipo ni subagentes de subagentes', async ($, on) => {
+    const lanzados = prepararAgentes($, on);
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/test' });
+    for (const subagent_type of ['niveles:nivel-ligero', 'niveles:nivel-exigente', 'niveles:nivel-alto', 'niveles:investigador', 'Explore', undefined])
+      expect((await $.tool.call(agente({ subagent_type }))).deny).toBeUndefined();
+    // Un subagente que lanza otro normal: el veto es solo de la sesión principal.
+    expect((await $.tool.call(agente({ agentId: 'a1' }))).deny).toBeUndefined();
+    expect(lanzados).toHaveLength(7);
+  });
+
+  test('sin la herramienta fabrica_encargar no se veta; si no se puede saber, se veta igual', async ($, on) => {
+    prepararAgentes($, on, { conEncargos: false });
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/test' });
+    expect((await $.tool.call(agente({}))).deny).toBeUndefined();
+  });
+
+  test('si la lista de herramientas falla, se veta igual', async ($, on) => {
+    prepararAgentes($, on, { listaFalla: true });
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/test' });
+    expect((await $.tool.call(agente({}))).deny).toContain('fabrica_encargar');
+  });
 });

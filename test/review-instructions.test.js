@@ -161,9 +161,9 @@ test('global block stays brief, includes project-handoff trigger, new session li
     const match = content.match(/<!-- nexakit:review:start -->[\s\S]*?<!-- nexakit:review:end -->/u);
     assert.ok(match, rel.join('/'));
     const block = match[0];
-    assert.ok(block.split('\n').length <= 48, `block has too many lines: ${block.split('\n').length}`);
-    // 3200: room for the rules that govern the required Superpowers process and the orchestration of encargos; still loaded in every session.
-    assert.ok(block.length <= 3200, `block is too long: ${block.length}`);
+    assert.ok(block.split('\n').length <= 54, `block has too many lines: ${block.split('\n').length}`);
+    // 3700: room for the rules that govern the required Superpowers process and the orchestration of encargos (encargo first, one at a time); still loaded in every session.
+    assert.ok(block.length <= 3700, `block is too long: ${block.length}`);
     assert.match(
       block,
       /si una tarea larga queda a medias —pausa, cambio de IA, bloqueo o cierre— escribe o actualiza la nota de seguimiento con project-handoff/iu,

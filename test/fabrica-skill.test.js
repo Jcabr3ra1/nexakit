@@ -37,6 +37,10 @@ test('la skill fabrica sigue el recorrido, exige aprobación y trata lo externo 
   assert.match(md.replace(/\s+/gu, ' '), /Si falla:\*\* sin servidor ni orden, o con un error, dilo en una línea y sigue\. Nunca bloquea el trabajo/u);
   assert.doesNotMatch(md, /opcional|solo corre cuando la persona|No la propongas en cada cierre/u);
   assert.match(md, /máximo de dos rondas/u);
+  const plano = md.replace(/\s+/gu, ' ');
+  assert.match(plano, /se hacen PRIMERO como encargo, sin preguntar, con `fabrica_encargar`/u);
+  assert.match(plano, /`niveles:nivel-normal` solo si el encargo no es posible .* o ya falló; entonces pon `\[sin encargo\]`/u);
+  assert.match(plano, /Los encargos van de uno en uno: no los sustituyas por subagentes para paralelizar/u);
 });
 
 test('la skill fabrica enseña las órdenes permitidas y avisa de las del repo', async () => {
