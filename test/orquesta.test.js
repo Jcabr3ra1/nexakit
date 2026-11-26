@@ -22,6 +22,14 @@ test('el bloque global orquesta por niveles, lanza la fábrica por su cuenta y d
   assert.match(block, /niveles:nivel-<nivel>/u);
   assert.match(block, /nivel_<nivel>/u);
   assert.match(block, /bifurca la\s+sesión \(fork\)/u);
+  // Los encargos van antes que los subagentes de nivel normal y no compiten con ellos.
+  const plano = block.replace(/\s+/gu, ' ');
+  assert.match(plano, /Implementar con diseño claro \(normal\) y los cambios mecánicos de código \(ligero\) no van a un subagente: se encargan primero/u);
+  assert.match(plano, /se hacen PRIMERO, sin preguntar, con fabrica_encargar/u);
+  assert.match(plano, /Usa niveles:nivel-normal solo si el encargo no es posible \(repo sin commits, otro encargo o recorrido en marcha, sin conector\) o ya falló, y entonces pon \[sin encargo\] en la descripción del subagente/u);
+  assert.match(plano, /Los encargos van de uno en uno: no los sustituyas por subagentes para paralelizar; mientras corre uno, prepara el siguiente o revisa/u);
+  assert.match(plano, /ligero para comandos, búsquedas y lecturas/u);
+  assert.doesNotMatch(plano, /normal para implementar con diseño claro/u);
 });
 
 test('los subagentes de nivel se ofrecen para cualquier tarea, no solo para la revisión', async () => {

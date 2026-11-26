@@ -23,7 +23,7 @@ Las IA externas nunca escriben: se deniegan los cambios de archivos y los permis
 
 ## Encargar: delegar código en Codex o Antigravity
 
-`nexakit encargar` (herramienta MCP `fabrica_encargar`) delega una tarea de programación con diseño claro en Codex o Antigravity. Las tareas exigentes, altas o de seguridad siguen con subagentes de Claude.
+`nexakit encargar` (herramienta MCP `fabrica_encargar`) delega una tarea de programación con diseño claro en Codex o Antigravity. Las tareas exigentes, altas o de seguridad siguen con subagentes de Claude. Implementar con diseño claro (nivel normal) y los cambios mecánicos de código (ligero) se encargan primero, de uno en uno: no se sustituyen por subagentes para paralelizar (mientras corre un encargo se prepara el siguiente o se revisa). `niveles:nivel-normal` queda para cuando el encargo no es posible (repo sin commits, otro encargo o recorrido en marcha, conector no disponible) o ya falló; el mod `nexakit-modelo` veta el subagente normal de la sesión principal salvo que su descripción o su prompt lleven `[sin encargo]`.
 
 ```text
 ~/.nexakit/nexakit encargar --ia codex|antigravity|auto --encargo <archivo.md> [--modelo <m>] [--esfuerzo <e>] [--ordenes <archivo.json>] [--tiempo <min>]

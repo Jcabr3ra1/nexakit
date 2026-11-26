@@ -452,6 +452,7 @@ test('quitar --global no sigue enlaces: un workflows enlazado y un revisores.jso
 // Los textos de cada versión anterior del bloque van como fixtures (test-support/bloques-anteriores), sacados del
 // historial de src/review-instructions.js: la prueba no depende de git.
 const PREVIOUS = {
+  e673ad5: '0fbb927e1b8089c7d909699b0af48cc5308f2df1724f88158311b1969e0a2f98',
   '76502d3': 'fec51a0095eaa4cf17b9c56fb4fb05d517ae44f15765ff19c9f19c1fb4dfc2f5',
   b0fe4d4: '68e39f959703ca1ae9523000206f25eee623d5461d92e1b5432d88715f6ca7e3',
   b42b5bf: '986f429cf9e0625cc45d0ea1afb02ed45fe9c359ef1e32897b387dbb21bc1dde',
@@ -463,7 +464,7 @@ const PREVIOUS = {
   d815d60: 'a59f9d7f20e328a0e990566dee78e9fe90623598bc8bd85eb593808217aae123',
   d73e44a: 'b9ed8e99a370f760c46574fa0e1854768d35498eb70fc619337851843d97c32a',
 };
-test('cada una de las 10 versiones anteriores del bloque se reconoce por su texto y se actualiza', async (t) => {
+test('cada una de las 11 versiones anteriores del bloque se reconoce por su texto y se actualiza', async (t) => {
   const { planReviewInstructions } = await import('../src/review-instructions.js');
   const fixtures = fileURLToPath(new URL('../test-support/bloques-anteriores/', import.meta.url));
   assert.deepEqual((await fs.readdir(fixtures)).sort(), Object.keys(PREVIOUS).map((sha) => `${sha}.md`).sort());

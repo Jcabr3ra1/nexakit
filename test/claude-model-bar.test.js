@@ -105,7 +105,8 @@ test('el mod recuerda el último esfuerzo entre turnos y dibuja la barra sobre e
 test('un esfuerzo visto en otro modelo no se atribuye al modelo nuevo', async () => {
   const { register } = await import('../plugins/nexakit-modelo/hooks/register.js?cambio');
   const hooks = new Map();
-  register((event, ...rest) => { hooks.set(event, rest.at(-1)); });
+  // tool.call lleva un filtro por herramienta (la recomendación y el veto de subagentes): se guarda por separado.
+  register((event, ...rest) => { hooks.set(rest.length > 1 && rest[0]?.tool ? `${event}:${rest[0].tool}` : event, rest.at(-1)); });
   let model = 'claude-haiku-5-5';
   const api = { session: { model: async () => model, usage: async () => null }, tool: { register: async () => {} }, ui: { status() {}, invalidate() {}, resolve: () => ({ Box: 'Box', Text: 'Text' }) } };
   globalThis.h = (tag, props, ...children) => ({ tag, props, children });
@@ -113,7 +114,7 @@ test('un esfuerzo visto en otro modelo no se atribuye al modelo nuevo', async ()
     await hooks.get('session.start')(api, {}, async (e) => e);
     for await (const _ of hooks.get('turn.step')(api, { model, effort: 'low' }, async function* () {})) { /* nada */ }
     model = 'claude-opus-5-5';
-    await hooks.get('tool.call')(api, { model: 'opus', effort: 'low', reason: 'prueba' });
+    await hooks.get('tool.call:mcp__nexakit-modelo__nexakit_recomendacion')(api, { model: 'opus', effort: 'low', reason: 'prueba' });
     const plano = JSON.stringify(await hooks.get('ui.render')(api, { props: { hasSurvey: false } }, async () => 'engine'));
     assert.match(plano, /Opus 5\.5/);
     assert.match(plano, /esfuerzo \?/);
@@ -603,4 +604,68 @@ test('las filas de la fábrica y las de los subagentes comparten columnas e icon
   const [ff] = filasDeFabrica(activo, ahoraF, columna).map(texto);
   assert.equal(fa.indexOf('●'), ff.indexOf('●'));
   assert.equal(fa.indexOf('Sonnet'), ff.indexOf('codex'));
+});
+
+// turn.abort no se puede disparar con el motor de pruebas de los mods (su `$.turn` solo tiene start, step y complete):
+// aquí se ejercita con ganchos y un `$` falsos.
+test('el botón de delegar: aborto de subagente, reintento tras abortar la delegación, envío fallido y envío de otro plugin', async () => {
+  const { register } = await import('../plugins/nexakit-modelo/hooks/register.js?boton');
+  const hooks = new Map();
+  register((event, ...rest) => { hooks.set(event, rest.at(-1)); });
+  const enviados = [];
+  const avisos = [];
+  let falla = false;
+  const api = {
+    session: { model: async () => 'claude-opus-5-5', usage: async () => null },
+    tool: { register: async () => {} },
+    prompt: { submit: async ({ text }) => { if (falla) throw new Error('sin conexión'); enviados.push(text); return { text }; } },
+    ui: { invalidate() {}, toast: (t) => avisos.push(t), resolve: () => ({ Box: 'Box', Text: 'Text', Button: 'Button' }) },
+  };
+  const ir = (nombre, e) => hooks.get(nombre)(api, e, async (x) => x);
+  const buscar = (nodo) => (!nodo || typeof nodo !== 'object' ? null : nodo.tag === 'Button' ? nodo : [].concat(nodo.children ?? []).map(buscar).find(Boolean) ?? null);
+  const boton = async (surface = 'desktop') => buscar(await hooks.get('ui.render')(api, { surface, props: { hasSurvey: false } }, async () => 'engine'));
+  globalThis.h = (tag, props, ...children) => ({ tag, props, children });
+  try {
+    await ir('session.start', {});
+    await ir('prompt.submit', { text: 'haz commit y push' });
+    assert.ok(await boton(), 'sin turno en curso hay botón');
+    assert.equal(await boton('terminal'), null);
+    for (const otra of ['mobile', 'vscode', 'cli']) assert.equal(await boton(otra), null, otra);
+    await ir('turn.start', { turnId: 'principal' });
+    assert.equal(await boton(), null);
+    // Un subagente aborta su turno: el principal sigue y el botón no vuelve.
+    await ir('turn.start', { turnId: 'hijo', agentId: 'a1' });
+    await ir('turn.abort', { turnId: 'hijo' });
+    await ir('turn.abort', { turnId: 'otro', agentId: 'a1' });
+    assert.equal(await boton(), null);
+    await ir('turn.abort', { turnId: 'principal' });
+    assert.ok(await boton(), 'el aborto del principal devuelve el botón');
+    // Pulsar, abortar la delegación y reintentar.
+    await (await boton()).props.onPress();
+    assert.equal(enviados.length, 1);
+    assert.match(enviados[0], /mi mensaje anterior/u);
+    assert.equal(await boton(), null);
+    await ir('turn.start', { turnId: 'delegacion' });
+    await ir('turn.abort', { turnId: 'delegacion' });
+    const reintento = await boton();
+    assert.ok(reintento, 'tras abortar la delegación se puede reintentar');
+    assert.match(reintento.props.label, /nivel-ligero/u);
+    // Un envío fallido restaura el botón y avisa en español.
+    falla = true;
+    await reintento.props.onPress();
+    assert.equal(avisos.length, 1);
+    assert.match(avisos[0], /reintentar/u);
+    falla = false;
+    await (await boton()).props.onPress();
+    assert.equal(enviados.length, 2);
+    await ir('turn.start', { turnId: 'd2' });
+    await ir('turn.complete', { turnId: 'd2' });
+    assert.equal(await boton(), null, 'ya delegado, no vuelve para el mismo mensaje');
+    // Un envío de otro plugin (no el del botón) sí es un mensaje: cambia la recomendación.
+    await ir('prompt.submit', { text: 'la API da error 500 y no sé por qué', origin: { kind: 'plugin', name: 'otro' } });
+    const r = JSON.stringify(await hooks.get('ui.render')(api, { surface: 'desktop', props: { hasSurvey: false } }, async () => 'engine'));
+    assert.match(r, /→ delega: nivel-alto|→ Opus · high/u);
+  } finally {
+    delete globalThis.h;
+  }
 });

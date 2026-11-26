@@ -20,24 +20,30 @@ escribe el código, un paso verificable cada vez) solo si lo pide.
 
 Orquesta: tú entiendes, planificas, decides e integras; delega la ejecución en
 subagentes de nivel (Claude: niveles:nivel-<nivel>; Codex: nivel_<nivel>; Antigravity: nivel-<nivel>):
-ligero para comandos, búsquedas y cambios mecánicos; normal para implementar
-con diseño claro; exigente para pruebas, casos borde o un fallo acotado; alto
-para un fallo sutil, seguridad o lo que exigente no resolvió. Trabaja tú solo
-lo que se hace en uno o dos pasos y la conversación con la persona. Da a cada
-subagente un encargo autocontenido (objetivo, archivos, criterio de hecho),
-lanza en paralelo los independientes y comprueba su informe antes de darlo
-por bueno. Si el encargo necesita el mismo contexto que ya llevas, bifurca la
+ligero para comandos, búsquedas y lecturas; exigente para pruebas, casos borde
+o un fallo acotado; alto para un fallo sutil, seguridad o lo que exigente no
+resolvió. Implementar con diseño claro (normal) y los cambios mecánicos de
+código (ligero) no van a un subagente: se encargan primero, como dice el párrafo
+siguiente. Trabaja tú solo lo que se hace en uno o dos pasos y la conversación
+con la persona. Da a cada subagente un encargo autocontenido (objetivo, archivos,
+criterio de hecho), lanza en paralelo los independientes y comprueba su informe
+antes de darlo por bueno. Si el encargo necesita el mismo contexto que ya llevas, bifurca la
 sesión (fork) en vez de crear un subagente nuevo. Usa elegir-modelo para nombres reales; nunca cambies el modelo de
 la sesión por tu cuenta. Sin subagentes de nivel, trabaja tú.
 
-Encargos: las tareas ligeras o normales con diseño claro las delegas primero,
-sin preguntar, con fabrica_encargar (o ~/.nexakit/nexakit encargar) en Codex o
-Antigravity: trabajan en una copia aislada y devuelven un diff. Revisas diff y
-resumen, lo aplicas, pruebas e integras; si falla, lo resuelves con Claude.
-Lo exigente, alto, de seguridad o de contexto largo sigue con subagentes de
-Claude. Revisa el diff con al menos una IA distinta de la que lo escribió. No
-edites el repo mientras corre un encargo. Informa en una línea qué IA hizo cada
-encargo; --ordenes, con permiso de la persona (en Codex solo orientan).
+Encargos: implementar con diseño claro (normal) y los cambios mecánicos de
+código (ligero) se hacen PRIMERO, sin preguntar, con fabrica_encargar (o
+~/.nexakit/nexakit encargar) en Codex o Antigravity: trabajan en una copia
+aislada y devuelven un diff. Usa niveles:nivel-normal solo si el encargo no es
+posible (repo sin commits, otro encargo o recorrido en marcha, sin conector) o
+ya falló, y entonces pon [sin encargo] en la descripción del subagente. Los
+encargos van de uno en uno: no los sustituyas por subagentes para paralelizar;
+mientras corre uno, prepara el siguiente o revisa. Revisas diff y resumen, lo
+aplicas, pruebas e integras; si falla, lo resuelves con Claude. Lo exigente,
+alto, de seguridad o de contexto largo sigue con subagentes de Claude. Revisa
+el diff con al menos una IA distinta de la que lo escribió. No edites el repo
+mientras corre un encargo. Informa en una línea qué IA hizo cada encargo;
+--ordenes, con permiso de la persona (en Codex solo orientan).
 
 La fábrica (revisión con varias IA) la lanzas tú, sin pedir permiso: al cerrar
 una tarea con cambios de código y siempre antes de proponer o crear un PR, con
@@ -57,6 +63,7 @@ ${END}`;
 // that matches one of them was written by nexakit even without its record in review-instructions.json, so it is
 // replaced by the current one; any other text between the marks was edited by the person and is never touched.
 const PREVIOUS_BODY_HASHES = new Set([
+  '0fbb927e1b8089c7d909699b0af48cc5308f2df1724f88158311b1969e0a2f98', // e673ad5: encargos primero (versión anterior al orden estricto)
   'fec51a0095eaa4cf17b9c56fb4fb05d517ae44f15765ff19c9f19c1fb4dfc2f5', // 76502d3: fábrica autónoma sin aprobación previa
   '68e39f959703ca1ae9523000206f25eee623d5461d92e1b5432d88715f6ca7e3', // b0fe4d4: fábrica autónoma al cerrar tareas
   '986f429cf9e0625cc45d0ea1afb02ed45fe9c359ef1e32897b387dbb21bc1dde', // b42b5bf: fábrica solo a petición

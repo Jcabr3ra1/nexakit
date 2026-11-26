@@ -96,4 +96,257 @@ describe('nexakit-modelo API', () => {
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/test' });
     expect(await pintar($)).not.toContain('↳');
   });
+
+  // Botón para delegar: la sesión tiene 50 % de contexto, así que un mensaje difícil desde Sonnet recomienda delegar
+  // en nivel-alto y uno mecánico desde Opus en nivel-ligero (sin cambiar de modelo, que costaría releer el contexto).
+  const prepararBoton = ($: any, on: any, modelo = 'claude-opus-5-5', extra: { avisos?: string[]; falla?: { valor: boolean } } = {}) => {
+    const enviados: { text: string; plugin: boolean }[] = [];
+    on('session.start', ($: any, e: any) => ({ cwd: e.cwd }));
+    on('session.model', () => ({ value: modelo }));
+    on('session.usage', () => ({ value: { context: { percent: 50, tokens: 100000 }, rateLimits: [] } }));
+    on('turn.start', ($: any, e: any) => ({ text: e.text, turnId: e.turnId }));
+    on('turn.complete', ($: any, e: any) => ({ text: e.answer }));
+    on('turn.abort', () => undefined);
+    on('clock.now', () => ({ value: Date.now() }));
+    on('tool.register', ($: any, e: any) => ({ value: { tool: e.name } }));
+    on('env.get', () => ({ value: undefined }));
+    on('ui.toast', (_: any, e: any) => {
+      extra.avisos?.push(e.text);
+      return { value: undefined };
+    });
+    on('prompt.edit', ($: any, e: any) => {
+      const text = e.text.slice(0, e.start) + e.inputText + e.text.slice(e.end);
+      return { text, cursor: e.start + e.inputText.length };
+    });
+    on('prompt.submit', ($: any, e: any) => {
+      if (extra.falla?.valor && e.origin?.kind === 'plugin') return { drop: 'bloqueado' };
+      enviados.push({ text: e.text, plugin: e.origin?.kind === 'plugin' });
+      return { text: e.text, origin: e.origin };
+    });
+    return enviados;
+  };
+  const MENSAJES = {
+    'nivel-ligero': 'haz commit y push',
+    'nivel-alto': 'el login sigue fallando y no sé por qué',
+  } as const;
+  const BARRA = (surface: string) => ({ plugin: 'nexakit-modelo', surface, component: 'AbovePrompt', props: { hasSurvey: false } }) as any;
+  const turno = async ($: any, sufijo: string) => {
+    await $.turn.start({ text: 'x', turnId: `t${sufijo}` });
+    await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: `t${sufijo}`, reason: 'answer' });
+  };
+
+  test('en el escritorio la sugerencia de delegar es un botón y envía la instrucción de su nivel', async ($, on) => {
+    const enviados = prepararBoton($, on);
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/test' });
+    await $.prompt.submit({ text: MENSAJES['nivel-ligero'] });
+    await turno($, '1');
+    const ui = await $.ui.mount(BARRA('desktop'));
+    const boton = await ui.find({ type: 'Button' });
+    expect(boton?.props.label).toBe('→ delega: nivel-ligero');
+    await ui.press({ key: 'delegar' });
+    const enviado = enviados.at(-1)!;
+    expect(enviado.plugin).toBe(true);
+    expect(enviado.text).toContain('fabrica_encargar en Codex o Antigravity');
+    expect(enviado.text).toContain('niveles:nivel-ligero');
+    await ui.unmount();
+  });
+
+  test('para nivel-alto el botón delega directo en el subagente', async ($, on) => {
+    // Desde Sonnet con contexto lleno, subir a Opus releería todo: se delega.
+    const enviados = prepararBoton($, on, 'claude-sonnet-5-5');
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/test' });
+    await $.prompt.submit({ text: MENSAJES['nivel-alto'] });
+    await turno($, '1');
+    const ui = await $.ui.mount(BARRA('desktop'));
+    expect((await ui.find({ type: 'Button' }))?.props.label).toBe('→ delega: nivel-alto');
+    await ui.press({ key: 'delegar' });
+    expect(enviados.at(-1)!.text).toBe('Delega la tarea de mi mensaje anterior en el subagente niveles:nivel-alto y comprueba su informe.');
+    await ui.unmount();
+  });
+
+  test('en la terminal la sugerencia sigue siendo texto', async ($, on) => {
+    prepararBoton($, on);
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/test' });
+    await $.prompt.submit({ text: MENSAJES['nivel-ligero'] });
+    await turno($, '1');
+    const ui = await $.ui.mount(BARRA('terminal'));
+    expect(await ui.find({ type: 'Button' })).toBeUndefined();
+    expect(await pintar($)).toContain('→ delega: nivel-ligero');
+    await ui.unmount();
+  });
+
+  test('durante un turno en curso de la sesión principal no hay botón; un envío que no empieza turno no lo oculta', async ($, on) => {
+    prepararBoton($, on);
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/test' });
+    await $.prompt.submit({ text: MENSAJES['nivel-ligero'] });
+    // El envío por sí solo no es un turno: el botón sigue (si el envío fallara, no quedaría bloqueado).
+    const sinTurno = await $.ui.mount(BARRA('desktop'));
+    expect(await sinTurno.find({ type: 'Button' })).toBeDefined();
+    await sinTurno.unmount();
+    await $.turn.start({ text: 'x', turnId: 't1' });
+    const ui = await $.ui.mount(BARRA('desktop'));
+    expect(await ui.find({ type: 'Button' })).toBeUndefined();
+    await ui.unmount();
+    await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' });
+    const despues = await $.ui.mount(BARRA('desktop'));
+    expect(await despues.find({ type: 'Button' })).toBeDefined();
+    await despues.unmount();
+  });
+
+  test('sin mensaje previo de la persona no hay botón', async ($, on) => {
+    prepararBoton($, on);
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/test' });
+    const ui = await $.ui.mount(BARRA('desktop'));
+    expect(await ui.find({ type: 'Button' })).toBeUndefined();
+    await ui.unmount();
+  });
+
+  test('tras pulsar el botón no se puede enviar dos veces', async ($, on) => {
+    const enviados = prepararBoton($, on);
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/test' });
+    await $.prompt.submit({ text: MENSAJES['nivel-ligero'] });
+    await turno($, '1');
+    const ui = await $.ui.mount(BARRA('desktop'));
+    await ui.press({ key: 'delegar' });
+    await ui.unmount();
+    const antes = enviados.length;
+    // El turno de la delegación termina y el botón sigue sin volver para el mismo mensaje.
+    await turno($, '2');
+    const otra = await $.ui.mount(BARRA('desktop'));
+    expect(await otra.find({ type: 'Button' })).toBeUndefined();
+    expect(enviados).toHaveLength(antes);
+    await otra.unmount();
+  });
+
+  test('el envío del botón no cambia el último mensaje de la persona', async ($, on) => {
+    const enviados = prepararBoton($, on);
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/test' });
+    await $.prompt.submit({ text: MENSAJES['nivel-ligero'] });
+    await turno($, '1');
+    const ui = await $.ui.mount(BARRA('desktop'));
+    await ui.press({ key: 'delegar' });
+    await ui.unmount();
+    // «ok, dale» hereda la recomendación del último mensaje: si la instrucción del botón la hubiera cambiado, no saldría ligero.
+    await $.prompt.submit({ text: 'ok, dale' });
+    await turno($, '2');
+    const otra = await $.ui.mount(BARRA('desktop'));
+    expect((await otra.find({ type: 'Button' }))?.props.label).toBe('→ delega: nivel-ligero');
+    expect(enviados.map((x) => x.plugin)).toEqual([false, true, false]);
+    await otra.unmount();
+  });
+
+  test('si el envío del botón falla, avisa en español y el botón vuelve para reintentar', async ($, on) => {
+    const avisos: string[] = [];
+    const falla = { valor: true };
+    const enviados = prepararBoton($, on, 'claude-opus-5-5', { avisos, falla });
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/test' });
+    await $.prompt.submit({ text: MENSAJES['nivel-ligero'] });
+    await turno($, '1');
+    const ui = await $.ui.mount(BARRA('desktop'));
+    await ui.press({ key: 'delegar' });
+    expect(avisos).toHaveLength(1);
+    expect(avisos[0]).toContain('reintentar');
+    expect(enviados).toHaveLength(1);
+    expect((await ui.find({ type: 'Button' }))?.props.label).toBe('→ delega: nivel-ligero');
+    falla.valor = false;
+    await ui.press({ key: 'delegar' });
+    expect(enviados).toHaveLength(2);
+    expect(enviados[1]!.plugin).toBe(true);
+    await ui.unmount();
+  });
+
+  test('un borrador con otro texto oculta el botón aunque la recomendación sea la misma; vacío o igual lo conserva', async ($, on) => {
+    prepararBoton($, on);
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/test' });
+    await $.prompt.submit({ text: MENSAJES['nivel-ligero'] });
+    await turno($, '1');
+    const editar = (text: string, inputText: string) => $.prompt.edit({ origin: { kind: 'composer' }, text, cursor: text.length, start: 0, end: text.length, inputText });
+    const hayBoton = async () => {
+      const ui = await $.ui.mount(BARRA('desktop'));
+      const boton = await ui.find({ type: 'Button' });
+      await ui.unmount();
+      return boton !== undefined;
+    };
+    expect(await hayBoton()).toBe(true);
+    // «ok, dale» conserva la recomendación del último mensaje, pero es otro texto.
+    await editar('', 'ok, dale');
+    expect(await hayBoton()).toBe(false);
+    await editar('ok, dale', '');
+    expect(await hayBoton()).toBe(true);
+    await editar('', ` ${MENSAJES['nivel-ligero']} `);
+    expect(await hayBoton()).toBe(true);
+  });
+
+  test('el botón solo aparece en la app de escritorio, no en otras superficies con botones', async ($, on) => {
+    prepararBoton($, on);
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/test' });
+    await $.prompt.submit({ text: MENSAJES['nivel-ligero'] });
+    await turno($, '1');
+    for (const surface of ['mobile', 'vscode', 'terminal'] as const) {
+      const ui = await $.ui.mount(BARRA(surface));
+      expect(await ui.find({ type: 'Button' })).toBeUndefined();
+      await ui.unmount();
+    }
+    const escritorio = await $.ui.mount(BARRA('desktop'));
+    expect(await escritorio.find({ type: 'Button' })).toBeDefined();
+    await escritorio.unmount();
+  });
+
+  // Guarda de subagentes: la implementación de nivel normal se encarga primero con fabrica_encargar.
+  const prepararAgentes = ($: any, on: any, { conEncargos = true, listaFalla = false } = {}) => {
+    const lanzados: string[] = [];
+    on('session.start', ($: any, e: any) => ({ cwd: e.cwd }));
+    on('session.model', () => ({ value: 'claude-opus-5-5' }));
+    on('tool.register', ($: any, e: any) => ({ value: { tool: e.name } }));
+    on('tool.list', () => {
+      if (listaFalla) throw new Error('sin lista');
+      const base = [{ name: 'Agent', description: 'subagentes', mcp: false }];
+      return { value: conEncargos ? [...base, { name: 'mcp__nexakit-fabrica__fabrica_encargar', description: 'encargar', mcp: true }] : base };
+    });
+    on('tool.call', ($: any, e: any) => {
+      lanzados.push(`${e.agentId ?? 'main'}:${e.subagent_type}`);
+      return { result: 'lanzado' };
+    });
+    return lanzados;
+  };
+  const agente = (extra: object) => ({ tool: 'Agent', description: 'implementar exportación', prompt: 'Añade el botón de exportar.', subagent_type: 'niveles:nivel-normal', ...extra }) as any;
+
+  test('el subagente niveles:nivel-normal se veta con el mensaje de encargar primero', async ($, on) => {
+    const lanzados = prepararAgentes($, on);
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/test' });
+    const r: any = await $.tool.call(agente({}));
+    expect(r.deny).toContain('Primero encarga esta implementación con fabrica_encargar (Codex o Antigravity): ahorra tokens de Claude.');
+    expect(r.deny).toContain('[sin encargo]');
+    expect(lanzados).toHaveLength(0);
+  });
+
+  test('con la marca [sin encargo] en la descripción o en el prompt el subagente normal pasa', async ($, on) => {
+    const lanzados = prepararAgentes($, on);
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/test' });
+    expect((await $.tool.call(agente({ description: 'implementar [sin encargo]' }))).deny).toBeUndefined();
+    expect((await $.tool.call(agente({ prompt: 'Contexto. [Sin encargo] porque el encargo falló.' }))).deny).toBeUndefined();
+    expect(lanzados).toHaveLength(2);
+  });
+
+  test('no se veta nada más: ligero, exigente, alto, otros agentes, sin tipo ni subagentes de subagentes', async ($, on) => {
+    const lanzados = prepararAgentes($, on);
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/test' });
+    for (const subagent_type of ['niveles:nivel-ligero', 'niveles:nivel-exigente', 'niveles:nivel-alto', 'niveles:investigador', 'Explore', undefined])
+      expect((await $.tool.call(agente({ subagent_type }))).deny).toBeUndefined();
+    // Un subagente que lanza otro normal: el veto es solo de la sesión principal.
+    expect((await $.tool.call(agente({ agentId: 'a1' }))).deny).toBeUndefined();
+    expect(lanzados).toHaveLength(7);
+  });
+
+  test('sin la herramienta fabrica_encargar no se veta; si no se puede saber, se veta igual', async ($, on) => {
+    prepararAgentes($, on, { conEncargos: false });
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/test' });
+    expect((await $.tool.call(agente({}))).deny).toBeUndefined();
+  });
+
+  test('si la lista de herramientas falla, se veta igual', async ($, on) => {
+    prepararAgentes($, on, { listaFalla: true });
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/test' });
+    expect((await $.tool.call(agente({}))).deny).toContain('fabrica_encargar');
+  });
 });

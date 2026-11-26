@@ -98,7 +98,28 @@ function tramosDeTokens(tokens) {
 function sugerencia(estado) {
   const d = decidir(estado);
   if (!d) return null;
-  return d.accion === 'mantener' ? { text: '  ✓', color: 'success' } : { text: `  → ${d.texto}`, color: 'suggestion' };
+  if (d.accion === 'mantener') return { text: '  ✓', color: 'success' };
+  // Al delegar, el tramo lleva el nivel y el texto de la etiqueta para que el render pueda dibujar un botón.
+  if (d.accion === 'delegar' && d.nivel) return { text: `  → ${d.texto}`, color: 'suggestion', accion: 'delegar', nivel: d.nivel, etiqueta: `→ ${d.texto}` };
+  return { text: `  → ${d.texto}`, color: 'suggestion' };
+}
+
+// Lo que el botón de delegar envía a la sesión. Los niveles ligero y normal pasan primero por un encargo a
+// Codex o Antigravity; los exigentes y altos van directos al subagente de nivel.
+export function instruccionDeDelegar(nivel) {
+  if (nivel === 'nivel-ligero' || nivel === 'nivel-normal') {
+    return `Delega la tarea de mi mensaje anterior: encárgala con fabrica_encargar en Codex o Antigravity, revisa el diff con una IA distinta, aplícalo, ejecuta las pruebas y dime qué IA lo hizo. Si no encaja en un encargo, pásala al subagente niveles:${nivel}.`;
+  }
+  return `Delega la tarea de mi mensaje anterior en el subagente niveles:${nivel} y comprueba su informe.`;
+}
+
+// Un turn.abort solo trae el id del turno (y agentId si lo trajera): es el de la sesión principal si no es de un
+// subagente y coincide con el turno principal conocido (o aún no se conoce ninguno). Solo entonces el botón de
+// delegar vuelve y se puede reintentar la delegación.
+export function alAbortarTurno(estado, e) {
+  if (e?.agentId || (estado.turnoId !== null && e?.turnId !== estado.turnoId)) return false;
+  Object.assign(estado, { turnoActivo: false, turnoId: null, delegado: false });
+  return true;
 }
 
 // El límite de uso más alto de los que informa la API (5 horas o semanal).
