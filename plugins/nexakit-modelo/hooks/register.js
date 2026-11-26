@@ -1,4 +1,4 @@
-import { activoDeTexto, columnaDeAgentes, columnaDeFabrica, familia, filasDeAgentes, filasDeFabrica, instruccionDeDelegar, segmentosDeBarra, sumarTokens, tokensVacios } from './barra.js';
+import { activoDeTexto, alAbortarTurno, columnaDeAgentes, columnaDeFabrica, familia, filasDeAgentes, filasDeFabrica, instruccionDeDelegar, segmentosDeBarra, sumarTokens, tokensVacios } from './barra.js';
 import { ajustarPorLimite } from './decidir.js';
 import { recomendarPorTexto } from './recomendar.js';
 
@@ -87,7 +87,7 @@ async function activoDeLaFabrica($) {
 // Una sola barra sobre el prompt con modelo, esfuerzo, recomendación y uso. Solo muestra:
 // nunca cambia el modelo ni el esfuerzo de la sesión.
 export function register(on) {
-  const estado = { model: null, effort: null, modeloDelEsfuerzo: null, recommendation: null, enviada: null, usage: null, cache: cacheVacia(), ultimaActividad: null, cacheFria: false, rutinaSeguidas: 0, turnoActivo: false, delegado: false };
+  const estado = { model: null, effort: null, modeloDelEsfuerzo: null, recommendation: null, enviada: null, usage: null, cache: cacheVacia(), ultimaActividad: null, cacheFria: false, rutinaSeguidas: 0, turnoActivo: false, turnoId: null, delegado: false, enviando: false, ultimoTexto: null, borrador: '' };
   // Subagentes de esta petición, por id, con el modelo y el esfuerzo que de verdad usaron.
   const agentes = new Map();
 
@@ -118,6 +118,7 @@ export function register(on) {
   on('prompt.edit', async ($, e, next) => {
     const r = await next(e);
     try {
+      estado.borrador = r?.text ?? '';
       const nueva = recomendarPorTexto(r?.text ?? '', estado.enviada);
       const cambioCache = await medirCacheFria($, estado);
       if (cambioCache || !mismaRecomendacion(nueva, estado.recommendation)) {
@@ -131,13 +132,11 @@ export function register(on) {
   });
 
   on('prompt.submit', async ($, e, next) => {
-    estado.turnoActivo = true;
     // Lo que envía el propio botón no es un mensaje de la persona: no cambia la recomendación ni «el último mensaje».
-    if (e.origin?.kind === 'plugin') {
-      $.ui.invalidate('ui.render');
-      return next(e);
-    }
+    if (estado.enviando && e.origin?.kind === 'plugin') return next(e);
     estado.delegado = false;
+    estado.ultimoTexto = e.text;
+    estado.borrador = '';
     estado.recommendation = recomendarPorTexto(e.text, estado.enviada);
     estado.enviada = estado.recommendation;
     await medirCacheFria($, estado);
@@ -150,18 +149,20 @@ export function register(on) {
     return next(e);
   });
 
+  // Solo un turno real de la sesión principal oculta el botón (un envío que no llega a empezar turno no lo deja bloqueado).
   on('turn.start', async ($, e, next) => {
     if (!e.agentId) {
       estado.turnoActivo = true;
+      estado.turnoId = e.turnId ?? null;
       $.ui.invalidate('ui.render');
     }
     return next(e);
   });
 
-  // El turno de la sesión principal terminó (o se interrumpió): el botón de delegar puede volver.
+  // El turno de la sesión principal se interrumpió: el botón de delegar puede volver, y también reintentarse.
+  // turn.abort solo trae el id del turno: un subagente aborta el suyo, que no es el principal.
   on('turn.abort', async ($, e, next) => {
-    estado.turnoActivo = false;
-    $.ui.invalidate('ui.render');
+    if (alAbortarTurno(estado, e)) $.ui.invalidate('ui.render');
     return next(e);
   });
 
@@ -200,6 +201,7 @@ export function register(on) {
     const r = await next(e);
     if (!e.agentId) {
       estado.turnoActivo = false;
+      estado.turnoId = null;
       // Solo la sesión principal: cada subagente tiene su propia caché y no toca la de la sesión.
       sumarCache(estado, r?.usage);
       await marcarActividad($, estado);
@@ -212,10 +214,13 @@ export function register(on) {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props?.hasSurvey || !estado.model) return next(e);
     const { Box, Text, Button } = $.ui.resolve(e);
-    // El botón solo donde hay ventana (no en la terminal), sin turno en curso, ya pulsado o con un borrador
-    // distinto del último mensaje: se delega «el último mensaje», así que la recomendación debe ser la suya.
-    const hayBoton = Boolean(Button) && e.surface !== 'terminal' && !estado.turnoActivo && !estado.delegado
-      && Boolean(estado.enviada) && (estado.recommendation === estado.enviada || mismaRecomendacion(estado.recommendation, estado.enviada));
+    // El botón solo en la app de escritorio, sin turno en curso, sin pulsar ya y con la caja vacía o con el mismo
+    // texto del último mensaje: se delega «mi mensaje anterior», así que ni la recomendación ni el texto
+    // pueden ser de otro borrador.
+    const borrador = estado.borrador.trim();
+    const hayBoton = Boolean(Button) && e.surface === 'desktop' && !estado.turnoActivo && !estado.delegado
+      && Boolean(estado.enviada) && (borrador === '' || borrador === estado.ultimoTexto?.trim())
+      && (estado.recommendation === estado.enviada || mismaRecomendacion(estado.recommendation, estado.enviada));
     const tramos = segmentosDeBarra(estado).map((s, i) => {
       if (hayBoton && s.accion === 'delegar') {
         const nivel = s.nivel;
@@ -224,13 +229,22 @@ export function register(on) {
           label: s.etiqueta,
           variant: 'primary',
           onPress: async () => {
-            if (estado.delegado || estado.turnoActivo) return;
-            estado.delegado = true;
+            if (estado.delegado || estado.turnoActivo || estado.enviando) return;
+            Object.assign(estado, { delegado: true, turnoActivo: true, enviando: true });
             $.ui.invalidate('ui.render');
             try {
-              await $.prompt.submit({ text: instruccionDeDelegar(nivel) });
+              const r = await $.prompt.submit({ text: instruccionDeDelegar(nivel) });
+              if (r?.drop !== undefined) throw new Error(r.drop);
             } catch {
-              estado.delegado = false;
+              // El envío no empezó: se devuelve el botón y se avisa para poder reintentar.
+              Object.assign(estado, { delegado: false, turnoActivo: false });
+              try {
+                $.ui.toast('No se pudo enviar la delegación. Pulsa el botón de nuevo para reintentar.', { timeoutMs: 8000 });
+              } catch {
+                // Sin aviso, el botón vuelve igual.
+              }
+            } finally {
+              estado.enviando = false;
               $.ui.invalidate('ui.render');
             }
           },
@@ -258,7 +272,7 @@ export function register(on) {
 
   on('session.end', async ($, e, next) => {
     agentes.clear();
-    Object.assign(estado, { model: null, effort: null, modeloDelEsfuerzo: null, recommendation: null, enviada: null, usage: null, cache: cacheVacia(), ultimaActividad: null, cacheFria: false, rutinaSeguidas: 0, turnoActivo: false, delegado: false });
+    Object.assign(estado, { model: null, effort: null, modeloDelEsfuerzo: null, recommendation: null, enviada: null, usage: null, cache: cacheVacia(), ultimaActividad: null, cacheFria: false, rutinaSeguidas: 0, turnoActivo: false, turnoId: null, delegado: false, enviando: false, ultimoTexto: null, borrador: '' });
     return next(e);
   });
 }
